@@ -3,10 +3,17 @@
 Dienstplan Excel Generator
 Liest die Original-Dienstplanübersicht 2026.xlsm ein und generiert eine
 saubere, schön formatierte Excel-Datei mit:
-- Eingabe-Sheet (Jahresübersicht aller Schichten)
-- 12 Monats-Sheets (druckfertig)
+- Eingabe-Sheet (Jahresübersicht aller Schichten) – HAUPT-EINGABE
+- 12 Monats-Sheets (druckfertig, lesen per Formel aus dem Eingabe-Sheet)
 - Jahresübersicht (Schichtzählung pro MA)
 - Monatsdetails (Soll/Ist Arbeitszeit)
+
+Features:
+- Monats-Sheets werden automatisch aus dem Eingabe-Sheet befüllt (Formeln)
+- Dropdown-Auswahl für Schichttypen in jeder Eingabezelle
+- Schmidt & Radimersky (Sekretariat) beim Druck ausgeblendet
+- Unterschriftenfeld rechts neben der Legende (A4-optimiert)
+- Legende mit Uhrzeiten
 """
 
 import calendar
@@ -17,6 +24,7 @@ from collections import OrderedDict
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 # ---------------------------------------------------------------------------
 # Konstanten
@@ -32,6 +40,9 @@ MONTHS_DE = [
     "Juli", "August", "September", "Oktober", "November", "Dezember",
 ]
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+# Mitarbeiter die nur zur Übersicht sind (Sekretariat) – beim Druck ausblenden
+SEKRETARIAT_MA = {"Schmidt", "Radimersky"}
 
 # Feiertage Baden-Württemberg 2026
 FEIERTAGE = [
@@ -82,16 +93,33 @@ SHIFT_COLORS = {
     "T-ZG":    (C_URLAUB, None),
 }
 
+# Schichtbeschreibungen mit Uhrzeiten (wie im Proto)
 SHIFT_DESCRIPTIONS = OrderedDict([
-    ("U", "Urlaub"), ("EH", "Einspringen/Erste Hilfe"),
-    ("KU", "Kurzurlaub/Kur"), ("A", "Ausgleich"),
-    ("GT", "Gleittag"), ("NST", "Nachtschicht (Sonder)"),
-    ("Fobi", "Fortbildung"), ("FI", "Frühschicht I"),
-    ("FII", "Frühschicht II"), ("SI", "Spätschicht I"),
-    ("SII", "Spätschicht II"), ("NI", "Nachtschicht I"),
-    ("DI", "Dienst I"), ("DII", "Dienst II"),
-    ("KT", "Koordinationstätigkeit"), ("SD", "Sonderdienst"),
+    ("U", "Urlaub"),
+    ("EH 08:00 -17:00", "Erste Hilfe"),
+    ("KU 08:30 - 16:30", "Kuppenheim"),
+    ("A", "AU"),
+    ("GT", "Gleittag"),
+    ("NST", "Ausgleichstag"),
+    ("Fobi", "Fortbildung"),
+    ("FI 06:00 - 14:00", "Frühschicht I"),
+    ("FII 06:00-14:00", "Frühschicht II"),
+    ("SI 14:00 - 22:00", "Spätschicht I"),
+    ("SII 14:00 -21:00", "Spätschicht II"),
+    ("NI 22:00 -06:00", "Nachtschicht I"),
+    ("DI 08:00 - 15:30", "Dienst I"),
+    ("DII 08:30 - 16:00", "Dienst II"),
+    ("KT IRTAZ", "Koordinationstätigkeit"),
+    ("SD Individuell", "Sonderdienst"),
 ])
+
+# Dropdown-Liste: Alle Schichtcodes die der User auswählen kann
+DROPDOWN_SHIFTS = [
+    "FI", "FII", "SI", "SII", "NI",
+    "DI", "DII", "KU", "EH", "SD",
+    "GT", "NST", "KT", "Fobi",
+    "U", "A", "T-ZUG",
+]
 
 THIN = Border(
     left=Side("thin", C_BORDER), right=Side("thin", C_BORDER),
@@ -151,6 +179,19 @@ def _shift_font(code, size=8, bold=False):
     elif c.startswith("(") and ")" in c:
         fg = C_RED
     return Font(name="Calibri", size=size, bold=bold, color=fg or "000000")
+
+
+# ---------------------------------------------------------------------------
+# Layout-Mapping: Welche Zeile hat welcher Monat/MA im Eingabe-Sheet?
+# Wird beim Erstellen des Eingabe-Sheets gespeichert und für Formeln benutzt.
+# ---------------------------------------------------------------------------
+class LayoutMap:
+    """Speichert die Zeilen-Positionen der MA pro Monat im Eingabe-Sheet."""
+    def __init__(self):
+        # month_idx -> {emp_name: row_number_in_eingabe_sheet}
+        self.emp_rows = {}
+        # month_idx -> first_data_column (always 2, col B = day 1)
+        self.data_col_start = 2  # col B
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +272,7 @@ def _apply_cell(cell, value=None, font=None, fill=None, align=None, border=THIN)
 
 
 def create_eingabe(ws, emps):
-    """Jahresplan-Sheet mit allen 12 Monaten."""
+    """Jahresplan-Sheet mit allen 12 Monaten – HAUPT-EINGABE mit Dropdowns."""
     print("Erstelle Eingabe-Sheet ...")
     hdr_fill = _fill(C_HDR_BG)
     we_fill = _fill(C_WEEKEND)
@@ -242,16 +283,36 @@ def create_eingabe(ws, emps):
     ws.column_dimensions["A"].width = 14
     _apply_cell(ws.cell(1, 1), f"Dienstplan {YEAR}",
                 Font(name="Calibri", size=14, bold=True), border=None)
+
+    # Dropdown-Validierung erstellen
+    dropdown_list = ",".join(DROPDOWN_SHIFTS)
+    dv = DataValidation(
+        type="list",
+        formula1=f'"{dropdown_list}"',
+        allow_blank=True,
+        showDropDown=False,  # In openpyxl ist False = Dropdown ANZEIGEN
+        showErrorMessage=True,
+        errorTitle="Ungültige Schicht",
+        error="Bitte wähle eine gültige Schicht aus der Liste.",
+        showInputMessage=True,
+        promptTitle="Schicht",
+        prompt="Schicht auswählen oder frei eingeben",
+    )
+    # Soft validation: allow manual entry too
+    dv.errorStyle = "warning"
+    ws.add_data_validation(dv)
+
+    layout = LayoutMap()
     row = 3
 
     for mi in range(12):
         mn = mi + 1
         dim = calendar.monthrange(YEAR, mn)[1]
+        layout.emp_rows[mi] = {}
 
         # Monatsname
         _apply_cell(ws.cell(row, 1), MONTHS_DE[mi],
                     Font(name="Calibri", size=11, bold=True), border=None)
-        # Ferien-Hintergrund in Monatskopfzeile
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
             if _is_ferien(dt):
@@ -299,6 +360,7 @@ def create_eingabe(ws, emps):
 
         # MA-Zeilen
         for ei, ed in enumerate(emps):
+            layout.emp_rows[mi][ed.name] = row
             _apply_cell(ws.cell(row, 1), ed.name,
                         Font(name="Calibri", size=10, bold=True), align=la)
             zebra = _fill(C_ZEBRA) if ei % 2 == 1 else None
@@ -308,6 +370,10 @@ def create_eingabe(ws, emps):
                 c = ws.cell(row, 1 + d)
                 c.alignment = ca
                 c.border = THIN
+
+                # Dropdown auf jede Datenzelle
+                dv.add(c)
+
                 if shift:
                     c.value = shift
                     sf = _shift_fill(shift)
@@ -334,10 +400,11 @@ def create_eingabe(ws, emps):
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     print(f"  {row} Zeilen")
+    return layout
 
 
-def create_month(wb, mi, emps):
-    """Druckfertiges Monats-Sheet."""
+def create_month(wb, mi, emps, layout):
+    """Druckfertiges Monats-Sheet mit Formeln aus dem Eingabe-Sheet."""
     mn = mi + 1
     name = MONTHS_DE[mi]
     ws = wb.create_sheet(title=name)
@@ -346,7 +413,7 @@ def create_month(wb, mi, emps):
     hdr_fill = _fill(C_HDR_BG)
     we_fill = _fill(C_WEEKEND)
     hdr_font = Font(name="Calibri", size=9, bold=True, color=C_HDR_FG)
-    ca = Alignment(horizontal="center", vertical="center")
+    ca = Alignment(horizontal="center", vertical="center", wrap_text=True)
     la = Alignment(horizontal="left", vertical="center")
 
     ws.column_dimensions["A"].width = 14
@@ -396,78 +463,126 @@ def create_month(wb, mi, emps):
         last_kw = kw
     row += 1
 
-    # MA
-    for ei, ed in enumerate(emps):
+    # --- MA-Zeilen mit Formeln aus dem Eingabe-Sheet ---
+    # Trenne reguläre MA und Sekretariats-MA
+    regular_emps = [e for e in emps if e.name not in SEKRETARIAT_MA]
+    sekr_emps = [e for e in emps if e.name in SEKRETARIAT_MA]
+
+    first_sekr_row = None
+
+    for ei, ed in enumerate(regular_emps + sekr_emps):
+        is_sekr = ed.name in SEKRETARIAT_MA
+        if is_sekr and first_sekr_row is None:
+            first_sekr_row = row
+
         _apply_cell(ws.cell(row, 1), ed.name,
-                    Font(name="Calibri", size=9, bold=True), align=la)
+                    Font(name="Calibri", size=9, bold=True,
+                         italic=is_sekr, color="999999" if is_sekr else "000000"),
+                    align=la)
         zebra = _fill(C_ZEBRA) if ei % 2 == 1 else None
+
+        # Zeile im Eingabe-Sheet für diesen MA/Monat
+        src_row = layout.emp_rows[mi].get(ed.name)
+
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
-            shift = ed.shifts[mi].get(d)
             c = ws.cell(row, 1 + d)
             c.alignment = ca
             c.border = THIN
-            if shift:
-                c.value = shift
-                sf = _shift_fill(shift)
-                c.font = _shift_font(shift, 8)
-                c.fill = sf or (we_fill if (_is_weekend(dt) or _is_feiertag(dt))
-                                else zebra or PatternFill())
-            else:
-                c.fill = we_fill if (_is_weekend(dt) or _is_feiertag(dt)) \
-                    else zebra or PatternFill()
+
+            # Formel: Verweis auf Eingabe-Sheet
+            src_col_letter = get_column_letter(1 + d)
+            if src_row:
+                c.value = f"=IF(Dienstplan!{src_col_letter}{src_row}=\"\",\"\",Dienstplan!{src_col_letter}{src_row})"
+
+            # Formatierung: Wochenende/Feiertag oder Zebra
+            if _is_weekend(dt) or _is_feiertag(dt):
+                c.fill = we_fill
+            elif zebra:
+                c.fill = zebra
+
+            c.font = Font(name="Calibri", size=8)
+
         row += 1
 
+    last_data_row = row - 1
     row += 1
 
-    # --- Legende ---
+    # --- Legende (links) + Unterschriften (rechts) nebeneinander ---
     leg_row = row
     _apply_cell(ws.cell(row, 1), "Legende:",
                 Font(name="Calibri", size=9, bold=True), border=None)
-    row += 1
 
     items = list(SHIFT_DESCRIPTIONS.items())
     half = (len(items) + 1) // 2
+
     for i, (code, desc) in enumerate(items):
         col_off = 0 if i < half else 5
         r = leg_row + 1 + (i if i < half else i - half)
-        bg, fg = SHIFT_COLORS.get(code, (None, None))
+
+        # Farbe für den Code-Teil der Legende
+        code_key = code.split()[0] if " " in code else code
+        bg, fg = SHIFT_COLORS.get(code_key, (None, None))
         _apply_cell(ws.cell(r, 1 + col_off), code,
                     Font(name="Calibri", size=8, bold=True, color=fg or "000000"),
-                    _fill(bg) if bg else None, ca)
+                    _fill(bg) if bg else None,
+                    Alignment(horizontal="left", vertical="center"))
         _apply_cell(ws.cell(r, 2 + col_off), desc,
                     Font(name="Calibri", size=8), border=None, align=la)
-    row = leg_row + 1 + half + 1
+
+    leg_end_row = leg_row + 1 + half
 
     # Wochenende-Legende
-    _apply_cell(ws.cell(row, 1), "", border=THIN, fill=we_fill)
-    _apply_cell(ws.cell(row, 2), "Wochenende / Feiertag",
+    _apply_cell(ws.cell(leg_end_row, 1), "", border=THIN, fill=we_fill)
+    _apply_cell(ws.cell(leg_end_row, 2), "Wochenende / Feiertag",
                 Font(name="Calibri", size=8), border=None)
-    row += 2
 
-    # Unterschriften
-    _apply_cell(ws.cell(row, 1), "Erstellt von:",
+    # --- Unterschriftenfeld RECHTS neben der Legende ---
+    # Positioniere ab Spalte nach den Tagen (rechts vom Datenbereich)
+    # Nutze die letzten Spalten des Monats
+    sig_col = max(dim - 3, 12)  # Mindestens ab Spalte 12
+    sig_col_letter = get_column_letter(sig_col)
+
+    _apply_cell(ws.cell(leg_row + 1, sig_col), "Erstellt von:",
                 Font(name="Calibri", size=10), border=None)
-    _apply_cell(ws.cell(row, 3), "________________________",
+    ws.merge_cells(start_row=leg_row + 1, start_column=sig_col + 1,
+                   end_row=leg_row + 1, end_column=sig_col + 4)
+    _apply_cell(ws.cell(leg_row + 1, sig_col + 1), "",
+                Font(name="Calibri", size=10), border=Border(
+                    bottom=Side("thin", "000000")),
+                align=Alignment(horizontal="center"))
+
+    _apply_cell(ws.cell(leg_row + 3, sig_col), "Genehmigt von:",
                 Font(name="Calibri", size=10), border=None)
-    row += 2
-    _apply_cell(ws.cell(row, 1), "Genehmigt von:",
-                Font(name="Calibri", size=10), border=None)
-    _apply_cell(ws.cell(row, 3), "________________________",
-                Font(name="Calibri", size=10), border=None)
-    row += 1
-    _apply_cell(ws.cell(row, 3), "Datum / Unterschrift",
+    ws.merge_cells(start_row=leg_row + 3, start_column=sig_col + 1,
+                   end_row=leg_row + 3, end_column=sig_col + 4)
+    _apply_cell(ws.cell(leg_row + 3, sig_col + 1), "",
+                Font(name="Calibri", size=10), border=Border(
+                    bottom=Side("thin", "000000")),
+                align=Alignment(horizontal="center"))
+
+    _apply_cell(ws.cell(leg_row + 4, sig_col + 1), "Datum / Unterschrift",
                 Font(name="Calibri", size=8, italic=True, color="999999"),
                 border=None)
 
+    row = max(leg_end_row + 1, leg_row + 6)
+
+    # Spaltenbreiten
     for d in range(1, dim + 1):
         ws.column_dimensions[get_column_letter(1 + d)].width = 5.0
+
+    # --- Druckeinstellungen ---
     ws.freeze_panes = "B7"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 1
     ws.print_area = f"A1:{get_column_letter(1+dim)}{row}"
+
+    # Sekretariats-MA Zeilen beim Druck ausblenden
+    if first_sekr_row is not None:
+        for r in range(first_sekr_row, first_sekr_row + len(sekr_emps)):
+            ws.row_dimensions[r].hidden = True
 
 
 def create_jahresuebersicht(ws, emps, stypes):
@@ -635,11 +750,11 @@ def main():
     wb = Workbook()
     ws = wb.active
     ws.title = "Dienstplan"
-    create_eingabe(ws, emps)
+    layout = create_eingabe(ws, emps)
 
     print("Erstelle 12 Monats-Sheets ...")
     for mi in range(12):
-        create_month(wb, mi, emps)
+        create_month(wb, mi, emps, layout)
         print(f"  {MONTHS_DE[mi]}")
 
     create_jahresuebersicht(wb.create_sheet("Jahresübersicht"), emps, stypes)
