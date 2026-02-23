@@ -661,27 +661,37 @@ def create_month(wb, mi, emps, layout):
 
     # =================================================================
     # LEGENDE (links, berahmt) + UNTERSCHRIFT (rechts, berahmt)
+    # Borders nur auf Anchor-Zellen der Merges, KEIN _apply_outer_border
+    # (das korruptiert merged Zellen)
     # =================================================================
     row += 1
     leg_start = row
-    leg_font_code = Font(name="Calibri", size=8, bold=True)
     leg_font_desc = Font(name="Calibri", size=8)
-    leg_border = Border(
-        left=Side("thin", C_BORDER), right=Side("thin", C_BORDER),
-        top=Side("thin", C_BORDER), bottom=Side("thin", C_BORDER))
+    b_thin = Side("thin", C_BORDER)
+    b_med = Side("medium", "000000")
+
+    def _leg_border(top=False, bottom=False, left=False, right=False):
+        """Border mit medium auf gewünschten Außenseiten, thin innen."""
+        return Border(
+            top=b_med if top else b_thin,
+            bottom=b_med if bottom else b_thin,
+            left=b_med if left else b_thin,
+            right=b_med if right else b_thin)
 
     # --- Legende-Header: merged über ganze Breite ---
-    leg_end_col = 14  # Legende geht von Spalte 1 bis 14
+    leg_end_col = 14
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=leg_end_col)
     _apply_cell(ws.cell(row, 1), "Legende",
                 Font(name="Calibri", size=9, bold=True, color=C_HDR_FG),
-                hdr_fill, ca, leg_border)
+                hdr_fill, ca, _leg_border(top=True, left=True, right=True))
     row += 1
 
-    # Linke Spalte (col 1-3 Code, 4-7 Beschreibung)
+    # Legende-Einträge (col 1-3 Code, 4-7 Desc | 8-10 Code, 11-14 Desc)
     n_leg = max(len(LEGEND_LEFT), len(LEGEND_RIGHT))
     for i in range(n_leg):
         r = row + i
+        is_last = (i == n_leg - 1)
+
         # Linke Hälfte
         if i < len(LEGEND_LEFT):
             code, desc, ckey = LEGEND_LEFT[i]
@@ -690,13 +700,14 @@ def create_month(wb, mi, emps, layout):
             _apply_cell(ws.cell(r, 1), code,
                         Font(name="Calibri", size=8, bold=True,
                              color=fg or "000000"),
-                        _fill(bg) if bg else None, la, leg_border)
+                        _fill(bg) if bg else None, la,
+                        _leg_border(left=True, bottom=is_last))
             ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=7)
             _apply_cell(ws.cell(r, 4), desc, leg_font_desc, align=la,
-                        border=leg_border)
+                        border=_leg_border(bottom=is_last))
         else:
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
-            _apply_cell(ws.cell(r, 1), "", border=leg_border)
+            _apply_cell(ws.cell(r, 1), "", border=_leg_border(left=True, bottom=is_last))
 
         # Rechte Hälfte
         if i < len(LEGEND_RIGHT):
@@ -706,31 +717,31 @@ def create_month(wb, mi, emps, layout):
             _apply_cell(ws.cell(r, 8), code,
                         Font(name="Calibri", size=8, bold=True,
                              color=fg or "000000"),
-                        _fill(bg) if bg else None, la, leg_border)
+                        _fill(bg) if bg else None, la,
+                        _leg_border(bottom=is_last))
             ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=leg_end_col)
             _apply_cell(ws.cell(r, 11), desc, leg_font_desc, align=la,
-                        border=leg_border)
+                        border=_leg_border(right=True, bottom=is_last))
         else:
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=leg_end_col)
-            _apply_cell(ws.cell(r, 8), "", border=leg_border)
+            _apply_cell(ws.cell(r, 8), "", border=_leg_border(right=True, bottom=is_last))
 
     # WE/Feiertag-Zeile
     we_row = row + n_leg
     ws.merge_cells(start_row=we_row, start_column=1, end_row=we_row, end_column=3)
-    _apply_cell(ws.cell(we_row, 1), "", we_fill, border=leg_border)
+    _apply_cell(ws.cell(we_row, 1), "", we_fill,
+                border=_leg_border(left=True, bottom=True))
     ws.merge_cells(start_row=we_row, start_column=4, end_row=we_row,
                    end_column=leg_end_col)
     _apply_cell(ws.cell(we_row, 4), "Wochenende / Feiertag",
-                leg_font_desc, align=la, border=leg_border)
+                leg_font_desc, align=la,
+                border=_leg_border(right=True, bottom=True))
 
     leg_end_row = we_row
-    # Dicker Außenrand um Legende
-    _apply_outer_border(ws, leg_start, 1, leg_end_row, leg_end_col)
 
     # === UNTERSCHRIFTEN-BLOCK (rechts, berahmt) ===
-    sig_col = max(last_col - 7, 16)   # 8 Spalten breit
+    sig_col = max(last_col - 7, 16)
     sig_end_col = last_col
-    sig_font = Font(name="Calibri", size=10)
     sig_label = Font(name="Calibri", size=9, bold=True)
     sig_hint = Font(name="Calibri", size=8, italic=True, color="999999")
 
@@ -739,54 +750,63 @@ def create_month(wb, mi, emps, layout):
                    end_row=leg_start, end_column=sig_end_col)
     _apply_cell(ws.cell(leg_start, sig_col), "Unterschriften",
                 Font(name="Calibri", size=9, bold=True, color=C_HDR_FG),
-                hdr_fill, ca)
+                hdr_fill, ca,
+                _leg_border(top=True, left=True, right=True))
 
     # Erstellt von:
     r = leg_start + 1
     ws.merge_cells(start_row=r, start_column=sig_col,
                    end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "Erstellt von:", sig_label, align=la)
+    _apply_cell(ws.cell(r, sig_col), "Erstellt von:", sig_label, align=la,
+                border=_leg_border(left=True, right=True))
 
-    # Linie
+    # Linie (Unterschrift)
     r += 1
     ws.merge_cells(start_row=r, start_column=sig_col,
                    end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "", border=Border(
-        bottom=Side("thin", "000000")))
+    _apply_cell(ws.cell(r, sig_col), "",
+                border=Border(left=b_med, right=b_med, top=b_thin,
+                              bottom=Side("thin", "000000")))
     ws.row_dimensions[r].height = 22
 
     # Hinweis
     r += 1
     ws.merge_cells(start_row=r, start_column=sig_col,
                    end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "Datum / Unterschrift", sig_hint, align=ca)
+    _apply_cell(ws.cell(r, sig_col), "Datum / Unterschrift", sig_hint,
+                align=ca, border=_leg_border(left=True, right=True))
 
     # Leerzeile
     r += 1
+    ws.merge_cells(start_row=r, start_column=sig_col,
+                   end_row=r, end_column=sig_end_col)
+    _apply_cell(ws.cell(r, sig_col), "",
+                border=_leg_border(left=True, right=True))
 
     # Genehmigt von:
     r += 1
     ws.merge_cells(start_row=r, start_column=sig_col,
                    end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "Genehmigt von:", sig_label, align=la)
+    _apply_cell(ws.cell(r, sig_col), "Genehmigt von:", sig_label, align=la,
+                border=_leg_border(left=True, right=True))
 
-    # Linie
+    # Linie (Unterschrift)
     r += 1
     ws.merge_cells(start_row=r, start_column=sig_col,
                    end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "", border=Border(
-        bottom=Side("thin", "000000")))
+    _apply_cell(ws.cell(r, sig_col), "",
+                border=Border(left=b_med, right=b_med, top=b_thin,
+                              bottom=Side("thin", "000000")))
     ws.row_dimensions[r].height = 22
 
     # Hinweis
     r += 1
     ws.merge_cells(start_row=r, start_column=sig_col,
                    end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "Datum / Unterschrift", sig_hint, align=ca)
+    _apply_cell(ws.cell(r, sig_col), "Datum / Unterschrift", sig_hint,
+                align=ca, border=_leg_border(left=True, right=True, bottom=True))
 
     sig_end_row = r
-    # Dicker Außenrand um Unterschriften-Block
-    _apply_outer_border(ws, leg_start, sig_col, sig_end_row, sig_end_col)
 
     last_row = max(leg_end_row, sig_end_row)
 
