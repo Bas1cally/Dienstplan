@@ -26,6 +26,7 @@ import os
 from collections import OrderedDict
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.comments import Comment
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -48,6 +49,12 @@ MONTHS_DE = [
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 SEKRETARIAT_MA = {"Schmidt", "Radimersky"}
+
+# Schichten die besetzt sein MÜSSEN (Unterbesetzungs-Warnung)
+CRITICAL_SHIFTS = ["FI", "SI", "NI"]
+
+# Standard-Urlaubsanspruch pro Jahr
+DEFAULT_URLAUB_TAGE = 30
 
 # Feiertage BW 2026 mit Namen
 FEIERTAGE = {
@@ -90,6 +97,8 @@ C_ZEBRA = "F2F2F2"
 C_BORDER = "B4B4B4"
 C_SUM_BG = "D9E2F3"
 C_FERIEN = "C6EFCE"
+C_WARN_BG = "FFC7CE"   # Rot-Hintergrund für Unterbesetzung
+C_WARN_FG = "9C0006"   # Dunkelrot-Text für Unterbesetzung
 
 SHIFT_COLORS = {
     "U": (C_URLAUB, None), "U    alt": (C_URLAUB, None),
@@ -232,6 +241,27 @@ def _add_shift_cond_fmt(ws, cell_range):
             ws.conditional_formatting.add(
                 cell_range,
                 CellIsRule(operator="equal", formula=[f'"{code}"'], **kwargs))
+
+def _get_missing_critical(emps, mi, day):
+    """Prüfe welche kritischen Schichten (FI/SI/NI) an einem Tag nicht besetzt sind."""
+    assigned = set()
+    for e in emps:
+        shift = e.shifts[mi].get(day)
+        if shift and shift in CRITICAL_SHIFTS:
+            assigned.add(shift)
+    return [s for s in CRITICAL_SHIFTS if s not in assigned]
+
+
+def _add_feiertag_comments(ws, row, year, month):
+    """Feiertag-Namen als Kommentare an den Tag-Zellen."""
+    dim = calendar.monthrange(year, month)[1]
+    for d in range(1, dim + 1):
+        dt = datetime.date(year, month, d)
+        if dt in FEIERTAGE:
+            c = ws.cell(row, 1 + d)
+            c.comment = Comment(FEIERTAGE[dt], "Dienstplan",
+                                width=140, height=30)
+
 
 def _get_ferien_ranges(year, month):
     """Ferien-Zeiträume innerhalb eines Monats → {name: (start_day, end_day)}."""
@@ -382,6 +412,7 @@ def create_eingabe(ws, emps):
         row += 1
 
         # Tag
+        tag_row = row
         _apply_cell(ws.cell(row, 1), "Tag", hdr_font, hdr_fill, ca)
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
@@ -390,6 +421,7 @@ def create_eingabe(ws, emps):
             fn = Font(name="Calibri", size=9, bold=True,
                       color="000000" if is_sp else C_HDR_FG)
             _apply_cell(ws.cell(row, 1 + d), d, fn, f, ca)
+        _add_feiertag_comments(ws, tag_row, YEAR, mn)
         row += 1
 
         # WT
@@ -432,6 +464,28 @@ def create_eingabe(ws, emps):
                     elif zebra:
                         c.fill = zebra
             row += 1
+
+        # --- Unterbesetzungs-Warnung ---
+        warn_fill = _fill(C_WARN_BG)
+        warn_font = Font(name="Calibri", size=7, bold=True, color=C_WARN_FG)
+        _apply_cell(ws.cell(row, 1), "Besetzung",
+                    Font(name="Calibri", size=8, italic=True, color="999999"),
+                    align=la, border=None)
+        has_warning = False
+        for d in range(1, dim + 1):
+            dt = datetime.date(YEAR, mn, d)
+            c = ws.cell(row, 1 + d)
+            c.alignment = ca
+            if _is_weekend(dt) or _is_feiertag(dt):
+                c.fill = we_fill
+                continue
+            missing = _get_missing_critical(emps, mi, d)
+            if missing:
+                c.value = "!" + "/".join(missing)
+                c.fill = warn_fill
+                c.font = warn_font
+                has_warning = True
+        row += 1
         row += 1
 
     for d in range(1, 32):
@@ -493,6 +547,7 @@ def create_month(wb, mi, emps, layout):
     row = tbl_start
 
     # Tag (Row 3)
+    tag_row = row
     _apply_cell(ws.cell(row, 1), "Tag", hdr_font, hdr_fill, ca)
     for d in range(1, dim + 1):
         dt = datetime.date(YEAR, mn, d)
@@ -501,6 +556,7 @@ def create_month(wb, mi, emps, layout):
         fn = Font(name="Calibri", size=8, bold=True,
                   color="000000" if is_sp else C_HDR_FG)
         _apply_cell(ws.cell(row, 1 + d), d, fn, f, ca)
+    _add_feiertag_comments(ws, tag_row, YEAR, mn)
     row += 1
 
     # WT (Row 4)
@@ -564,13 +620,34 @@ def create_month(wb, mi, emps, layout):
             c.font = Font(name="Calibri", size=7)
         row += 1
 
+    # --- Unterbesetzungs-Warnung ---
+    warn_fill = _fill(C_WARN_BG)
+    warn_font = Font(name="Calibri", size=6, bold=True, color=C_WARN_FG)
+    _apply_cell(ws.cell(row, 1), "Besetzung",
+                Font(name="Calibri", size=7, italic=True, color="999999"),
+                align=la, border=None)
+    for d in range(1, dim + 1):
+        dt = datetime.date(YEAR, mn, d)
+        c = ws.cell(row, 1 + d)
+        c.alignment = ca
+        c.border = THIN
+        if _is_weekend(dt) or _is_feiertag(dt):
+            c.fill = we_fill
+            continue
+        missing = _get_missing_critical(emps, mi, d)
+        if missing:
+            c.value = "!" + "/".join(missing)
+            c.fill = warn_fill
+            c.font = warn_font
+    row += 1
+
     tbl_end = row - 1
 
     # --- Dicker Außenrand ---
     _apply_outer_border(ws, tbl_start, 1, tbl_end, 1 + dim)
 
     # --- Conditional Formatting für Schichtfarben ---
-    data_range = f"B{tbl_start + 3}:{get_column_letter(1 + dim)}{tbl_end}"
+    data_range = f"B{tbl_start + 3}:{get_column_letter(1 + dim)}{tbl_end - 1}"
     _add_shift_cond_fmt(ws, data_range)
 
     # --- Sekretariats-MA verstecken ---
@@ -818,6 +895,97 @@ def create_monatsdetails(ws, emps, stypes, shrs):
 
 
 # ---------------------------------------------------------------------------
+# Urlaubsübersicht
+# ---------------------------------------------------------------------------
+def create_urlaubsuebersicht(ws, emps):
+    """Jahres-Urlaubsübersicht: U-Tage pro Monat, Gesamt, Resturlaub."""
+    print("Erstelle Urlaubsübersicht ...")
+    hdr_fill = _fill(C_HDR_BG)
+    hdr_font = Font(name="Calibri", size=10, bold=True, color=C_HDR_FG)
+    ca = Alignment(horizontal="center", vertical="center")
+    la = Alignment(horizontal="left", vertical="center")
+
+    ws.column_dimensions["A"].width = 14
+    for i in range(14):
+        ws.column_dimensions[get_column_letter(2 + i)].width = 8
+
+    _apply_cell(ws.cell(1, 1), f"Urlaubsübersicht {YEAR}",
+                Font(name="Calibri", size=14, bold=True), border=None)
+
+    row = 3
+    # Header
+    _apply_cell(ws.cell(row, 1), "Mitarbeiter", hdr_font, hdr_fill, la)
+    for i in range(12):
+        _apply_cell(ws.cell(row, 2 + i), MONTHS_DE[i][:3], hdr_font, hdr_fill, ca)
+    gc = 14  # Gesamt-Spalte
+    rc = 15  # Anspruch
+    dc = 16  # Rest
+    _apply_cell(ws.cell(row, gc), "Genommen", hdr_font, hdr_fill, ca)
+    ws.column_dimensions[get_column_letter(gc)].width = 10
+    _apply_cell(ws.cell(row, rc), "Anspruch", hdr_font, hdr_fill, ca)
+    ws.column_dimensions[get_column_letter(rc)].width = 10
+    _apply_cell(ws.cell(row, dc), "Rest", hdr_font, hdr_fill, ca)
+    ws.column_dimensions[get_column_letter(dc)].width = 8
+    row += 1
+
+    sum_per_month = [0] * 12
+    sum_total = 0
+
+    for ei, ed in enumerate(emps):
+        _apply_cell(ws.cell(row, 1), ed.name,
+                    Font(name="Calibri", size=10, bold=True), align=la)
+        zebra = _fill(C_ZEBRA) if ei % 2 == 1 else None
+        total = 0
+        for mi in range(12):
+            cnt = sum(1 for _, c in ed.shifts[mi].items()
+                      if c in ("U", "U    alt"))
+            _apply_cell(ws.cell(row, 2 + mi), cnt or "",
+                        Font(name="Calibri", size=10), zebra, ca)
+            total += cnt
+            sum_per_month[mi] += cnt
+
+        # Gesamt genommen
+        _apply_cell(ws.cell(row, gc), total,
+                    Font(name="Calibri", size=10, bold=True), zebra, ca)
+        sum_total += total
+
+        # Anspruch
+        _apply_cell(ws.cell(row, rc), DEFAULT_URLAUB_TAGE,
+                    Font(name="Calibri", size=10), zebra, ca)
+
+        # Rest
+        rest = DEFAULT_URLAUB_TAGE - total
+        color = C_RED if rest < 0 else ("008000" if rest > 5 else C_WARN_FG)
+        _apply_cell(ws.cell(row, dc), rest,
+                    Font(name="Calibri", size=10, bold=True, color=color),
+                    zebra, ca)
+        row += 1
+
+    # Summenzeile
+    sf = _fill(C_SUM_BG)
+    _apply_cell(ws.cell(row, 1), "Summe",
+                Font(name="Calibri", size=10, bold=True), sf, la)
+    for mi in range(12):
+        _apply_cell(ws.cell(row, 2 + mi), sum_per_month[mi],
+                    Font(name="Calibri", size=10, bold=True), sf, ca)
+    _apply_cell(ws.cell(row, gc), sum_total,
+                Font(name="Calibri", size=10, bold=True), sf, ca)
+
+    _apply_outer_border(ws, 3, 1, row, dc)
+
+    # Hinweis
+    row += 2
+    _apply_cell(ws.cell(row, 1),
+                f"Anspruch: {DEFAULT_URLAUB_TAGE} Tage/Jahr (anpassbar in Spalte {get_column_letter(rc)})",
+                Font(name="Calibri", size=8, italic=True, color="666666"),
+                border=None)
+
+    ws.freeze_panes = "B4"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
@@ -839,6 +1007,7 @@ def main():
 
     create_jahresuebersicht(wb.create_sheet("Jahresübersicht"), emps, stypes)
     create_monatsdetails(wb.create_sheet("Monatsdetails"), emps, stypes, shrs)
+    create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps)
 
     print(f"\nSpeichere {DST_FILE} ...")
     wb.save(DST_FILE)
