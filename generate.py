@@ -503,11 +503,13 @@ def create_eingabe(ws, emps):
                 c.alignment = ALIGN_C
             row += 1
 
+        ws.row_dimensions[row].height = 20
         _set(ws.cell(row, 1), MONTHS_DE[mi], FONT_MONTH, border=None)
         row += 1
 
         # KW
-        _set(ws.cell(row, 1), "KW", FONT_KW, align=ALIGN_C, border=None)
+        kw_row = row
+        _set(ws.cell(row, 1), "KW", FONT_KW, align=ALIGN_C, border=THIN)
         last_kw = None
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
@@ -521,6 +523,7 @@ def create_eingabe(ws, emps):
                 c.value = kw
                 c.font = FONT_KW
             last_kw = kw
+        ws.row_dimensions[row].height = 15
         row += 1
 
         # Tag
@@ -533,6 +536,7 @@ def create_eingabe(ws, emps):
                  FONT_TAG_SP if sp else FONT_TAG_NR,
                  FILL_WE if sp else FILL_HDR, ALIGN_C)
         _feiertag_comments(ws, tag_row, YEAR, mn)
+        ws.row_dimensions[row].height = 18
         row += 1
 
         # WT
@@ -543,6 +547,7 @@ def create_eingabe(ws, emps):
             _set(ws.cell(row, 1 + d), WEEKDAYS_DE[dt.weekday()],
                  FONT_WT_SP if sp else FONT_WT_NR,
                  FILL_WE if sp else FILL_HDR, ALIGN_C)
+        ws.row_dimensions[row].height = 18
         row += 1
 
         # MA-Zeilen
@@ -572,6 +577,7 @@ def create_eingabe(ws, emps):
                         c.fill = FILL_WE
                     elif zebra:
                         c.fill = zebra
+            ws.row_dimensions[row].height = 16
             row += 1
 
         dv_ranges.append(f"B{first_ma_row}:{last_cl}{row - 1}")
@@ -582,6 +588,7 @@ def create_eingabe(ws, emps):
             dt = datetime.date(YEAR, mn, d)
             c = ws.cell(row, 1 + d)
             c.alignment = ALIGN_C
+            c.border = THIN
             if _is_special(dt):
                 c.fill = FILL_WE
                 continue
@@ -590,6 +597,10 @@ def create_eingabe(ws, emps):
                 c.value = "!" + "/".join(missing)
                 c.fill = FILL_WARN
                 c.font = FONT_WARN
+        ws.row_dimensions[row].height = 15
+
+        # Medium-Rahmen um den gesamten Monatsblock
+        _outer_border(ws, kw_row, 1, row, 1 + dim)
         row += 2
 
     dv.sqref = " ".join(dv_ranges)
@@ -870,6 +881,7 @@ def create_jahresuebersicht(ws, emps, stypes):
     tc = 2 + len(stypes)
     _set(ws.cell(row, tc), "Gesamt", FONT_HDR10, FILL_HDR, ALIGN_C)
     ws.column_dimensions[get_column_letter(tc)].width = 8
+    ws.row_dimensions[row].height = 20
     row += 1
 
     sums = {st: 0 for st in stypes}
@@ -884,6 +896,7 @@ def create_jahresuebersicht(ws, emps, stypes):
             sums[st] += cnt
             total += cnt
         _set(ws.cell(row, tc), total, FONT_BOLD10, zebra, ALIGN_C)
+        ws.row_dimensions[row].height = 18
         row += 1
 
     _set(ws.cell(row, 1), "Summe", FONT_BOLD10, FILL_SUM, ALIGN_L)
@@ -892,6 +905,7 @@ def create_jahresuebersicht(ws, emps, stypes):
         _set(ws.cell(row, 2 + i), sums[st], FONT_BOLD10, FILL_SUM, ALIGN_C)
         gt += sums[st]
     _set(ws.cell(row, tc), gt, FONT_BOLD10, FILL_SUM, ALIGN_C)
+    ws.row_dimensions[row].height = 18
 
     _outer_border(ws, 3, 1, row, tc)
     ws.freeze_panes = "B4"
@@ -927,6 +941,7 @@ def create_monatsdetails(ws, emps, stypes, shrs):
         headers = ["MA"] + stypes + ["Soll", "Ist", "Diff"]
         for i, h in enumerate(headers):
             _set(ws.cell(row, 1 + i), h, FONT_HDR, FILL_HDR, ALIGN_C)
+        ws.row_dimensions[row].height = 18
         row += 1
 
         s_sums = {st: 0 for st in stypes}
@@ -959,6 +974,7 @@ def create_monatsdetails(ws, emps, stypes, shrs):
             _set(ws.cell(row, sc + 2), round(diff, 2),
                  Font(name="Calibri", size=9,
                       color=C_RED if diff < 0 else "008000"), zebra, ALIGN_C)
+            ws.row_dimensions[row].height = 16
             row += 1
 
         _set(ws.cell(row, 1), "Summe", FONT_BOLD9, FILL_SUM, ALIGN_L)
@@ -968,6 +984,7 @@ def create_monatsdetails(ws, emps, stypes, shrs):
         for off, val in enumerate([round(sum_soll, 1), round(sum_ist, 2),
                                     round(sum_ist - sum_soll, 2)]):
             _set(ws.cell(row, sc + off), val, FONT_BOLD9, FILL_SUM, ALIGN_C)
+        ws.row_dimensions[row].height = 18
 
         _outer_border(ws, hdr_row, 1, row, sc + 2)
         row += 2
@@ -999,6 +1016,7 @@ def create_urlaubsuebersicht(ws, emps):
     ws.column_dimensions[get_column_letter(rc)].width = 10
     _set(ws.cell(row, dc), "Rest", FONT_HDR10, FILL_HDR, ALIGN_C)
     ws.column_dimensions[get_column_letter(dc)].width = 8
+    ws.row_dimensions[row].height = 20
     row += 1
 
     sum_per_month = [0] * 12
@@ -1021,12 +1039,14 @@ def create_urlaubsuebersicht(ws, emps):
         color = C_RED if rest < 0 else ("008000" if rest > 5 else C_WARN_FG)
         _set(ws.cell(row, dc), rest,
              Font(name="Calibri", size=10, bold=True, color=color), zebra, ALIGN_C)
+        ws.row_dimensions[row].height = 18
         row += 1
 
     _set(ws.cell(row, 1), "Summe", FONT_BOLD10, FILL_SUM, ALIGN_L)
     for mi in range(12):
         _set(ws.cell(row, 2 + mi), sum_per_month[mi], FONT_BOLD10, FILL_SUM, ALIGN_C)
     _set(ws.cell(row, gc), sum_total, FONT_BOLD10, FILL_SUM, ALIGN_C)
+    ws.row_dimensions[row].height = 18
 
     _outer_border(ws, 3, 1, row, dc)
 
