@@ -466,7 +466,7 @@ def create_eingabe(ws, emps):
         dv_ranges.append(f"B{first_ma_row}:{last_cl}{row - 1}")
 
         # Unterbesetzungs-Warnung
-        _set(ws.cell(row, 1), "Besetzung", FONT_GRAY8, align=ALIGN_L, border=None)
+        _set(ws.cell(row, 1), "Besetzung", FONT_GRAY8, align=ALIGN_L, border=THIN)
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
             c = ws.cell(row, 1 + d)
@@ -509,7 +509,7 @@ def create_month(wb, mi, emps, layout):
 
     # Spaltenbreiten
     ws.column_dimensions["A"].width = 13
-    day_w = max(3.8, min(5.2, 63.5 / dim))
+    day_w = max(4.0, min(5.2, 63.5 / dim))
     for d in range(1, dim + 1):
         ws.column_dimensions[get_column_letter(1 + d)].width = day_w
 
@@ -607,7 +607,7 @@ def create_month(wb, mi, emps, layout):
         row += 1
 
     # Unterbesetzung
-    _set(ws.cell(row, 1), "Besetzung", FONT_GRAY8, align=ALIGN_L)
+    _set(ws.cell(row, 1), "Besetzung", FONT_GRAY8, align=ALIGN_L, border=THIN)
     for d in range(1, dim + 1):
         dt = datetime.date(YEAR, mn, d)
         c = ws.cell(row, 1 + d)
@@ -657,6 +657,13 @@ def create_month(wb, mi, emps, layout):
          _lb(top=True, left=True, right=True))
     row += 1
 
+    def _leg_font(ckey):
+        """Font für Legenden-Code: rot wenn Schicht rot ist, sonst schwarz."""
+        _, fn = SHIFT_COLORS.get(ckey, (None, None))
+        if fn and fn.color:
+            return Font(name="Calibri", size=8, bold=True, color=fn.color)
+        return FONT_LEG_CODE
+
     n_leg = max(len(LEGEND_LEFT), len(LEGEND_RIGHT))
     for i in range(n_leg):
         r = row + i
@@ -664,11 +671,9 @@ def create_month(wb, mi, emps, layout):
 
         if i < len(LEGEND_LEFT):
             code, desc, ckey = LEGEND_LEFT[i]
-            sf, fn = SHIFT_COLORS.get(ckey, (None, None))
+            sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
-            _set(ws.cell(r, 1), code,
-                 Font(name="Calibri", size=8, bold=True,
-                      color=fn.color.rgb if fn else "000000") if fn else FONT_LEG_CODE,
+            _set(ws.cell(r, 1), code, _leg_font(ckey),
                  sf, ALIGN_L, _lb(left=True))
             ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=7)
             _set(ws.cell(r, 4), desc, FONT_LEG_DESC, align=ALIGN_L, border=_lb())
@@ -678,11 +683,9 @@ def create_month(wb, mi, emps, layout):
 
         if i < len(LEGEND_RIGHT):
             code, desc, ckey = LEGEND_RIGHT[i]
-            sf, fn = SHIFT_COLORS.get(ckey, (None, None))
+            sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=10)
-            _set(ws.cell(r, 8), code,
-                 Font(name="Calibri", size=8, bold=True,
-                      color=fn.color.rgb if fn else "000000") if fn else FONT_LEG_CODE,
+            _set(ws.cell(r, 8), code, _leg_font(ckey),
                  sf, ALIGN_L, _lb())
             ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=leg_end_col)
             _set(ws.cell(r, 11), desc, FONT_LEG_DESC, align=ALIGN_L,
