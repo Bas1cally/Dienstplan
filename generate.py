@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
 """
 Dienstplan Excel Generator
-Liest die Original-Dienstplanübersicht 2026.xlsm ein und generiert eine
-saubere, schön formatierte Excel-Datei mit:
-- Eingabe-Sheet (Jahresübersicht aller Schichten) – HAUPT-EINGABE
-- 12 Monats-Sheets (druckfertig, lesen per Formel aus dem Eingabe-Sheet)
-- Jahresübersicht (Schichtzählung pro MA)
-- Monatsdetails (Soll/Ist Arbeitszeit)
 
-Features:
-- Monats-Sheets werden automatisch aus dem Eingabe-Sheet befüllt (Formeln)
-- Dropdown-Auswahl für Schichttypen in jeder Eingabezelle
-- Schmidt & Radimersky (Sekretariat) beim Druck ausgeblendet
-- Unterschriftenfeld rechts neben der Legende (A4-optimiert)
-- Legende mit Uhrzeiten, merged Zellen
-- Conditional Formatting für automatische Schichtfarben
-- Dicke Außenränder um Datentabellen
-- Ferien-Namen in Eingabe-Sheet
-- Schmale Margins für maximalen Druckbereich
+Usage:
+  python3 generate.py                    # Normaler Modus: liest .xlsm, erzeugt gefüllten Plan
+  python3 generate.py --year 2027        # Für anderes Jahr
+  python3 generate.py --leer             # Leerer Plan (nur Struktur + Dropdowns)
+  python3 generate.py --leer --year 2027 # Leerer Plan für 2027
+  python3 generate.py --archiv           # Backup des aktuellen Plans vor Überschreiben
 """
 
+import argparse
 import calendar
 import datetime
+import json
 import os
-from collections import OrderedDict
+import shutil
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
@@ -34,13 +26,11 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.page import PageMargins
 
 # ---------------------------------------------------------------------------
-# Konstanten
+# Pfade
 # ---------------------------------------------------------------------------
-SRC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "Dienstplanübersicht 2026.xlsm")
-DST_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "Dienstplan_2026_neu.xlsx")
-YEAR = 2026
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(BASE_DIR, "mitarbeiter.json")
+ARCHIV_DIR = os.path.join(BASE_DIR, "archiv")
 
 MONTHS_DE = [
     "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -49,41 +39,94 @@ MONTHS_DE = [
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 SEKRETARIAT_MA = {"Schmidt", "Radimersky"}
-
-# Schichten die besetzt sein MÜSSEN (Unterbesetzungs-Warnung)
 CRITICAL_SHIFTS = ["FI", "SI", "NI"]
-
-# Standard-Urlaubsanspruch pro Jahr
 DEFAULT_URLAUB_TAGE = 30
 
-# Feiertage BW 2026 mit Namen
-FEIERTAGE = {
-    datetime.date(2026, 1, 1): "Neujahr",
-    datetime.date(2026, 1, 6): "Hl. 3 Könige",
-    datetime.date(2026, 4, 3): "Karfreitag",
-    datetime.date(2026, 4, 6): "Ostermontag",
-    datetime.date(2026, 5, 1): "Tag d. Arbeit",
-    datetime.date(2026, 5, 14): "Chr. Himmelf.",
-    datetime.date(2026, 5, 25): "Pfingstmontag",
-    datetime.date(2026, 6, 4): "Fronleichnam",
-    datetime.date(2026, 8, 15): "Mariä Himmelf.",
-    datetime.date(2026, 10, 3): "Tag d. Einheit",
-    datetime.date(2026, 11, 1): "Allerheiligen",
-    datetime.date(2026, 12, 25): "1. Weihnacht",
-    datetime.date(2026, 12, 26): "2. Weihnacht",
-}
+# ---------------------------------------------------------------------------
+# Dynamische Feiertage (BW) – funktioniert für jedes Jahr
+# ---------------------------------------------------------------------------
+def _ostersonntag(year):
+    """Gaußsche Osterformel."""
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return datetime.date(year, month, day)
 
-SCHULFERIEN = [
-    ("Weihnachtsferien", datetime.date(2025, 12, 22), datetime.date(2026, 1, 5)),
-    ("Faschingsferien", datetime.date(2026, 2, 16), datetime.date(2026, 2, 20)),
-    ("Osterferien", datetime.date(2026, 4, 2), datetime.date(2026, 4, 11)),
-    ("Pfingstferien", datetime.date(2026, 5, 26), datetime.date(2026, 6, 6)),
-    ("Sommerferien", datetime.date(2026, 7, 30), datetime.date(2026, 9, 12)),
-    ("Herbstferien", datetime.date(2026, 10, 26), datetime.date(2026, 10, 30)),
-    ("Weihnachtsferien", datetime.date(2026, 12, 23), datetime.date(2027, 1, 9)),
-]
+def feiertage_bw(year):
+    """Alle Feiertage in Baden-Württemberg für ein gegebenes Jahr."""
+    ostern = _ostersonntag(year)
+    return {
+        datetime.date(year, 1, 1): "Neujahr",
+        datetime.date(year, 1, 6): "Hl. 3 Könige",
+        ostern - datetime.timedelta(days=2): "Karfreitag",
+        ostern + datetime.timedelta(days=1): "Ostermontag",
+        datetime.date(year, 5, 1): "Tag d. Arbeit",
+        ostern + datetime.timedelta(days=39): "Chr. Himmelf.",
+        ostern + datetime.timedelta(days=50): "Pfingstmontag",
+        ostern + datetime.timedelta(days=60): "Fronleichnam",
+        datetime.date(year, 8, 15): "Mariä Himmelf.",
+        datetime.date(year, 10, 3): "Tag d. Einheit",
+        datetime.date(year, 11, 1): "Allerheiligen",
+        datetime.date(year, 12, 25): "1. Weihnacht",
+        datetime.date(year, 12, 26): "2. Weihnacht",
+    }
 
-# Farben
+def schulferien_bw(year):
+    """Schulferien BW – Schätzung basierend auf typischen Terminen.
+    Für exakte Termine: manuell in der Ausgabe-Datei anpassen."""
+    ostern = _ostersonntag(year)
+    pfingsten = ostern + datetime.timedelta(days=49)
+    return [
+        ("Faschingsferien",
+         _mo_of_week(year, 2, 3),
+         _fr_of_week(year, 2, 3)),
+        ("Osterferien",
+         ostern - datetime.timedelta(days=1),
+         ostern + datetime.timedelta(days=6)),
+        ("Pfingstferien",
+         pfingsten + datetime.timedelta(days=1),
+         pfingsten + datetime.timedelta(days=12)),
+        ("Sommerferien",
+         datetime.date(year, 7, 30),
+         datetime.date(year, 9, 12)),
+        ("Herbstferien",
+         _mo_of_week(year, 10, 4),
+         _fr_of_week(year, 10, 4)),
+        ("Weihnachtsferien",
+         datetime.date(year, 12, 23),
+         datetime.date(year + 1, 1, 6)),
+    ]
+
+def _mo_of_week(year, month, week_num):
+    """Montag der N-ten Woche im Monat."""
+    first = datetime.date(year, month, 1)
+    days_to_monday = (7 - first.weekday()) % 7
+    first_monday = first + datetime.timedelta(days=days_to_monday)
+    return first_monday + datetime.timedelta(weeks=week_num - 1)
+
+def _fr_of_week(year, month, week_num):
+    mo = _mo_of_week(year, month, week_num)
+    return mo + datetime.timedelta(days=4)
+
+# Globale Variablen – werden in main() gesetzt
+YEAR = 2026
+FEIERTAGE = {}
+SCHULFERIEN = []
+
+# ---------------------------------------------------------------------------
+# Styles
+# ---------------------------------------------------------------------------
 C_URLAUB = "92D050"
 C_EH = "66FFFF"
 C_KU = "B8CCE4"
@@ -97,17 +140,64 @@ C_ZEBRA = "F2F2F2"
 C_BORDER = "B4B4B4"
 C_SUM_BG = "D9E2F3"
 C_FERIEN = "C6EFCE"
-C_WARN_BG = "FFC7CE"   # Rot-Hintergrund für Unterbesetzung
-C_WARN_FG = "9C0006"   # Dunkelrot-Text für Unterbesetzung
+C_WARN_BG = "FFC7CE"
+C_WARN_FG = "9C0006"
+
+THIN_SIDE = Side("thin", C_BORDER)
+THIN = Border(left=THIN_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
+MEDIUM_SIDE = Side("medium", "000000")
+
+FILL_HDR = PatternFill("solid", fgColor=C_HDR_BG)
+FILL_WE = PatternFill("solid", fgColor=C_WEEKEND)
+FILL_ZEBRA = PatternFill("solid", fgColor=C_ZEBRA)
+FILL_FERIEN = PatternFill("solid", fgColor=C_FERIEN)
+FILL_SUM = PatternFill("solid", fgColor=C_SUM_BG)
+FILL_WARN = PatternFill("solid", fgColor=C_WARN_BG)
+FILL_URLAUB = PatternFill("solid", fgColor=C_URLAUB)
+FILL_EH = PatternFill("solid", fgColor=C_EH)
+FILL_KU = PatternFill("solid", fgColor=C_KU)
+FILL_AUSGLEICH = PatternFill("solid", fgColor=C_AUSGLEICH)
+FILL_YELLOW = PatternFill("solid", fgColor=C_YELLOW)
+
+FONT_TITLE = Font(name="Calibri", size=14, bold=True)
+FONT_HDR = Font(name="Calibri", size=9, bold=True, color=C_HDR_FG)
+FONT_HDR10 = Font(name="Calibri", size=10, bold=True, color=C_HDR_FG)
+FONT_MONTH = Font(name="Calibri", size=11, bold=True)
+FONT_NAME = Font(name="Calibri", size=10, bold=True)
+FONT_NAME9 = Font(name="Calibri", size=9, bold=True)
+FONT_CELL = Font(name="Calibri", size=9)
+FONT_CELL8 = Font(name="Calibri", size=8)
+FONT_CELL10 = Font(name="Calibri", size=10)
+FONT_BOLD10 = Font(name="Calibri", size=10, bold=True)
+FONT_BOLD9 = Font(name="Calibri", size=9, bold=True)
+FONT_KW = Font(name="Calibri", size=8, italic=True, color="666666")
+FONT_KW_W = Font(name="Calibri", size=8, italic=True, color=C_HDR_FG)
+FONT_TAG_SP = Font(name="Calibri", size=9, bold=True, color="000000")
+FONT_TAG_NR = Font(name="Calibri", size=9, bold=True, color=C_HDR_FG)
+FONT_WT_SP = Font(name="Calibri", size=8, bold=True, color="000000")
+FONT_WT_NR = Font(name="Calibri", size=8, color=C_HDR_FG)
+FONT_WARN = Font(name="Calibri", size=7, bold=True, color=C_WARN_FG)
+FONT_GRAY8 = Font(name="Calibri", size=8, italic=True, color="999999")
+FONT_GRAY_SM = Font(name="Calibri", size=9, color="666666")
+FONT_FERIEN = Font(name="Calibri", size=7, italic=True, color="006100")
+FONT_RED = Font(name="Calibri", size=8, color=C_RED)
+FONT_LEG_CODE = Font(name="Calibri", size=8, bold=True)
+FONT_LEG_DESC = Font(name="Calibri", size=8)
+FONT_SIG_LABEL = Font(name="Calibri", size=9, bold=True)
+FONT_SIG_HINT = Font(name="Calibri", size=8, italic=True, color="999999")
+FONT_SEKR = Font(name="Calibri", size=9, bold=True, italic=True, color="999999")
+
+ALIGN_C = Alignment(horizontal="center", vertical="center")
+ALIGN_L = Alignment(horizontal="left", vertical="center")
 
 SHIFT_COLORS = {
-    "U": (C_URLAUB, None), "U    alt": (C_URLAUB, None),
-    "EH": (C_EH, C_RED), "KU": (C_KU, None), "A": (C_AUSGLEICH, None),
-    "GT": (None, C_RED), "NST": (None, C_RED), "Fobi": (None, C_RED),
-    "T-ZUG": (C_URLAUB, None), "T-ZG": (C_URLAUB, None),
+    "U": (FILL_URLAUB, None), "U    alt": (FILL_URLAUB, None),
+    "EH": (FILL_EH, FONT_RED), "KU": (FILL_KU, None),
+    "A": (FILL_AUSGLEICH, None),
+    "GT": (None, FONT_RED), "NST": (None, FONT_RED), "Fobi": (None, FONT_RED),
+    "T-ZUG": (FILL_URLAUB, None), "T-ZG": (FILL_URLAUB, None),
 }
 
-# Legende: (Anzeige-Text, Beschreibung, Farb-Schlüssel)
 LEGEND_LEFT = [
     ("U", "Urlaub", "U"),
     ("EH 08:00-17:00", "Erste Hilfe", "EH"),
@@ -134,11 +224,56 @@ DROPDOWN_SHIFTS = [
     "KU", "EH", "SD", "GT", "NST", "KT", "Fobi", "U", "A", "T-ZUG",
 ]
 
-THIN = Border(
-    left=Side("thin", C_BORDER), right=Side("thin", C_BORDER),
-    top=Side("thin", C_BORDER), bottom=Side("thin", C_BORDER),
-)
-MEDIUM_SIDE = Side("medium", "000000")
+CF_RULES = [
+    ("U", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
+    ("EH", PatternFill("solid", fgColor=C_EH), Font(color=C_RED)),
+    ("KU", PatternFill("solid", fgColor=C_KU), Font(color="000000")),
+    ("A", PatternFill("solid", fgColor=C_AUSGLEICH), Font(color="000000")),
+    ("T-ZUG", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
+    ("Fobi", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
+    ("GT", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
+    ("NST", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
+]
+
+
+# ---------------------------------------------------------------------------
+# MA-Config
+# ---------------------------------------------------------------------------
+def load_config():
+    """Lade MA-Config aus JSON. Erstellt Default-Config falls nicht vorhanden."""
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+def save_default_config(emps):
+    """Speichert aktuelle MA-Liste als JSON-Config."""
+    config = {
+        "mitarbeiter": [
+            {
+                "name": e.name,
+                "irtaz": e.irtaz,
+                "urlaub_tage": DEFAULT_URLAUB_TAGE,
+                "sekretariat": e.name in SEKRETARIAT_MA,
+            }
+            for e in emps
+        ],
+        "sekretariat_namen": list(SEKRETARIAT_MA),
+        "kritische_schichten": CRITICAL_SHIFTS,
+    }
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+    print(f"  Config gespeichert: {CONFIG_FILE}")
+
+def emps_from_config(config):
+    """Erstellt Employee-Objekte aus Config."""
+    emps = []
+    for m in config["mitarbeiter"]:
+        e = Employee(m["name"], m.get("irtaz", 8.0))
+        emps.append(e)
+    global SEKRETARIAT_MA
+    SEKRETARIAT_MA = set(config.get("sekretariat_namen", []))
+    return emps
 
 
 # ---------------------------------------------------------------------------
@@ -180,27 +315,16 @@ def _samstage(year, month):
 def _kw(dt):
     return dt.isocalendar()[1]
 
-def _fill(color):
-    return PatternFill(start_color=color, end_color=color, fill_type="solid")
-
-def _shift_fill(code):
-    if code and str(code).strip() in SHIFT_COLORS:
-        bg = SHIFT_COLORS[str(code).strip()][0]
-        return _fill(bg) if bg else None
-    if code and str(code).startswith("(") and ")" in str(code):
-        return _fill(C_YELLOW)
-    return None
-
-def _shift_font(code, size=8, bold=False):
-    fg = None
+def _shift_style(code):
     c = str(code).strip() if code else ""
     if c in SHIFT_COLORS:
-        fg = SHIFT_COLORS[c][1]
-    elif c.startswith("(") and ")" in c:
-        fg = C_RED
-    return Font(name="Calibri", size=size, bold=bold, color=fg or "000000")
+        sf, fn = SHIFT_COLORS[c]
+        return sf, fn or FONT_CELL8
+    if c.startswith("(") and ")" in c:
+        return FILL_YELLOW, FONT_RED
+    return None, FONT_CELL8
 
-def _apply_cell(cell, value=None, font=None, fill=None, align=None, border=THIN):
+def _set(cell, value=None, font=None, fill=None, align=None, border=THIN):
     if value is not None:
         cell.value = value
     if font:
@@ -213,58 +337,40 @@ def _apply_cell(cell, value=None, font=None, fill=None, align=None, border=THIN)
         cell.border = border
     return cell
 
-def _apply_outer_border(ws, min_row, min_col, max_row, max_col):
-    """Dicken Außenrand um einen Bereich, innen dünne Ränder."""
-    thin_s = Side("thin", C_BORDER)
-    for r in range(min_row, max_row + 1):
-        for c in range(min_col, max_col + 1):
-            left = MEDIUM_SIDE if c == min_col else thin_s
-            right = MEDIUM_SIDE if c == max_col else thin_s
-            top = MEDIUM_SIDE if r == min_row else thin_s
-            bottom = MEDIUM_SIDE if r == max_row else thin_s
+def _outer_border(ws, r1, c1, r2, c2):
+    for r in range(r1, r2 + 1):
+        for c in range(c1, c2 + 1):
+            left = MEDIUM_SIDE if c == c1 else THIN_SIDE
+            right = MEDIUM_SIDE if c == c2 else THIN_SIDE
+            top = MEDIUM_SIDE if r == r1 else THIN_SIDE
+            bottom = MEDIUM_SIDE if r == r2 else THIN_SIDE
             ws.cell(r, c).border = Border(left=left, right=right,
                                           top=top, bottom=bottom)
 
-def _add_shift_cond_fmt(ws, cell_range):
-    """Conditional Formatting für Schichtfarben (funktioniert auch mit Formeln)."""
-    for code, bg, fg in [
-        ("U", C_URLAUB, None), ("EH", C_EH, C_RED), ("KU", C_KU, None),
-        ("A", C_AUSGLEICH, None), ("T-ZUG", C_URLAUB, None),
-        ("Fobi", None, C_RED), ("GT", None, C_RED), ("NST", None, C_RED),
-    ]:
-        kwargs = {}
-        if bg:
-            kwargs["fill"] = _fill(bg)
-        if fg:
-            kwargs["font"] = Font(color=fg)
-        if kwargs:
-            ws.conditional_formatting.add(
-                cell_range,
-                CellIsRule(operator="equal", formula=[f'"{code}"'], **kwargs))
+def _add_cond_fmt(ws, cell_range):
+    for code, fill, font in CF_RULES:
+        ws.conditional_formatting.add(
+            cell_range,
+            CellIsRule(operator="equal", formula=[f'"{code}"'],
+                       fill=fill, font=font, stopIfTrue=True))
 
-def _get_missing_critical(emps, mi, day):
-    """Prüfe welche kritischen Schichten (FI/SI/NI) an einem Tag nicht besetzt sind."""
+def _missing_critical(emps, mi, day):
     assigned = set()
     for e in emps:
-        shift = e.shifts[mi].get(day)
-        if shift and shift in CRITICAL_SHIFTS:
-            assigned.add(shift)
+        s = e.shifts[mi].get(day)
+        if s and s in CRITICAL_SHIFTS:
+            assigned.add(s)
     return [s for s in CRITICAL_SHIFTS if s not in assigned]
 
-
-def _add_feiertag_comments(ws, row, year, month):
-    """Feiertag-Namen als Kommentare an den Tag-Zellen."""
+def _feiertag_comments(ws, row, year, month):
     dim = calendar.monthrange(year, month)[1]
     for d in range(1, dim + 1):
         dt = datetime.date(year, month, d)
         if dt in FEIERTAGE:
-            c = ws.cell(row, 1 + d)
-            c.comment = Comment(FEIERTAGE[dt], "Dienstplan",
-                                width=140, height=30)
+            ws.cell(row, 1 + d).comment = Comment(
+                FEIERTAGE[dt], "Dienstplan", width=140, height=30)
 
-
-def _get_ferien_ranges(year, month):
-    """Ferien-Zeiträume innerhalb eines Monats → {name: (start_day, end_day)}."""
+def _ferien_ranges(year, month):
     dim = calendar.monthrange(year, month)[1]
     ranges = {}
     for d in range(1, dim + 1):
@@ -277,9 +383,29 @@ def _get_ferien_ranges(year, month):
                 ranges[fname][1] = d
     return ranges
 
+def _is_special(dt):
+    return _is_weekend(dt) or _is_feiertag(dt)
+
 
 # ---------------------------------------------------------------------------
-# Daten extrahieren
+# Archiv
+# ---------------------------------------------------------------------------
+def archiv_backup(dst_file):
+    """Erstellt ein Backup der bestehenden Datei mit Timestamp."""
+    if not os.path.exists(dst_file):
+        print(f"  Keine bestehende Datei: {dst_file} – kein Backup nötig.")
+        return
+    os.makedirs(ARCHIV_DIR, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = os.path.splitext(os.path.basename(dst_file))[0]
+    backup = os.path.join(ARCHIV_DIR, f"{base}_{ts}.xlsx")
+    shutil.copy2(dst_file, backup)
+    print(f"  Archiv-Backup: {backup}")
+    return backup
+
+
+# ---------------------------------------------------------------------------
+# Daten extrahieren (aus .xlsm)
 # ---------------------------------------------------------------------------
 def extract_data(src):
     print(f"Lese {src} ...")
@@ -338,18 +464,9 @@ def extract_data(src):
 # Eingabe-Sheet
 # ---------------------------------------------------------------------------
 def create_eingabe(ws, emps):
-    """Jahresplan-Sheet – HAUPT-EINGABE mit Dropdowns + Ferien-Labels."""
     print("Erstelle Eingabe-Sheet ...")
-    hdr_fill = _fill(C_HDR_BG)
-    we_fill = _fill(C_WEEKEND)
-    ferien_fill = _fill(C_FERIEN)
-    hdr_font = Font(name="Calibri", size=9, bold=True, color=C_HDR_FG)
-    ca = Alignment(horizontal="center", vertical="center")
-    la = Alignment(horizontal="left", vertical="center")
-
     ws.column_dimensions["A"].width = 14
-    _apply_cell(ws.cell(1, 1), f"Dienstplan {YEAR}",
-                Font(name="Calibri", size=14, bold=True), border=None)
+    _set(ws.cell(1, 1), f"Dienstplan {YEAR}", FONT_TITLE, border=None)
 
     dv = DataValidation(
         type="list", formula1=f'"{",".join(DROPDOWN_SHIFTS)}"',
@@ -362,136 +479,124 @@ def create_eingabe(ws, emps):
     ws.add_data_validation(dv)
 
     layout = LayoutMap()
+    dv_ranges = []
     row = 3
 
     for mi in range(12):
         mn = mi + 1
         dim = calendar.monthrange(YEAR, mn)[1]
+        last_cl = get_column_letter(1 + dim)
         layout.emp_rows[mi] = {}
 
-        # --- Ferien-Balken mit Name ---
-        ferien_ranges = _get_ferien_ranges(YEAR, mn)
-        if ferien_ranges:
-            for fname, (sd, ed) in ferien_ranges.items():
+        # Ferien-Balken
+        fr = _ferien_ranges(YEAR, mn)
+        if fr:
+            for fname, (sd, ed) in fr.items():
                 sc, ec = 1 + sd, 1 + ed
                 if ec > sc:
                     ws.merge_cells(start_row=row, start_column=sc,
                                    end_row=row, end_column=ec)
-                cell = ws.cell(row, sc)
-                cell.value = fname
-                cell.fill = ferien_fill
-                cell.font = Font(name="Calibri", size=7, italic=True, color="006100")
-                cell.alignment = ca
-                cell.border = Border(
-                    left=Side("thin", "006100"), right=Side("thin", "006100"),
-                    top=Side("thin", "006100"), bottom=Side("thin", "006100"))
+                c = ws.cell(row, sc)
+                c.value = fname
+                c.fill = FILL_FERIEN
+                c.font = FONT_FERIEN
+                c.alignment = ALIGN_C
             row += 1
 
-        # Monatsname
-        _apply_cell(ws.cell(row, 1), MONTHS_DE[mi],
-                    Font(name="Calibri", size=11, bold=True), border=None)
+        _set(ws.cell(row, 1), MONTHS_DE[mi], FONT_MONTH, border=None)
         row += 1
 
         # KW
-        _apply_cell(ws.cell(row, 1), "KW",
-                    Font(name="Calibri", size=8, italic=True, color="666666"),
-                    align=ca)
+        _set(ws.cell(row, 1), "KW", FONT_KW, align=ALIGN_C, border=None)
         last_kw = None
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
             kw = _kw(dt)
             c = ws.cell(row, 1 + d)
-            c.alignment = ca
+            c.alignment = ALIGN_C
             c.border = THIN
-            if _is_weekend(dt) or _is_feiertag(dt):
-                c.fill = we_fill
+            if _is_special(dt):
+                c.fill = FILL_WE
             if kw != last_kw:
                 c.value = kw
-                c.font = Font(name="Calibri", size=8, italic=True, color="666666")
+                c.font = FONT_KW
             last_kw = kw
         row += 1
 
         # Tag
         tag_row = row
-        _apply_cell(ws.cell(row, 1), "Tag", hdr_font, hdr_fill, ca)
+        _set(ws.cell(row, 1), "Tag", FONT_HDR, FILL_HDR, ALIGN_C)
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
-            is_sp = _is_weekend(dt) or _is_feiertag(dt)
-            f = we_fill if is_sp else hdr_fill
-            fn = Font(name="Calibri", size=9, bold=True,
-                      color="000000" if is_sp else C_HDR_FG)
-            _apply_cell(ws.cell(row, 1 + d), d, fn, f, ca)
-        _add_feiertag_comments(ws, tag_row, YEAR, mn)
+            sp = _is_special(dt)
+            _set(ws.cell(row, 1 + d), d,
+                 FONT_TAG_SP if sp else FONT_TAG_NR,
+                 FILL_WE if sp else FILL_HDR, ALIGN_C)
+        _feiertag_comments(ws, tag_row, YEAR, mn)
         row += 1
 
         # WT
-        _apply_cell(ws.cell(row, 1), "WT", hdr_font, hdr_fill, ca)
+        _set(ws.cell(row, 1), "WT", FONT_HDR, FILL_HDR, ALIGN_C)
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
-            is_sp = _is_weekend(dt) or _is_feiertag(dt)
-            f = we_fill if is_sp else hdr_fill
-            fn = Font(name="Calibri", size=8,
-                      color="000000" if is_sp else C_HDR_FG)
-            _apply_cell(ws.cell(row, 1 + d), WEEKDAYS_DE[dt.weekday()], fn, f, ca)
+            sp = _is_special(dt)
+            _set(ws.cell(row, 1 + d), WEEKDAYS_DE[dt.weekday()],
+                 FONT_WT_SP if sp else FONT_WT_NR,
+                 FILL_WE if sp else FILL_HDR, ALIGN_C)
         row += 1
 
         # MA-Zeilen
+        first_ma_row = row
         for ei, ed in enumerate(emps):
             layout.emp_rows[mi][ed.name] = row
-            _apply_cell(ws.cell(row, 1), ed.name,
-                        Font(name="Calibri", size=10, bold=True), align=la)
-            zebra = _fill(C_ZEBRA) if ei % 2 == 1 else None
+            _set(ws.cell(row, 1), ed.name, FONT_NAME, align=ALIGN_L)
+            zebra = FILL_ZEBRA if ei % 2 == 1 else None
             for d in range(1, dim + 1):
                 dt = datetime.date(YEAR, mn, d)
                 shift = ed.shifts[mi].get(d)
                 c = ws.cell(row, 1 + d)
-                c.alignment = ca
+                c.alignment = ALIGN_C
                 c.border = THIN
-                dv.add(c)
                 if shift:
                     c.value = shift
-                    sf = _shift_fill(shift)
-                    c.font = _shift_font(shift, 8)
+                    sf, fn = _shift_style(shift)
+                    c.font = fn
                     if sf:
                         c.fill = sf
-                    elif _is_weekend(dt) or _is_feiertag(dt):
-                        c.fill = we_fill
+                    elif _is_special(dt):
+                        c.fill = FILL_WE
                     elif zebra:
                         c.fill = zebra
                 else:
-                    if _is_weekend(dt) or _is_feiertag(dt):
-                        c.fill = we_fill
+                    if _is_special(dt):
+                        c.fill = FILL_WE
                     elif zebra:
                         c.fill = zebra
             row += 1
 
-        # --- Unterbesetzungs-Warnung ---
-        warn_fill = _fill(C_WARN_BG)
-        warn_font = Font(name="Calibri", size=7, bold=True, color=C_WARN_FG)
-        _apply_cell(ws.cell(row, 1), "Besetzung",
-                    Font(name="Calibri", size=8, italic=True, color="999999"),
-                    align=la, border=None)
-        has_warning = False
+        dv_ranges.append(f"B{first_ma_row}:{last_cl}{row - 1}")
+
+        # Unterbesetzungs-Warnung
+        _set(ws.cell(row, 1), "Besetzung", FONT_GRAY8, align=ALIGN_L, border=THIN)
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
             c = ws.cell(row, 1 + d)
-            c.alignment = ca
-            if _is_weekend(dt) or _is_feiertag(dt):
-                c.fill = we_fill
+            c.alignment = ALIGN_C
+            if _is_special(dt):
+                c.fill = FILL_WE
                 continue
-            missing = _get_missing_critical(emps, mi, d)
+            missing = _missing_critical(emps, mi, d)
             if missing:
                 c.value = "!" + "/".join(missing)
-                c.fill = warn_fill
-                c.font = warn_font
-                has_warning = True
-        row += 1
-        row += 1
+                c.fill = FILL_WARN
+                c.font = FONT_WARN
+        row += 2
+
+    dv.sqref = " ".join(dv_ranges)
 
     for d in range(1, 32):
         ws.column_dimensions[get_column_letter(1 + d)].width = 5.5
 
-    # Nur Spalte A einfrieren – kein Monat "angenagelt"
     ws.freeze_panes = "B1"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
@@ -502,315 +607,242 @@ def create_eingabe(ws, emps):
 
 
 # ---------------------------------------------------------------------------
-# Monats-Sheet (druckfertig A4 Landscape)
+# Monats-Sheet
 # ---------------------------------------------------------------------------
 def create_month(wb, mi, emps, layout):
-    """Druckfertiges Monats-Sheet: sauber berahmt, A4-optimiert, Formeln."""
     mn = mi + 1
     name = MONTHS_DE[mi]
     ws = wb.create_sheet(title=name)
     dim = calendar.monthrange(YEAR, mn)[1]
+    last_col = 1 + dim
+    last_cl = get_column_letter(last_col)
 
-    hdr_fill = _fill(C_HDR_BG)
-    we_fill = _fill(C_WEEKEND)
-    hdr_font = Font(name="Calibri", size=9, bold=True, color=C_HDR_FG)
-    cell_font = Font(name="Calibri", size=9)
-    ca = Alignment(horizontal="center", vertical="center")
-    la = Alignment(horizontal="left", vertical="center")
-    last_col = 1 + dim  # letzte Datenspalte
-
-    # --- Spaltenbreiten: Name=13, Tage dynamisch für A4-Füllung ---
     ws.column_dimensions["A"].width = 13
-    day_w = max(3.8, min(5.2, (25.0 * 2.54) / dim))  # ~25cm nutzbar
+    day_w = max(4.0, min(5.2, 63.5 / dim))
     for d in range(1, dim + 1):
         ws.column_dimensions[get_column_letter(1 + d)].width = day_w
 
-    # === Row 1: Titel ===
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=8)
-    _apply_cell(ws.cell(1, 1), f"Dienstplan {name} {YEAR}",
-                Font(name="Calibri", size=14, bold=True), border=None)
-    # Info rechts
-    _apply_cell(ws.cell(1, last_col - 3),
-                f"AT: {_arbeitstage(YEAR, mn)}   Sa: {_samstage(YEAR, mn)}",
-                Font(name="Calibri", size=9, color="666666"), border=None)
+    _set(ws.cell(1, 1), f"Dienstplan {name} {YEAR}", FONT_TITLE, border=None)
+    _set(ws.cell(1, last_col - 3),
+         f"AT: {_arbeitstage(YEAR, mn)}   Sa: {_samstage(YEAR, mn)}",
+         FONT_GRAY_SM, border=None)
 
-    # === Row 2: Ferien-Balken ===
-    ferien_ranges = _get_ferien_ranges(YEAR, mn)
-    for fname, (sd, ed) in ferien_ranges.items():
+    # Row 2: Ferien
+    fr = _ferien_ranges(YEAR, mn)
+    for fname, (sd, ed) in fr.items():
         sc, ec = 1 + sd, 1 + ed
         if ec > sc:
             ws.merge_cells(start_row=2, start_column=sc, end_row=2, end_column=ec)
-        cell = ws.cell(2, sc)
-        cell.value = fname
-        cell.fill = _fill(C_FERIEN)
-        cell.font = Font(name="Calibri", size=7, italic=True, color="006100")
-        cell.alignment = ca
+        c = ws.cell(2, sc)
+        c.value = fname
+        c.fill = FILL_FERIEN
+        c.font = FONT_FERIEN
+        c.alignment = ALIGN_C
 
-    # === DATENTABELLE ab Row 3 ===
     tbl_start = 3
     row = tbl_start
 
-    # Tag-Zeile
+    # Tag
     tag_row = row
-    _apply_cell(ws.cell(row, 1), "Tag", hdr_font, hdr_fill, ca)
+    _set(ws.cell(row, 1), "Tag", FONT_HDR, FILL_HDR, ALIGN_C)
     for d in range(1, dim + 1):
         dt = datetime.date(YEAR, mn, d)
-        is_sp = _is_weekend(dt) or _is_feiertag(dt)
-        f = we_fill if is_sp else hdr_fill
-        fn = Font(name="Calibri", size=9, bold=True,
-                  color="000000" if is_sp else C_HDR_FG)
-        _apply_cell(ws.cell(row, 1 + d), d, fn, f, ca)
-    _add_feiertag_comments(ws, tag_row, YEAR, mn)
+        sp = _is_special(dt)
+        _set(ws.cell(row, 1 + d), d,
+             FONT_TAG_SP if sp else FONT_TAG_NR,
+             FILL_WE if sp else FILL_HDR, ALIGN_C)
+    _feiertag_comments(ws, tag_row, YEAR, mn)
     row += 1
 
-    # Wochentag-Zeile
-    _apply_cell(ws.cell(row, 1), "WT", hdr_font, hdr_fill, ca)
+    # WT
+    _set(ws.cell(row, 1), "WT", FONT_HDR, FILL_HDR, ALIGN_C)
     for d in range(1, dim + 1):
         dt = datetime.date(YEAR, mn, d)
-        is_sp = _is_weekend(dt) or _is_feiertag(dt)
-        f = we_fill if is_sp else hdr_fill
-        fn = Font(name="Calibri", size=8, bold=is_sp,
-                  color="000000" if is_sp else C_HDR_FG)
-        _apply_cell(ws.cell(row, 1 + d), WEEKDAYS_DE[dt.weekday()], fn, f, ca)
+        sp = _is_special(dt)
+        _set(ws.cell(row, 1 + d), WEEKDAYS_DE[dt.weekday()],
+             FONT_WT_SP if sp else FONT_WT_NR,
+             FILL_WE if sp else FILL_HDR, ALIGN_C)
     row += 1
 
-    # KW-Zeile
-    _apply_cell(ws.cell(row, 1), "KW", hdr_font, hdr_fill, ca)
+    # KW
+    _set(ws.cell(row, 1), "KW", FONT_HDR, FILL_HDR, ALIGN_C)
     last_kw = None
     for d in range(1, dim + 1):
         dt = datetime.date(YEAR, mn, d)
         kw = _kw(dt)
         c = ws.cell(row, 1 + d)
-        c.alignment = ca
+        c.alignment = ALIGN_C
         c.border = THIN
-        is_sp = _is_weekend(dt) or _is_feiertag(dt)
-        c.fill = we_fill if is_sp else hdr_fill
+        sp = _is_special(dt)
+        c.fill = FILL_WE if sp else FILL_HDR
         if kw != last_kw:
             c.value = kw
-            c.font = Font(name="Calibri", size=8, italic=True, color=C_HDR_FG)
+            c.font = FONT_KW_W
         last_kw = kw
     row += 1
 
-    # --- MA-Zeilen ---
+    # MA-Zeilen
     regular = [e for e in emps if e.name not in SEKRETARIAT_MA]
     sekr = [e for e in emps if e.name in SEKRETARIAT_MA]
     all_ordered = regular + sekr
     first_sekr_row = None
+    first_data_row = row
 
     for ei, ed in enumerate(all_ordered):
         is_s = ed.name in SEKRETARIAT_MA
         if is_s and first_sekr_row is None:
             first_sekr_row = row
 
-        _apply_cell(ws.cell(row, 1), ed.name,
-                    Font(name="Calibri", size=9, bold=True,
-                         italic=is_s, color="999999" if is_s else "000000"),
-                    align=la)
-        zebra = _fill(C_ZEBRA) if ei % 2 == 1 else None
+        _set(ws.cell(row, 1), ed.name,
+             FONT_SEKR if is_s else FONT_NAME9, align=ALIGN_L)
+        zebra = FILL_ZEBRA if ei % 2 == 1 else None
         src_row = layout.emp_rows[mi].get(ed.name)
 
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
             c = ws.cell(row, 1 + d)
-            c.alignment = ca
+            c.alignment = ALIGN_C
             c.border = THIN
+            c.font = FONT_CELL8
             if src_row:
                 cl = get_column_letter(1 + d)
                 c.value = f'=IF(Dienstplan!{cl}{src_row}="","",Dienstplan!{cl}{src_row})'
-            if _is_weekend(dt) or _is_feiertag(dt):
-                c.fill = we_fill
+            if _is_special(dt):
+                c.fill = FILL_WE
             elif zebra:
                 c.fill = zebra
-            c.font = Font(name="Calibri", size=8)
         row += 1
 
-    # --- Unterbesetzungs-Warnung ---
-    warn_fill = _fill(C_WARN_BG)
-    warn_font = Font(name="Calibri", size=7, bold=True, color=C_WARN_FG)
-    _apply_cell(ws.cell(row, 1), "Besetzung",
-                Font(name="Calibri", size=8, italic=True, color="999999"),
-                align=la)
+    # Unterbesetzung
+    _set(ws.cell(row, 1), "Besetzung", FONT_GRAY8, align=ALIGN_L, border=THIN)
     for d in range(1, dim + 1):
         dt = datetime.date(YEAR, mn, d)
         c = ws.cell(row, 1 + d)
-        c.alignment = ca
+        c.alignment = ALIGN_C
         c.border = THIN
-        if _is_weekend(dt) or _is_feiertag(dt):
-            c.fill = we_fill
+        if _is_special(dt):
+            c.fill = FILL_WE
             continue
-        missing = _get_missing_critical(emps, mi, d)
+        missing = _missing_critical(emps, mi, d)
         if missing:
             c.value = "!" + "/".join(missing)
-            c.fill = warn_fill
-            c.font = warn_font
+            c.fill = FILL_WARN
+            c.font = FONT_WARN
     row += 1
-
     tbl_end = row - 1
 
-    # --- Dicker Außenrand um gesamte Datentabelle ---
-    _apply_outer_border(ws, tbl_start, 1, tbl_end, last_col)
+    _outer_border(ws, tbl_start, 1, tbl_end, last_col)
 
-    # --- Conditional Formatting ---
-    data_range = f"B{tbl_start + 3}:{get_column_letter(last_col)}{tbl_end - 1}"
-    _add_shift_cond_fmt(ws, data_range)
+    data_range = f"B{first_data_row}:{last_cl}{tbl_end - 1}"
+    _add_cond_fmt(ws, data_range)
 
-    # --- Sekretariats-MA verstecken ---
     if first_sekr_row:
         for r in range(first_sekr_row, first_sekr_row + len(sekr)):
             ws.row_dimensions[r].hidden = True
 
-    # =================================================================
-    # LEGENDE (links, berahmt) + UNTERSCHRIFT (rechts, berahmt)
-    # Borders nur auf Anchor-Zellen der Merges, KEIN _apply_outer_border
-    # (das korruptiert merged Zellen)
-    # =================================================================
+    # === LEGENDE + UNTERSCHRIFTEN ===
     row += 1
     leg_start = row
-    leg_font_desc = Font(name="Calibri", size=8)
-    b_thin = Side("thin", C_BORDER)
-    b_med = Side("medium", "000000")
-
-    def _leg_border(top=False, bottom=False, left=False, right=False):
-        """Border mit medium auf gewünschten Außenseiten, thin innen."""
-        return Border(
-            top=b_med if top else b_thin,
-            bottom=b_med if bottom else b_thin,
-            left=b_med if left else b_thin,
-            right=b_med if right else b_thin)
-
-    # --- Legende-Header: merged über ganze Breite ---
     leg_end_col = 14
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=leg_end_col)
-    _apply_cell(ws.cell(row, 1), "Legende",
-                Font(name="Calibri", size=9, bold=True, color=C_HDR_FG),
-                hdr_fill, ca, _leg_border(top=True, left=True, right=True))
+
+    def _lb(top=False, bottom=False, left=False, right=False):
+        return Border(
+            top=MEDIUM_SIDE if top else THIN_SIDE,
+            bottom=MEDIUM_SIDE if bottom else THIN_SIDE,
+            left=MEDIUM_SIDE if left else THIN_SIDE,
+            right=MEDIUM_SIDE if right else THIN_SIDE)
+
+    ws.merge_cells(start_row=row, start_column=1,
+                   end_row=row, end_column=leg_end_col)
+    _set(ws.cell(row, 1), "Legende", FONT_HDR, FILL_HDR, ALIGN_C,
+         _lb(top=True, left=True, right=True))
     row += 1
 
-    # Legende-Einträge (col 1-3 Code, 4-7 Desc | 8-10 Code, 11-14 Desc)
+    def _leg_font(ckey):
+        _, fn = SHIFT_COLORS.get(ckey, (None, None))
+        if fn and fn.color:
+            return Font(name="Calibri", size=8, bold=True, color=fn.color)
+        return FONT_LEG_CODE
+
     n_leg = max(len(LEGEND_LEFT), len(LEGEND_RIGHT))
     for i in range(n_leg):
         r = row + i
-        is_last = (i == n_leg - 1)
 
-        # Linke Hälfte
         if i < len(LEGEND_LEFT):
             code, desc, ckey = LEGEND_LEFT[i]
-            bg, fg = SHIFT_COLORS.get(ckey, (None, None))
+            sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
-            _apply_cell(ws.cell(r, 1), code,
-                        Font(name="Calibri", size=8, bold=True,
-                             color=fg or "000000"),
-                        _fill(bg) if bg else None, la,
-                        _leg_border(left=True, bottom=is_last))
+            _set(ws.cell(r, 1), code, _leg_font(ckey), sf, ALIGN_L, _lb(left=True))
             ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=7)
-            _apply_cell(ws.cell(r, 4), desc, leg_font_desc, align=la,
-                        border=_leg_border(bottom=is_last))
+            _set(ws.cell(r, 4), desc, FONT_LEG_DESC, align=ALIGN_L, border=_lb())
         else:
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
-            _apply_cell(ws.cell(r, 1), "", border=_leg_border(left=True, bottom=is_last))
+            _set(ws.cell(r, 1), "", border=_lb(left=True))
 
-        # Rechte Hälfte
         if i < len(LEGEND_RIGHT):
             code, desc, ckey = LEGEND_RIGHT[i]
-            bg, fg = SHIFT_COLORS.get(ckey, (None, None))
+            sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=10)
-            _apply_cell(ws.cell(r, 8), code,
-                        Font(name="Calibri", size=8, bold=True,
-                             color=fg or "000000"),
-                        _fill(bg) if bg else None, la,
-                        _leg_border(bottom=is_last))
+            _set(ws.cell(r, 8), code, _leg_font(ckey), sf, ALIGN_L, _lb())
             ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=leg_end_col)
-            _apply_cell(ws.cell(r, 11), desc, leg_font_desc, align=la,
-                        border=_leg_border(right=True, bottom=is_last))
+            _set(ws.cell(r, 11), desc, FONT_LEG_DESC, align=ALIGN_L,
+                 border=_lb(right=True))
         else:
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=leg_end_col)
-            _apply_cell(ws.cell(r, 8), "", border=_leg_border(right=True, bottom=is_last))
+            _set(ws.cell(r, 8), "", border=_lb(right=True))
 
-    # WE/Feiertag-Zeile
     we_row = row + n_leg
     ws.merge_cells(start_row=we_row, start_column=1, end_row=we_row, end_column=3)
-    _apply_cell(ws.cell(we_row, 1), "", we_fill,
-                border=_leg_border(left=True, bottom=True))
-    ws.merge_cells(start_row=we_row, start_column=4, end_row=we_row,
-                   end_column=leg_end_col)
-    _apply_cell(ws.cell(we_row, 4), "Wochenende / Feiertag",
-                leg_font_desc, align=la,
-                border=_leg_border(right=True, bottom=True))
+    _set(ws.cell(we_row, 1), "", fill=FILL_WE,
+         border=_lb(left=True, bottom=True))
+    ws.merge_cells(start_row=we_row, start_column=4,
+                   end_row=we_row, end_column=leg_end_col)
+    _set(ws.cell(we_row, 4), "Wochenende / Feiertag", FONT_LEG_DESC,
+         align=ALIGN_L, border=_lb(right=True, bottom=True))
 
-    leg_end_row = we_row
-
-    # === UNTERSCHRIFTEN-BLOCK (rechts, berahmt) ===
+    # Unterschriften
     sig_col = max(last_col - 7, 16)
-    sig_end_col = last_col
-    sig_label = Font(name="Calibri", size=9, bold=True)
-    sig_hint = Font(name="Calibri", size=8, italic=True, color="999999")
+    sig_end = last_col
 
-    # Header
     ws.merge_cells(start_row=leg_start, start_column=sig_col,
-                   end_row=leg_start, end_column=sig_end_col)
-    _apply_cell(ws.cell(leg_start, sig_col), "Unterschriften",
-                Font(name="Calibri", size=9, bold=True, color=C_HDR_FG),
-                hdr_fill, ca,
-                _leg_border(top=True, left=True, right=True))
+                   end_row=leg_start, end_column=sig_end)
+    _set(ws.cell(leg_start, sig_col), "Unterschriften",
+         FONT_HDR, FILL_HDR, ALIGN_C, _lb(top=True, left=True, right=True))
 
-    # Erstellt von:
     r = leg_start + 1
-    ws.merge_cells(start_row=r, start_column=sig_col,
-                   end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "Erstellt von:", sig_label, align=la,
-                border=_leg_border(left=True, right=True))
-
-    # Linie (Unterschrift)
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "Erstellt von:", FONT_SIG_LABEL,
+         align=ALIGN_L, border=_lb(left=True, right=True))
     r += 1
-    ws.merge_cells(start_row=r, start_column=sig_col,
-                   end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "",
-                border=Border(left=b_med, right=b_med, top=b_thin,
-                              bottom=Side("thin", "000000")))
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "",
+         border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
+                       top=THIN_SIDE, bottom=Side("thin", "000000")))
     ws.row_dimensions[r].height = 22
-
-    # Hinweis
     r += 1
-    ws.merge_cells(start_row=r, start_column=sig_col,
-                   end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "Datum / Unterschrift", sig_hint,
-                align=ca, border=_leg_border(left=True, right=True))
-
-    # Leerzeile
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
+         align=ALIGN_C, border=_lb(left=True, right=True))
     r += 1
-    ws.merge_cells(start_row=r, start_column=sig_col,
-                   end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "",
-                border=_leg_border(left=True, right=True))
-
-    # Genehmigt von:
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "", border=_lb(left=True, right=True))
     r += 1
-    ws.merge_cells(start_row=r, start_column=sig_col,
-                   end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "Genehmigt von:", sig_label, align=la,
-                border=_leg_border(left=True, right=True))
-
-    # Linie (Unterschrift)
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "Genehmigt von:", FONT_SIG_LABEL,
+         align=ALIGN_L, border=_lb(left=True, right=True))
     r += 1
-    ws.merge_cells(start_row=r, start_column=sig_col,
-                   end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "",
-                border=Border(left=b_med, right=b_med, top=b_thin,
-                              bottom=Side("thin", "000000")))
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "",
+         border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
+                       top=THIN_SIDE, bottom=Side("thin", "000000")))
     ws.row_dimensions[r].height = 22
-
-    # Hinweis
     r += 1
-    ws.merge_cells(start_row=r, start_column=sig_col,
-                   end_row=r, end_column=sig_end_col)
-    _apply_cell(ws.cell(r, sig_col), "Datum / Unterschrift", sig_hint,
-                align=ca, border=_leg_border(left=True, right=True, bottom=True))
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
+         align=ALIGN_C, border=_lb(left=True, right=True, bottom=True))
 
-    sig_end_row = r
+    last_row = max(we_row, r)
 
-    last_row = max(leg_end_row, sig_end_row)
-
-    # === Druckeinstellungen ===
     ws.freeze_panes = "B6"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
@@ -819,7 +851,7 @@ def create_month(wb, mi, emps, layout):
     ws.page_setup.fitToHeight = 1
     ws.page_margins = PageMargins(left=0.35, right=0.25, top=0.3, bottom=0.25,
                                   header=0.15, footer=0.15)
-    ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
+    ws.print_area = f"A1:{last_cl}{last_row}"
 
 
 # ---------------------------------------------------------------------------
@@ -827,54 +859,41 @@ def create_month(wb, mi, emps, layout):
 # ---------------------------------------------------------------------------
 def create_jahresuebersicht(ws, emps, stypes):
     print("Erstelle Jahresübersicht ...")
-    hdr_fill = _fill(C_HDR_BG)
-    hdr_font = Font(name="Calibri", size=10, bold=True, color=C_HDR_FG)
-    ca = Alignment(horizontal="center", vertical="center")
-    la = Alignment(horizontal="left", vertical="center")
-
     ws.column_dimensions["A"].width = 14
-    _apply_cell(ws.cell(1, 1), f"Jahresübersicht {YEAR}",
-                Font(name="Calibri", size=14, bold=True), border=None)
+    _set(ws.cell(1, 1), f"Jahresübersicht {YEAR}", FONT_TITLE, border=None)
 
     row = 3
-    _apply_cell(ws.cell(row, 1), "Mitarbeiter", hdr_font, hdr_fill, la)
+    _set(ws.cell(row, 1), "Mitarbeiter", FONT_HDR10, FILL_HDR, ALIGN_L)
     for i, st in enumerate(stypes):
-        _apply_cell(ws.cell(row, 2 + i), st, hdr_font, hdr_fill, ca)
+        _set(ws.cell(row, 2 + i), st, FONT_HDR10, FILL_HDR, ALIGN_C)
         ws.column_dimensions[get_column_letter(2 + i)].width = 7
     tc = 2 + len(stypes)
-    _apply_cell(ws.cell(row, tc), "Gesamt", hdr_font, hdr_fill, ca)
+    _set(ws.cell(row, tc), "Gesamt", FONT_HDR10, FILL_HDR, ALIGN_C)
     ws.column_dimensions[get_column_letter(tc)].width = 8
     row += 1
 
     sums = {st: 0 for st in stypes}
     for ei, ed in enumerate(emps):
-        _apply_cell(ws.cell(row, 1), ed.name,
-                    Font(name="Calibri", size=10, bold=True), align=la)
-        zebra = _fill(C_ZEBRA) if ei % 2 == 1 else None
+        _set(ws.cell(row, 1), ed.name, FONT_NAME, align=ALIGN_L)
+        zebra = FILL_ZEBRA if ei % 2 == 1 else None
         total = 0
         for i, st in enumerate(stypes):
             cnt = sum(1 for m in range(12) for _, c in ed.shifts[m].items()
                       if c == st)
-            _apply_cell(ws.cell(row, 2 + i), cnt or "",
-                        Font(name="Calibri", size=10), zebra, ca)
+            _set(ws.cell(row, 2 + i), cnt or "", FONT_CELL10, zebra, ALIGN_C)
             sums[st] += cnt
             total += cnt
-        _apply_cell(ws.cell(row, tc), total,
-                    Font(name="Calibri", size=10, bold=True), zebra, ca)
+        _set(ws.cell(row, tc), total, FONT_BOLD10, zebra, ALIGN_C)
         row += 1
 
-    sf = _fill(C_SUM_BG)
-    _apply_cell(ws.cell(row, 1), "Summe",
-                Font(name="Calibri", size=10, bold=True), sf, la)
+    _set(ws.cell(row, 1), "Summe", FONT_BOLD10, FILL_SUM, ALIGN_L)
     gt = 0
     for i, st in enumerate(stypes):
-        _apply_cell(ws.cell(row, 2 + i), sums[st],
-                    Font(name="Calibri", size=10, bold=True), sf, ca)
+        _set(ws.cell(row, 2 + i), sums[st], FONT_BOLD10, FILL_SUM, ALIGN_C)
         gt += sums[st]
-    _apply_cell(ws.cell(row, tc), gt,
-                Font(name="Calibri", size=10, bold=True), sf, ca)
+    _set(ws.cell(row, tc), gt, FONT_BOLD10, FILL_SUM, ALIGN_C)
 
-    _apply_outer_border(ws, 3, 1, row, tc)
+    _outer_border(ws, 3, 1, row, tc)
     ws.freeze_panes = "B4"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
@@ -885,17 +904,11 @@ def create_jahresuebersicht(ws, emps, stypes):
 # ---------------------------------------------------------------------------
 def create_monatsdetails(ws, emps, stypes, shrs):
     print("Erstelle Monatsdetails ...")
-    hdr_fill = _fill(C_HDR_BG)
-    hdr_font = Font(name="Calibri", size=9, bold=True, color=C_HDR_FG)
-    ca = Alignment(horizontal="center", vertical="center")
-    la = Alignment(horizontal="left", vertical="center")
-
     ws.column_dimensions["A"].width = 14
     for i in range(len(stypes) + 5):
         ws.column_dimensions[get_column_letter(2 + i)].width = 6.5
 
-    _apply_cell(ws.cell(1, 1), f"Monatsdetails {YEAR}",
-                Font(name="Calibri", size=14, bold=True), border=None)
+    _set(ws.cell(1, 1), f"Monatsdetails {YEAR}", FONT_TITLE, border=None)
     row = 3
 
     for mi in range(12):
@@ -903,39 +916,33 @@ def create_monatsdetails(ws, emps, stypes, shrs):
         at = _arbeitstage(YEAR, mn)
         sa = _samstage(YEAR, mn)
 
-        _apply_cell(ws.cell(row, 1), MONTHS_DE[mi],
-                    Font(name="Calibri", size=11, bold=True), border=None)
-        _apply_cell(ws.cell(row, 3), "AT:", border=None)
-        _apply_cell(ws.cell(row, 4), at,
-                    Font(name="Calibri", size=9, bold=True), border=None)
-        _apply_cell(ws.cell(row, 6), "Sa:", border=None)
-        _apply_cell(ws.cell(row, 7), sa,
-                    Font(name="Calibri", size=9, bold=True), border=None)
+        _set(ws.cell(row, 1), MONTHS_DE[mi], FONT_MONTH, border=None)
+        _set(ws.cell(row, 3), "AT:", border=None)
+        _set(ws.cell(row, 4), at, FONT_BOLD9, border=None)
+        _set(ws.cell(row, 6), "Sa:", border=None)
+        _set(ws.cell(row, 7), sa, FONT_BOLD9, border=None)
         row += 1
 
         hdr_row = row
         headers = ["MA"] + stypes + ["Soll", "Ist", "Diff"]
         for i, h in enumerate(headers):
-            _apply_cell(ws.cell(row, 1 + i), h, hdr_font, hdr_fill, ca)
+            _set(ws.cell(row, 1 + i), h, FONT_HDR, FILL_HDR, ALIGN_C)
         row += 1
 
         s_sums = {st: 0 for st in stypes}
         sum_soll = sum_ist = 0.0
 
         for ei, ed in enumerate(emps):
-            _apply_cell(ws.cell(row, 1), ed.name,
-                        Font(name="Calibri", size=9, bold=True), align=la)
-            zebra = _fill(C_ZEBRA) if ei % 2 == 1 else None
+            _set(ws.cell(row, 1), ed.name, FONT_NAME9, align=ALIGN_L)
+            zebra = FILL_ZEBRA if ei % 2 == 1 else None
             for i, st in enumerate(stypes):
                 cnt = sum(1 for _, c in ed.shifts[mi].items() if c == st)
-                _apply_cell(ws.cell(row, 2 + i), cnt or "",
-                            Font(name="Calibri", size=9), zebra, ca)
+                _set(ws.cell(row, 2 + i), cnt or "", FONT_CELL, zebra, ALIGN_C)
                 s_sums[st] += cnt
 
             sc = 2 + len(stypes)
             soll = at * ed.irtaz
-            _apply_cell(ws.cell(row, sc), round(soll, 1),
-                        Font(name="Calibri", size=9), zebra, ca)
+            _set(ws.cell(row, sc), round(soll, 1), FONT_CELL, zebra, ALIGN_C)
             sum_soll += soll
 
             ist = 0.0
@@ -945,29 +952,24 @@ def create_monatsdetails(ws, emps, stypes, shrs):
                     ist += h
                 else:
                     ist += ed.irtaz
-            _apply_cell(ws.cell(row, sc + 1), round(ist, 2),
-                        Font(name="Calibri", size=9), zebra, ca)
+            _set(ws.cell(row, sc + 1), round(ist, 2), FONT_CELL, zebra, ALIGN_C)
             sum_ist += ist
 
             diff = ist - soll
-            _apply_cell(ws.cell(row, sc + 2), round(diff, 2),
-                        Font(name="Calibri", size=9,
-                             color=C_RED if diff < 0 else "008000"), zebra, ca)
+            _set(ws.cell(row, sc + 2), round(diff, 2),
+                 Font(name="Calibri", size=9,
+                      color=C_RED if diff < 0 else "008000"), zebra, ALIGN_C)
             row += 1
 
-        sf = _fill(C_SUM_BG)
-        _apply_cell(ws.cell(row, 1), "Summe",
-                    Font(name="Calibri", size=9, bold=True), sf, la)
+        _set(ws.cell(row, 1), "Summe", FONT_BOLD9, FILL_SUM, ALIGN_L)
         for i, st in enumerate(stypes):
-            _apply_cell(ws.cell(row, 2 + i), s_sums[st],
-                        Font(name="Calibri", size=9, bold=True), sf, ca)
+            _set(ws.cell(row, 2 + i), s_sums[st], FONT_BOLD9, FILL_SUM, ALIGN_C)
         sc = 2 + len(stypes)
         for off, val in enumerate([round(sum_soll, 1), round(sum_ist, 2),
                                     round(sum_ist - sum_soll, 2)]):
-            _apply_cell(ws.cell(row, sc + off), val,
-                        Font(name="Calibri", size=9, bold=True), sf, ca)
+            _set(ws.cell(row, sc + off), val, FONT_BOLD9, FILL_SUM, ALIGN_C)
 
-        _apply_outer_border(ws, hdr_row, 1, row, sc + 2)
+        _outer_border(ws, hdr_row, 1, row, sc + 2)
         row += 2
 
     ws.freeze_panes = "B4"
@@ -979,33 +981,23 @@ def create_monatsdetails(ws, emps, stypes, shrs):
 # Urlaubsübersicht
 # ---------------------------------------------------------------------------
 def create_urlaubsuebersicht(ws, emps):
-    """Jahres-Urlaubsübersicht: U-Tage pro Monat, Gesamt, Resturlaub."""
     print("Erstelle Urlaubsübersicht ...")
-    hdr_fill = _fill(C_HDR_BG)
-    hdr_font = Font(name="Calibri", size=10, bold=True, color=C_HDR_FG)
-    ca = Alignment(horizontal="center", vertical="center")
-    la = Alignment(horizontal="left", vertical="center")
-
     ws.column_dimensions["A"].width = 14
     for i in range(14):
         ws.column_dimensions[get_column_letter(2 + i)].width = 8
 
-    _apply_cell(ws.cell(1, 1), f"Urlaubsübersicht {YEAR}",
-                Font(name="Calibri", size=14, bold=True), border=None)
+    _set(ws.cell(1, 1), f"Urlaubsübersicht {YEAR}", FONT_TITLE, border=None)
 
     row = 3
-    # Header
-    _apply_cell(ws.cell(row, 1), "Mitarbeiter", hdr_font, hdr_fill, la)
+    _set(ws.cell(row, 1), "Mitarbeiter", FONT_HDR10, FILL_HDR, ALIGN_L)
     for i in range(12):
-        _apply_cell(ws.cell(row, 2 + i), MONTHS_DE[i][:3], hdr_font, hdr_fill, ca)
-    gc = 14  # Gesamt-Spalte
-    rc = 15  # Anspruch
-    dc = 16  # Rest
-    _apply_cell(ws.cell(row, gc), "Genommen", hdr_font, hdr_fill, ca)
+        _set(ws.cell(row, 2 + i), MONTHS_DE[i][:3], FONT_HDR10, FILL_HDR, ALIGN_C)
+    gc, rc, dc = 14, 15, 16
+    _set(ws.cell(row, gc), "Genommen", FONT_HDR10, FILL_HDR, ALIGN_C)
     ws.column_dimensions[get_column_letter(gc)].width = 10
-    _apply_cell(ws.cell(row, rc), "Anspruch", hdr_font, hdr_fill, ca)
+    _set(ws.cell(row, rc), "Anspruch", FONT_HDR10, FILL_HDR, ALIGN_C)
     ws.column_dimensions[get_column_letter(rc)].width = 10
-    _apply_cell(ws.cell(row, dc), "Rest", hdr_font, hdr_fill, ca)
+    _set(ws.cell(row, dc), "Rest", FONT_HDR10, FILL_HDR, ALIGN_C)
     ws.column_dimensions[get_column_letter(dc)].width = 8
     row += 1
 
@@ -1013,53 +1005,35 @@ def create_urlaubsuebersicht(ws, emps):
     sum_total = 0
 
     for ei, ed in enumerate(emps):
-        _apply_cell(ws.cell(row, 1), ed.name,
-                    Font(name="Calibri", size=10, bold=True), align=la)
-        zebra = _fill(C_ZEBRA) if ei % 2 == 1 else None
+        _set(ws.cell(row, 1), ed.name, FONT_NAME, align=ALIGN_L)
+        zebra = FILL_ZEBRA if ei % 2 == 1 else None
         total = 0
         for mi in range(12):
             cnt = sum(1 for _, c in ed.shifts[mi].items()
                       if c in ("U", "U    alt"))
-            _apply_cell(ws.cell(row, 2 + mi), cnt or "",
-                        Font(name="Calibri", size=10), zebra, ca)
+            _set(ws.cell(row, 2 + mi), cnt or "", FONT_CELL10, zebra, ALIGN_C)
             total += cnt
             sum_per_month[mi] += cnt
-
-        # Gesamt genommen
-        _apply_cell(ws.cell(row, gc), total,
-                    Font(name="Calibri", size=10, bold=True), zebra, ca)
+        _set(ws.cell(row, gc), total, FONT_BOLD10, zebra, ALIGN_C)
         sum_total += total
-
-        # Anspruch
-        _apply_cell(ws.cell(row, rc), DEFAULT_URLAUB_TAGE,
-                    Font(name="Calibri", size=10), zebra, ca)
-
-        # Rest
+        _set(ws.cell(row, rc), DEFAULT_URLAUB_TAGE, FONT_CELL10, zebra, ALIGN_C)
         rest = DEFAULT_URLAUB_TAGE - total
         color = C_RED if rest < 0 else ("008000" if rest > 5 else C_WARN_FG)
-        _apply_cell(ws.cell(row, dc), rest,
-                    Font(name="Calibri", size=10, bold=True, color=color),
-                    zebra, ca)
+        _set(ws.cell(row, dc), rest,
+             Font(name="Calibri", size=10, bold=True, color=color), zebra, ALIGN_C)
         row += 1
 
-    # Summenzeile
-    sf = _fill(C_SUM_BG)
-    _apply_cell(ws.cell(row, 1), "Summe",
-                Font(name="Calibri", size=10, bold=True), sf, la)
+    _set(ws.cell(row, 1), "Summe", FONT_BOLD10, FILL_SUM, ALIGN_L)
     for mi in range(12):
-        _apply_cell(ws.cell(row, 2 + mi), sum_per_month[mi],
-                    Font(name="Calibri", size=10, bold=True), sf, ca)
-    _apply_cell(ws.cell(row, gc), sum_total,
-                Font(name="Calibri", size=10, bold=True), sf, ca)
+        _set(ws.cell(row, 2 + mi), sum_per_month[mi], FONT_BOLD10, FILL_SUM, ALIGN_C)
+    _set(ws.cell(row, gc), sum_total, FONT_BOLD10, FILL_SUM, ALIGN_C)
 
-    _apply_outer_border(ws, 3, 1, row, dc)
+    _outer_border(ws, 3, 1, row, dc)
 
-    # Hinweis
     row += 2
-    _apply_cell(ws.cell(row, 1),
-                f"Anspruch: {DEFAULT_URLAUB_TAGE} Tage/Jahr (anpassbar in Spalte {get_column_letter(rc)})",
-                Font(name="Calibri", size=8, italic=True, color="666666"),
-                border=None)
+    _set(ws.cell(row, 1),
+         f"Anspruch: {DEFAULT_URLAUB_TAGE} Tage/Jahr (anpassbar in Spalte {get_column_letter(rc)})",
+         Font(name="Calibri", size=8, italic=True, color="666666"), border=None)
 
     ws.freeze_panes = "B4"
     ws.page_setup.orientation = "landscape"
@@ -1070,11 +1044,102 @@ def create_urlaubsuebersicht(ws, emps):
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    parser = argparse.ArgumentParser(description="Dienstplan Excel Generator")
+    parser.add_argument("--year", type=int, default=None,
+                        help="Jahr (default: aktuelles Jahr wenn --leer, sonst 2026)")
+    parser.add_argument("--leer", action="store_true",
+                        help="Leeren Dienstplan erstellen (nur Struktur + Dropdowns)")
+    parser.add_argument("--archiv", action="store_true",
+                        help="Backup des bestehenden Plans erstellen")
+    parser.add_argument("--config-export", action="store_true",
+                        help="MA-Config aus .xlsm exportieren nach mitarbeiter.json")
+    args = parser.parse_args()
+
+    # Jahr bestimmen
+    global YEAR, FEIERTAGE, SCHULFERIEN
+    if args.year:
+        YEAR = args.year
+    elif args.leer:
+        YEAR = datetime.date.today().year + 1
+    else:
+        YEAR = 2026
+
+    # Feiertage + Ferien dynamisch berechnen
+    FEIERTAGE = feiertage_bw(YEAR)
+    SCHULFERIEN = schulferien_bw(YEAR)
+
+    dst_file = os.path.join(BASE_DIR, f"Dienstplan_{YEAR}_neu.xlsx")
+    src_file = os.path.join(BASE_DIR, "Dienstplanübersicht 2026.xlsm")
+
     print("=" * 60)
-    print("Dienstplan Excel Generator")
+    print(f"Dienstplan Excel Generator – {YEAR}")
     print("=" * 60)
 
-    emps, stypes, shrs = extract_data(SRC_FILE)
+    # Feiertage anzeigen
+    print(f"\nFeiertage {YEAR} (BW):")
+    for dt in sorted(FEIERTAGE):
+        print(f"  {dt.strftime('%d.%m.')} {FEIERTAGE[dt]}")
+
+    # Archiv
+    if args.archiv:
+        print("\nArchiv-Backup ...")
+        archiv_backup(dst_file)
+
+    # --- LEERER PLAN ---
+    if args.leer:
+        print(f"\nErstelle LEEREN Dienstplan für {YEAR} ...")
+
+        # MA aus Config oder aus .xlsm
+        config = load_config()
+        stypes_default = DROPDOWN_SHIFTS
+        shrs_default = {}
+        if config:
+            print(f"  MA aus Config: {CONFIG_FILE}")
+            emps = emps_from_config(config)
+        elif os.path.exists(src_file):
+            print(f"  MA aus .xlsm (keine Config gefunden)")
+            emps_full, stypes_default, shrs_default = extract_data(src_file)
+            emps = [Employee(e.name, e.irtaz) for e in emps_full]
+        else:
+            print("  FEHLER: Weder mitarbeiter.json noch .xlsm gefunden!")
+            return
+
+        # Leere Shifts
+        for e in emps:
+            e.shifts = {m: {} for m in range(12)}
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Dienstplan"
+        layout = create_eingabe(ws, emps)
+
+        print("Erstelle 12 Monats-Sheets ...")
+        for mi in range(12):
+            create_month(wb, mi, emps, layout)
+            print(f"  {MONTHS_DE[mi]}")
+
+        create_jahresuebersicht(wb.create_sheet("Jahresübersicht"),
+                                emps, stypes_default)
+        create_monatsdetails(wb.create_sheet("Monatsdetails"),
+                             emps, stypes_default, shrs_default)
+        create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps)
+
+        print(f"\nSpeichere {dst_file} ...")
+        wb.save(dst_file)
+        print(f"Fertig! Leerer Dienstplan {YEAR}: {dst_file}")
+        wb.close()
+        return
+
+    # --- NORMALER MODUS (aus .xlsm lesen) ---
+    if not os.path.exists(src_file):
+        print(f"FEHLER: {src_file} nicht gefunden!")
+        return
+
+    emps, stypes, shrs = extract_data(src_file)
+
+    # Config exportieren wenn gewünscht oder noch nicht vorhanden
+    if args.config_export or not os.path.exists(CONFIG_FILE):
+        save_default_config(emps)
 
     wb = Workbook()
     ws = wb.active
@@ -1090,8 +1155,8 @@ def main():
     create_monatsdetails(wb.create_sheet("Monatsdetails"), emps, stypes, shrs)
     create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps)
 
-    print(f"\nSpeichere {DST_FILE} ...")
-    wb.save(DST_FILE)
+    print(f"\nSpeichere {dst_file} ...")
+    wb.save(dst_file)
     print(f"Fertig! Sheets: {wb.sheetnames}")
     wb.close()
 

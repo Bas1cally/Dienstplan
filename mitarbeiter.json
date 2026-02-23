@@ -1,0 +1,85 @@
+{
+  "mitarbeiter": [
+    {
+      "name": "Breig",
+      "irtaz": 8.0,
+      "urlaub_tage": 30,
+      "sekretariat": false
+    },
+    {
+      "name": "Siebert",
+      "irtaz": 7.0,
+      "urlaub_tage": 30,
+      "sekretariat": false
+    },
+    {
+      "name": "Jochim",
+      "irtaz": 7.0,
+      "urlaub_tage": 30,
+      "sekretariat": false
+    },
+    {
+      "name": "Wunsch",
+      "irtaz": 8.0,
+      "urlaub_tage": 30,
+      "sekretariat": false
+    },
+    {
+      "name": "Göpfrich",
+      "irtaz": 7.0,
+      "urlaub_tage": 30,
+      "sekretariat": false
+    },
+    {
+      "name": "Zeller",
+      "irtaz": 8.0,
+      "urlaub_tage": 30,
+      "sekretariat": false
+    },
+    {
+      "name": "Behrendt",
+      "irtaz": 7.0,
+      "urlaub_tage": 30,
+      "sekretariat": false
+    },
+    {
+      "name": "Krempl",
+      "irtaz": 3.2,
+      "urlaub_tage": 30,
+      "sekretariat": false
+    },
+    {
+      "name": "Putschler",
+      "irtaz": 8.0,
+      "urlaub_tage": 30,
+      "sekretariat": false
+    },
+    {
+      "name": "Kunz",
+      "irtaz": 7.0,
+      "urlaub_tage": 30,
+      "sekretariat": false
+    },
+    {
+      "name": "Schmidt",
+      "irtaz": 3.0,
+      "urlaub_tage": 30,
+      "sekretariat": true
+    },
+    {
+      "name": "Radimersky",
+      "irtaz": 8.0,
+      "urlaub_tage": 30,
+      "sekretariat": true
+    }
+  ],
+  "sekretariat_namen": [
+    "Radimersky",
+    "Schmidt"
+  ],
+  "kritische_schichten": [
+    "FI",
+    "SI",
+    "NI"
+  ]
+}
