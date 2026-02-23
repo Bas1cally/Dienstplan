@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
 """
 Dienstplan Excel Generator
+
+Usage:
+  python3 generate.py                    # Normaler Modus: liest .xlsm, erzeugt gefüllten Plan
+  python3 generate.py --year 2027        # Für anderes Jahr
+  python3 generate.py --leer             # Leerer Plan (nur Struktur + Dropdowns)
+  python3 generate.py --leer --year 2027 # Leerer Plan für 2027
+  python3 generate.py --archiv           # Backup des aktuellen Plans vor Überschreiben
 """
 
+import argparse
 import calendar
 import datetime
+import json
 import os
+import shutil
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
@@ -16,13 +26,11 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.page import PageMargins
 
 # ---------------------------------------------------------------------------
-# Konstanten
+# Pfade
 # ---------------------------------------------------------------------------
-SRC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "Dienstplanübersicht 2026.xlsm")
-DST_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "Dienstplan_2026_neu.xlsx")
-YEAR = 2026
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(BASE_DIR, "mitarbeiter.json")
+ARCHIV_DIR = os.path.join(BASE_DIR, "archiv")
 
 MONTHS_DE = [
     "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -34,34 +42,90 @@ SEKRETARIAT_MA = {"Schmidt", "Radimersky"}
 CRITICAL_SHIFTS = ["FI", "SI", "NI"]
 DEFAULT_URLAUB_TAGE = 30
 
-FEIERTAGE = {
-    datetime.date(2026, 1, 1): "Neujahr",
-    datetime.date(2026, 1, 6): "Hl. 3 Könige",
-    datetime.date(2026, 4, 3): "Karfreitag",
-    datetime.date(2026, 4, 6): "Ostermontag",
-    datetime.date(2026, 5, 1): "Tag d. Arbeit",
-    datetime.date(2026, 5, 14): "Chr. Himmelf.",
-    datetime.date(2026, 5, 25): "Pfingstmontag",
-    datetime.date(2026, 6, 4): "Fronleichnam",
-    datetime.date(2026, 8, 15): "Mariä Himmelf.",
-    datetime.date(2026, 10, 3): "Tag d. Einheit",
-    datetime.date(2026, 11, 1): "Allerheiligen",
-    datetime.date(2026, 12, 25): "1. Weihnacht",
-    datetime.date(2026, 12, 26): "2. Weihnacht",
-}
+# ---------------------------------------------------------------------------
+# Dynamische Feiertage (BW) – funktioniert für jedes Jahr
+# ---------------------------------------------------------------------------
+def _ostersonntag(year):
+    """Gaußsche Osterformel."""
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return datetime.date(year, month, day)
 
-SCHULFERIEN = [
-    ("Weihnachtsferien", datetime.date(2025, 12, 22), datetime.date(2026, 1, 5)),
-    ("Faschingsferien", datetime.date(2026, 2, 16), datetime.date(2026, 2, 20)),
-    ("Osterferien", datetime.date(2026, 4, 2), datetime.date(2026, 4, 11)),
-    ("Pfingstferien", datetime.date(2026, 5, 26), datetime.date(2026, 6, 6)),
-    ("Sommerferien", datetime.date(2026, 7, 30), datetime.date(2026, 9, 12)),
-    ("Herbstferien", datetime.date(2026, 10, 26), datetime.date(2026, 10, 30)),
-    ("Weihnachtsferien", datetime.date(2026, 12, 23), datetime.date(2027, 1, 9)),
-]
+def feiertage_bw(year):
+    """Alle Feiertage in Baden-Württemberg für ein gegebenes Jahr."""
+    ostern = _ostersonntag(year)
+    return {
+        datetime.date(year, 1, 1): "Neujahr",
+        datetime.date(year, 1, 6): "Hl. 3 Könige",
+        ostern - datetime.timedelta(days=2): "Karfreitag",
+        ostern + datetime.timedelta(days=1): "Ostermontag",
+        datetime.date(year, 5, 1): "Tag d. Arbeit",
+        ostern + datetime.timedelta(days=39): "Chr. Himmelf.",
+        ostern + datetime.timedelta(days=50): "Pfingstmontag",
+        ostern + datetime.timedelta(days=60): "Fronleichnam",
+        datetime.date(year, 8, 15): "Mariä Himmelf.",
+        datetime.date(year, 10, 3): "Tag d. Einheit",
+        datetime.date(year, 11, 1): "Allerheiligen",
+        datetime.date(year, 12, 25): "1. Weihnacht",
+        datetime.date(year, 12, 26): "2. Weihnacht",
+    }
+
+def schulferien_bw(year):
+    """Schulferien BW – Schätzung basierend auf typischen Terminen.
+    Für exakte Termine: manuell in der Ausgabe-Datei anpassen."""
+    ostern = _ostersonntag(year)
+    pfingsten = ostern + datetime.timedelta(days=49)
+    return [
+        ("Faschingsferien",
+         _mo_of_week(year, 2, 3),
+         _fr_of_week(year, 2, 3)),
+        ("Osterferien",
+         ostern - datetime.timedelta(days=1),
+         ostern + datetime.timedelta(days=6)),
+        ("Pfingstferien",
+         pfingsten + datetime.timedelta(days=1),
+         pfingsten + datetime.timedelta(days=12)),
+        ("Sommerferien",
+         datetime.date(year, 7, 30),
+         datetime.date(year, 9, 12)),
+        ("Herbstferien",
+         _mo_of_week(year, 10, 4),
+         _fr_of_week(year, 10, 4)),
+        ("Weihnachtsferien",
+         datetime.date(year, 12, 23),
+         datetime.date(year + 1, 1, 6)),
+    ]
+
+def _mo_of_week(year, month, week_num):
+    """Montag der N-ten Woche im Monat."""
+    first = datetime.date(year, month, 1)
+    days_to_monday = (7 - first.weekday()) % 7
+    first_monday = first + datetime.timedelta(days=days_to_monday)
+    return first_monday + datetime.timedelta(weeks=week_num - 1)
+
+def _fr_of_week(year, month, week_num):
+    mo = _mo_of_week(year, month, week_num)
+    return mo + datetime.timedelta(days=4)
+
+# Globale Variablen – werden in main() gesetzt
+YEAR = 2026
+FEIERTAGE = {}
+SCHULFERIEN = []
 
 # ---------------------------------------------------------------------------
-# Vordefinierte Styles (wiederverwendbar, minimiert Style-Duplikate)
+# Styles
 # ---------------------------------------------------------------------------
 C_URLAUB = "92D050"
 C_EH = "66FFFF"
@@ -83,7 +147,6 @@ THIN_SIDE = Side("thin", C_BORDER)
 THIN = Border(left=THIN_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
 MEDIUM_SIDE = Side("medium", "000000")
 
-# Vorberechnete Fills
 FILL_HDR = PatternFill("solid", fgColor=C_HDR_BG)
 FILL_WE = PatternFill("solid", fgColor=C_WEEKEND)
 FILL_ZEBRA = PatternFill("solid", fgColor=C_ZEBRA)
@@ -95,9 +158,7 @@ FILL_EH = PatternFill("solid", fgColor=C_EH)
 FILL_KU = PatternFill("solid", fgColor=C_KU)
 FILL_AUSGLEICH = PatternFill("solid", fgColor=C_AUSGLEICH)
 FILL_YELLOW = PatternFill("solid", fgColor=C_YELLOW)
-NO_FILL = PatternFill(fill_type=None)
 
-# Vorberechnete Fonts
 FONT_TITLE = Font(name="Calibri", size=14, bold=True)
 FONT_HDR = Font(name="Calibri", size=9, bold=True, color=C_HDR_FG)
 FONT_HDR10 = Font(name="Calibri", size=10, bold=True, color=C_HDR_FG)
@@ -163,7 +224,6 @@ DROPDOWN_SHIFTS = [
     "KU", "EH", "SD", "GT", "NST", "KT", "Fobi", "U", "A", "T-ZUG",
 ]
 
-# Conditional-Formatting Regeln (code, fill, font) - IMMER beides angeben!
 CF_RULES = [
     ("U", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
     ("EH", PatternFill("solid", fgColor=C_EH), Font(color=C_RED)),
@@ -174,6 +234,46 @@ CF_RULES = [
     ("GT", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
     ("NST", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
 ]
+
+
+# ---------------------------------------------------------------------------
+# MA-Config
+# ---------------------------------------------------------------------------
+def load_config():
+    """Lade MA-Config aus JSON. Erstellt Default-Config falls nicht vorhanden."""
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+def save_default_config(emps):
+    """Speichert aktuelle MA-Liste als JSON-Config."""
+    config = {
+        "mitarbeiter": [
+            {
+                "name": e.name,
+                "irtaz": e.irtaz,
+                "urlaub_tage": DEFAULT_URLAUB_TAGE,
+                "sekretariat": e.name in SEKRETARIAT_MA,
+            }
+            for e in emps
+        ],
+        "sekretariat_namen": list(SEKRETARIAT_MA),
+        "kritische_schichten": CRITICAL_SHIFTS,
+    }
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+    print(f"  Config gespeichert: {CONFIG_FILE}")
+
+def emps_from_config(config):
+    """Erstellt Employee-Objekte aus Config."""
+    emps = []
+    for m in config["mitarbeiter"]:
+        e = Employee(m["name"], m.get("irtaz", 8.0))
+        emps.append(e)
+    global SEKRETARIAT_MA
+    SEKRETARIAT_MA = set(config.get("sekretariat_namen", []))
+    return emps
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +316,6 @@ def _kw(dt):
     return dt.isocalendar()[1]
 
 def _shift_style(code):
-    """Gibt (fill, font) für einen Schichtcode zurück."""
     c = str(code).strip() if code else ""
     if c in SHIFT_COLORS:
         sf, fn = SHIFT_COLORS[c]
@@ -239,7 +338,6 @@ def _set(cell, value=None, font=None, fill=None, align=None, border=THIN):
     return cell
 
 def _outer_border(ws, r1, c1, r2, c2):
-    """Dicker Außenrand. NUR auf Bereiche OHNE merged cells verwenden!"""
     for r in range(r1, r2 + 1):
         for c in range(c1, c2 + 1):
             left = MEDIUM_SIDE if c == c1 else THIN_SIDE
@@ -250,7 +348,6 @@ def _outer_border(ws, r1, c1, r2, c2):
                                           top=top, bottom=bottom)
 
 def _add_cond_fmt(ws, cell_range):
-    """Conditional Formatting – immer fill UND font (verhindert dxf-Korruption)."""
     for code, fill, font in CF_RULES:
         ws.conditional_formatting.add(
             cell_range,
@@ -291,7 +388,24 @@ def _is_special(dt):
 
 
 # ---------------------------------------------------------------------------
-# Daten extrahieren
+# Archiv
+# ---------------------------------------------------------------------------
+def archiv_backup(dst_file):
+    """Erstellt ein Backup der bestehenden Datei mit Timestamp."""
+    if not os.path.exists(dst_file):
+        print(f"  Keine bestehende Datei: {dst_file} – kein Backup nötig.")
+        return
+    os.makedirs(ARCHIV_DIR, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = os.path.splitext(os.path.basename(dst_file))[0]
+    backup = os.path.join(ARCHIV_DIR, f"{base}_{ts}.xlsx")
+    shutil.copy2(dst_file, backup)
+    print(f"  Archiv-Backup: {backup}")
+    return backup
+
+
+# ---------------------------------------------------------------------------
+# Daten extrahieren (aus .xlsm)
 # ---------------------------------------------------------------------------
 def extract_data(src):
     print(f"Lese {src} ...")
@@ -354,7 +468,6 @@ def create_eingabe(ws, emps):
     ws.column_dimensions["A"].width = 14
     _set(ws.cell(1, 1), f"Dienstplan {YEAR}", FONT_TITLE, border=None)
 
-    # Data Validation – wird am Ende als RANGE hinzugefügt (nicht pro Zelle!)
     dv = DataValidation(
         type="list", formula1=f'"{",".join(DROPDOWN_SHIFTS)}"',
         allow_blank=True, showDropDown=False, showErrorMessage=True,
@@ -366,7 +479,7 @@ def create_eingabe(ws, emps):
     ws.add_data_validation(dv)
 
     layout = LayoutMap()
-    dv_ranges = []  # Sammle Ranges für DV
+    dv_ranges = []
     row = 3
 
     for mi in range(12):
@@ -390,7 +503,6 @@ def create_eingabe(ws, emps):
                 c.alignment = ALIGN_C
             row += 1
 
-        # Monatsname
         _set(ws.cell(row, 1), MONTHS_DE[mi], FONT_MONTH, border=None)
         row += 1
 
@@ -462,7 +574,6 @@ def create_eingabe(ws, emps):
                         c.fill = zebra
             row += 1
 
-        # DV-Range für diesen Monat (alle MA-Zeilen, Spalte B bis letzte)
         dv_ranges.append(f"B{first_ma_row}:{last_cl}{row - 1}")
 
         # Unterbesetzungs-Warnung
@@ -481,7 +592,6 @@ def create_eingabe(ws, emps):
                 c.font = FONT_WARN
         row += 2
 
-    # DV als Ranges statt Einzelzellen
     dv.sqref = " ".join(dv_ranges)
 
     for d in range(1, 32):
@@ -507,13 +617,11 @@ def create_month(wb, mi, emps, layout):
     last_col = 1 + dim
     last_cl = get_column_letter(last_col)
 
-    # Spaltenbreiten
     ws.column_dimensions["A"].width = 13
     day_w = max(4.0, min(5.2, 63.5 / dim))
     for d in range(1, dim + 1):
         ws.column_dimensions[get_column_letter(1 + d)].width = day_w
 
-    # Row 1: Titel (KEIN merge – vermeidet Probleme)
     _set(ws.cell(1, 1), f"Dienstplan {name} {YEAR}", FONT_TITLE, border=None)
     _set(ws.cell(1, last_col - 3),
          f"AT: {_arbeitstage(YEAR, mn)}   Sa: {_samstage(YEAR, mn)}",
@@ -531,7 +639,6 @@ def create_month(wb, mi, emps, layout):
         c.font = FONT_FERIEN
         c.alignment = ALIGN_C
 
-    # === DATENTABELLE (ab Row 3, KEINE merges → _outer_border sicher) ===
     tbl_start = 3
     row = tbl_start
 
@@ -624,21 +731,16 @@ def create_month(wb, mi, emps, layout):
     row += 1
     tbl_end = row - 1
 
-    # Dicker Außenrand (Datentabelle hat KEINE merges → sicher)
     _outer_border(ws, tbl_start, 1, tbl_end, last_col)
 
-    # Conditional Formatting
     data_range = f"B{first_data_row}:{last_cl}{tbl_end - 1}"
     _add_cond_fmt(ws, data_range)
 
-    # Sekretariat verstecken
     if first_sekr_row:
         for r in range(first_sekr_row, first_sekr_row + len(sekr)):
             ws.row_dimensions[r].hidden = True
 
-    # =================================================================
-    # LEGENDE + UNTERSCHRIFTEN (nur merges innerhalb, kein _outer_border)
-    # =================================================================
+    # === LEGENDE + UNTERSCHRIFTEN ===
     row += 1
     leg_start = row
     leg_end_col = 14
@@ -650,7 +752,6 @@ def create_month(wb, mi, emps, layout):
             left=MEDIUM_SIDE if left else THIN_SIDE,
             right=MEDIUM_SIDE if right else THIN_SIDE)
 
-    # Legende Header
     ws.merge_cells(start_row=row, start_column=1,
                    end_row=row, end_column=leg_end_col)
     _set(ws.cell(row, 1), "Legende", FONT_HDR, FILL_HDR, ALIGN_C,
@@ -658,7 +759,6 @@ def create_month(wb, mi, emps, layout):
     row += 1
 
     def _leg_font(ckey):
-        """Font für Legenden-Code: rot wenn Schicht rot ist, sonst schwarz."""
         _, fn = SHIFT_COLORS.get(ckey, (None, None))
         if fn and fn.color:
             return Font(name="Calibri", size=8, bold=True, color=fn.color)
@@ -667,14 +767,12 @@ def create_month(wb, mi, emps, layout):
     n_leg = max(len(LEGEND_LEFT), len(LEGEND_RIGHT))
     for i in range(n_leg):
         r = row + i
-        last = (i == n_leg - 1)
 
         if i < len(LEGEND_LEFT):
             code, desc, ckey = LEGEND_LEFT[i]
             sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
-            _set(ws.cell(r, 1), code, _leg_font(ckey),
-                 sf, ALIGN_L, _lb(left=True))
+            _set(ws.cell(r, 1), code, _leg_font(ckey), sf, ALIGN_L, _lb(left=True))
             ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=7)
             _set(ws.cell(r, 4), desc, FONT_LEG_DESC, align=ALIGN_L, border=_lb())
         else:
@@ -685,8 +783,7 @@ def create_month(wb, mi, emps, layout):
             code, desc, ckey = LEGEND_RIGHT[i]
             sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=10)
-            _set(ws.cell(r, 8), code, _leg_font(ckey),
-                 sf, ALIGN_L, _lb())
+            _set(ws.cell(r, 8), code, _leg_font(ckey), sf, ALIGN_L, _lb())
             ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=leg_end_col)
             _set(ws.cell(r, 11), desc, FONT_LEG_DESC, align=ALIGN_L,
                  border=_lb(right=True))
@@ -694,7 +791,6 @@ def create_month(wb, mi, emps, layout):
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=leg_end_col)
             _set(ws.cell(r, 8), "", border=_lb(right=True))
 
-    # WE/Feiertag
     we_row = row + n_leg
     ws.merge_cells(start_row=we_row, start_column=1, end_row=we_row, end_column=3)
     _set(ws.cell(we_row, 1), "", fill=FILL_WE,
@@ -704,58 +800,49 @@ def create_month(wb, mi, emps, layout):
     _set(ws.cell(we_row, 4), "Wochenende / Feiertag", FONT_LEG_DESC,
          align=ALIGN_L, border=_lb(right=True, bottom=True))
 
-    # === Unterschriften-Block ===
+    # Unterschriften
     sig_col = max(last_col - 7, 16)
     sig_end = last_col
 
-    # Header
     ws.merge_cells(start_row=leg_start, start_column=sig_col,
                    end_row=leg_start, end_column=sig_end)
     _set(ws.cell(leg_start, sig_col), "Unterschriften",
          FONT_HDR, FILL_HDR, ALIGN_C, _lb(top=True, left=True, right=True))
 
     r = leg_start + 1
-    # Erstellt von
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Erstellt von:", FONT_SIG_LABEL,
          align=ALIGN_L, border=_lb(left=True, right=True))
     r += 1
-    # Linie
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "",
          border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
                        top=THIN_SIDE, bottom=Side("thin", "000000")))
     ws.row_dimensions[r].height = 22
     r += 1
-    # Hinweis
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
          align=ALIGN_C, border=_lb(left=True, right=True))
     r += 1
-    # Leer
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "", border=_lb(left=True, right=True))
     r += 1
-    # Genehmigt von
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Genehmigt von:", FONT_SIG_LABEL,
          align=ALIGN_L, border=_lb(left=True, right=True))
     r += 1
-    # Linie
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "",
          border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
                        top=THIN_SIDE, bottom=Side("thin", "000000")))
     ws.row_dimensions[r].height = 22
     r += 1
-    # Hinweis
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
          align=ALIGN_C, border=_lb(left=True, right=True, bottom=True))
 
     last_row = max(we_row, r)
 
-    # Druckeinstellungen
     ws.freeze_panes = "B6"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
@@ -957,11 +1044,102 @@ def create_urlaubsuebersicht(ws, emps):
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    parser = argparse.ArgumentParser(description="Dienstplan Excel Generator")
+    parser.add_argument("--year", type=int, default=None,
+                        help="Jahr (default: aktuelles Jahr wenn --leer, sonst 2026)")
+    parser.add_argument("--leer", action="store_true",
+                        help="Leeren Dienstplan erstellen (nur Struktur + Dropdowns)")
+    parser.add_argument("--archiv", action="store_true",
+                        help="Backup des bestehenden Plans erstellen")
+    parser.add_argument("--config-export", action="store_true",
+                        help="MA-Config aus .xlsm exportieren nach mitarbeiter.json")
+    args = parser.parse_args()
+
+    # Jahr bestimmen
+    global YEAR, FEIERTAGE, SCHULFERIEN
+    if args.year:
+        YEAR = args.year
+    elif args.leer:
+        YEAR = datetime.date.today().year + 1
+    else:
+        YEAR = 2026
+
+    # Feiertage + Ferien dynamisch berechnen
+    FEIERTAGE = feiertage_bw(YEAR)
+    SCHULFERIEN = schulferien_bw(YEAR)
+
+    dst_file = os.path.join(BASE_DIR, f"Dienstplan_{YEAR}_neu.xlsx")
+    src_file = os.path.join(BASE_DIR, "Dienstplanübersicht 2026.xlsm")
+
     print("=" * 60)
-    print("Dienstplan Excel Generator")
+    print(f"Dienstplan Excel Generator – {YEAR}")
     print("=" * 60)
 
-    emps, stypes, shrs = extract_data(SRC_FILE)
+    # Feiertage anzeigen
+    print(f"\nFeiertage {YEAR} (BW):")
+    for dt in sorted(FEIERTAGE):
+        print(f"  {dt.strftime('%d.%m.')} {FEIERTAGE[dt]}")
+
+    # Archiv
+    if args.archiv:
+        print("\nArchiv-Backup ...")
+        archiv_backup(dst_file)
+
+    # --- LEERER PLAN ---
+    if args.leer:
+        print(f"\nErstelle LEEREN Dienstplan für {YEAR} ...")
+
+        # MA aus Config oder aus .xlsm
+        config = load_config()
+        stypes_default = DROPDOWN_SHIFTS
+        shrs_default = {}
+        if config:
+            print(f"  MA aus Config: {CONFIG_FILE}")
+            emps = emps_from_config(config)
+        elif os.path.exists(src_file):
+            print(f"  MA aus .xlsm (keine Config gefunden)")
+            emps_full, stypes_default, shrs_default = extract_data(src_file)
+            emps = [Employee(e.name, e.irtaz) for e in emps_full]
+        else:
+            print("  FEHLER: Weder mitarbeiter.json noch .xlsm gefunden!")
+            return
+
+        # Leere Shifts
+        for e in emps:
+            e.shifts = {m: {} for m in range(12)}
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Dienstplan"
+        layout = create_eingabe(ws, emps)
+
+        print("Erstelle 12 Monats-Sheets ...")
+        for mi in range(12):
+            create_month(wb, mi, emps, layout)
+            print(f"  {MONTHS_DE[mi]}")
+
+        create_jahresuebersicht(wb.create_sheet("Jahresübersicht"),
+                                emps, stypes_default)
+        create_monatsdetails(wb.create_sheet("Monatsdetails"),
+                             emps, stypes_default, shrs_default)
+        create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps)
+
+        print(f"\nSpeichere {dst_file} ...")
+        wb.save(dst_file)
+        print(f"Fertig! Leerer Dienstplan {YEAR}: {dst_file}")
+        wb.close()
+        return
+
+    # --- NORMALER MODUS (aus .xlsm lesen) ---
+    if not os.path.exists(src_file):
+        print(f"FEHLER: {src_file} nicht gefunden!")
+        return
+
+    emps, stypes, shrs = extract_data(src_file)
+
+    # Config exportieren wenn gewünscht oder noch nicht vorhanden
+    if args.config_export or not os.path.exists(CONFIG_FILE):
+        save_default_config(emps)
 
     wb = Workbook()
     ws = wb.active
@@ -977,8 +1155,8 @@ def main():
     create_monatsdetails(wb.create_sheet("Monatsdetails"), emps, stypes, shrs)
     create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps)
 
-    print(f"\nSpeichere {DST_FILE} ...")
-    wb.save(DST_FILE)
+    print(f"\nSpeichere {dst_file} ...")
+    wb.save(dst_file)
     print(f"Fertig! Sheets: {wb.sheetnames}")
     wb.close()
 
