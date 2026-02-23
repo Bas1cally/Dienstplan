@@ -505,7 +505,7 @@ def create_eingabe(ws, emps):
 # Monats-Sheet (druckfertig A4 Landscape)
 # ---------------------------------------------------------------------------
 def create_month(wb, mi, emps, layout):
-    """Druckfertiges Monats-Sheet: kompakt, A4-optimiert, Formeln."""
+    """Druckfertiges Monats-Sheet: sauber berahmt, A4-optimiert, Formeln."""
     mn = mi + 1
     name = MONTHS_DE[mi]
     ws = wb.create_sheet(title=name)
@@ -513,24 +513,28 @@ def create_month(wb, mi, emps, layout):
 
     hdr_fill = _fill(C_HDR_BG)
     we_fill = _fill(C_WEEKEND)
-    hdr_font = Font(name="Calibri", size=8, bold=True, color=C_HDR_FG)
+    hdr_font = Font(name="Calibri", size=9, bold=True, color=C_HDR_FG)
+    cell_font = Font(name="Calibri", size=9)
     ca = Alignment(horizontal="center", vertical="center")
     la = Alignment(horizontal="left", vertical="center")
+    last_col = 1 + dim  # letzte Datenspalte
 
-    # Spaltenbreiten: A=11 für Namen, Tage=4.3 für A4-Fit
-    ws.column_dimensions["A"].width = 11
+    # --- Spaltenbreiten: Name=13, Tage dynamisch für A4-Füllung ---
+    ws.column_dimensions["A"].width = 13
+    day_w = max(3.8, min(5.2, (25.0 * 2.54) / dim))  # ~25cm nutzbar
     for d in range(1, dim + 1):
-        ws.column_dimensions[get_column_letter(1 + d)].width = 4.3
+        ws.column_dimensions[get_column_letter(1 + d)].width = day_w
 
-    # --- Row 1: Titel + Info ---
+    # === Row 1: Titel ===
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=8)
     _apply_cell(ws.cell(1, 1), f"Dienstplan {name} {YEAR}",
-                Font(name="Calibri", size=12, bold=True), border=None)
-    info_col = max(dim // 2, 10)
-    _apply_cell(ws.cell(1, info_col),
-                f"AT: {_arbeitstage(YEAR, mn)}  |  Sa: {_samstage(YEAR, mn)}",
-                Font(name="Calibri", size=8, color="666666"), border=None)
+                Font(name="Calibri", size=14, bold=True), border=None)
+    # Info rechts
+    _apply_cell(ws.cell(1, last_col - 3),
+                f"AT: {_arbeitstage(YEAR, mn)}   Sa: {_samstage(YEAR, mn)}",
+                Font(name="Calibri", size=9, color="666666"), border=None)
 
-    # --- Row 2: Ferien-Balken ---
+    # === Row 2: Ferien-Balken ===
     ferien_ranges = _get_ferien_ranges(YEAR, mn)
     for fname, (sd, ed) in ferien_ranges.items():
         sc, ec = 1 + sd, 1 + ed
@@ -539,38 +543,38 @@ def create_month(wb, mi, emps, layout):
         cell = ws.cell(2, sc)
         cell.value = fname
         cell.fill = _fill(C_FERIEN)
-        cell.font = Font(name="Calibri", size=6, italic=True, color="006100")
+        cell.font = Font(name="Calibri", size=7, italic=True, color="006100")
         cell.alignment = ca
 
     # === DATENTABELLE ab Row 3 ===
     tbl_start = 3
     row = tbl_start
 
-    # Tag (Row 3)
+    # Tag-Zeile
     tag_row = row
     _apply_cell(ws.cell(row, 1), "Tag", hdr_font, hdr_fill, ca)
     for d in range(1, dim + 1):
         dt = datetime.date(YEAR, mn, d)
         is_sp = _is_weekend(dt) or _is_feiertag(dt)
         f = we_fill if is_sp else hdr_fill
-        fn = Font(name="Calibri", size=8, bold=True,
+        fn = Font(name="Calibri", size=9, bold=True,
                   color="000000" if is_sp else C_HDR_FG)
         _apply_cell(ws.cell(row, 1 + d), d, fn, f, ca)
     _add_feiertag_comments(ws, tag_row, YEAR, mn)
     row += 1
 
-    # WT (Row 4)
+    # Wochentag-Zeile
     _apply_cell(ws.cell(row, 1), "WT", hdr_font, hdr_fill, ca)
     for d in range(1, dim + 1):
         dt = datetime.date(YEAR, mn, d)
         is_sp = _is_weekend(dt) or _is_feiertag(dt)
         f = we_fill if is_sp else hdr_fill
-        fn = Font(name="Calibri", size=7,
+        fn = Font(name="Calibri", size=8, bold=is_sp,
                   color="000000" if is_sp else C_HDR_FG)
         _apply_cell(ws.cell(row, 1 + d), WEEKDAYS_DE[dt.weekday()], fn, f, ca)
     row += 1
 
-    # KW (Row 5)
+    # KW-Zeile
     _apply_cell(ws.cell(row, 1), "KW", hdr_font, hdr_fill, ca)
     last_kw = None
     for d in range(1, dim + 1):
@@ -583,11 +587,11 @@ def create_month(wb, mi, emps, layout):
         c.fill = we_fill if is_sp else hdr_fill
         if kw != last_kw:
             c.value = kw
-            c.font = Font(name="Calibri", size=7, italic=True, color=C_HDR_FG)
+            c.font = Font(name="Calibri", size=8, italic=True, color=C_HDR_FG)
         last_kw = kw
     row += 1
 
-    # --- MA-Zeilen mit Formeln aus Eingabe-Sheet ---
+    # --- MA-Zeilen ---
     regular = [e for e in emps if e.name not in SEKRETARIAT_MA]
     sekr = [e for e in emps if e.name in SEKRETARIAT_MA]
     all_ordered = regular + sekr
@@ -599,7 +603,7 @@ def create_month(wb, mi, emps, layout):
             first_sekr_row = row
 
         _apply_cell(ws.cell(row, 1), ed.name,
-                    Font(name="Calibri", size=8, bold=True,
+                    Font(name="Calibri", size=9, bold=True,
                          italic=is_s, color="999999" if is_s else "000000"),
                     align=la)
         zebra = _fill(C_ZEBRA) if ei % 2 == 1 else None
@@ -617,15 +621,15 @@ def create_month(wb, mi, emps, layout):
                 c.fill = we_fill
             elif zebra:
                 c.fill = zebra
-            c.font = Font(name="Calibri", size=7)
+            c.font = Font(name="Calibri", size=8)
         row += 1
 
     # --- Unterbesetzungs-Warnung ---
     warn_fill = _fill(C_WARN_BG)
-    warn_font = Font(name="Calibri", size=6, bold=True, color=C_WARN_FG)
+    warn_font = Font(name="Calibri", size=7, bold=True, color=C_WARN_FG)
     _apply_cell(ws.cell(row, 1), "Besetzung",
-                Font(name="Calibri", size=7, italic=True, color="999999"),
-                align=la, border=None)
+                Font(name="Calibri", size=8, italic=True, color="999999"),
+                align=la)
     for d in range(1, dim + 1):
         dt = datetime.date(YEAR, mn, d)
         c = ws.cell(row, 1 + d)
@@ -643,11 +647,11 @@ def create_month(wb, mi, emps, layout):
 
     tbl_end = row - 1
 
-    # --- Dicker Außenrand ---
-    _apply_outer_border(ws, tbl_start, 1, tbl_end, 1 + dim)
+    # --- Dicker Außenrand um gesamte Datentabelle ---
+    _apply_outer_border(ws, tbl_start, 1, tbl_end, last_col)
 
-    # --- Conditional Formatting für Schichtfarben ---
-    data_range = f"B{tbl_start + 3}:{get_column_letter(1 + dim)}{tbl_end - 1}"
+    # --- Conditional Formatting ---
+    data_range = f"B{tbl_start + 3}:{get_column_letter(last_col)}{tbl_end - 1}"
     _add_shift_cond_fmt(ws, data_range)
 
     # --- Sekretariats-MA verstecken ---
@@ -656,89 +660,146 @@ def create_month(wb, mi, emps, layout):
             ws.row_dimensions[r].hidden = True
 
     # =================================================================
-    # LEGENDE (links) + UNTERSCHRIFT (rechts) – auf gleicher Höhe
+    # LEGENDE (links, berahmt) + UNTERSCHRIFT (rechts, berahmt)
     # =================================================================
     row += 1
     leg_start = row
+    leg_font_code = Font(name="Calibri", size=8, bold=True)
+    leg_font_desc = Font(name="Calibri", size=8)
+    leg_border = Border(
+        left=Side("thin", C_BORDER), right=Side("thin", C_BORDER),
+        top=Side("thin", C_BORDER), bottom=Side("thin", C_BORDER))
 
-    _apply_cell(ws.cell(row, 1), "Legende:",
-                Font(name="Calibri", size=8, bold=True), border=None)
+    # --- Legende-Header: merged über ganze Breite ---
+    leg_end_col = 14  # Legende geht von Spalte 1 bis 14
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=leg_end_col)
+    _apply_cell(ws.cell(row, 1), "Legende",
+                Font(name="Calibri", size=9, bold=True, color=C_HDR_FG),
+                hdr_fill, ca, leg_border)
+    row += 1
 
-    # Linke Spalte: A:C Code, D:F Beschreibung
-    for i, (code, desc, ckey) in enumerate(LEGEND_LEFT):
-        r = leg_start + 1 + i
-        bg, fg = SHIFT_COLORS.get(ckey, (None, None))
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
-        _apply_cell(ws.cell(r, 1), code,
-                    Font(name="Calibri", size=7, bold=True, color=fg or "000000"),
-                    _fill(bg) if bg else None, la, border=None)
-        ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=6)
-        _apply_cell(ws.cell(r, 4), desc,
-                    Font(name="Calibri", size=7), border=None, align=la)
+    # Linke Spalte (col 1-3 Code, 4-7 Beschreibung)
+    n_leg = max(len(LEGEND_LEFT), len(LEGEND_RIGHT))
+    for i in range(n_leg):
+        r = row + i
+        # Linke Hälfte
+        if i < len(LEGEND_LEFT):
+            code, desc, ckey = LEGEND_LEFT[i]
+            bg, fg = SHIFT_COLORS.get(ckey, (None, None))
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
+            _apply_cell(ws.cell(r, 1), code,
+                        Font(name="Calibri", size=8, bold=True,
+                             color=fg or "000000"),
+                        _fill(bg) if bg else None, la, leg_border)
+            ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=7)
+            _apply_cell(ws.cell(r, 4), desc, leg_font_desc, align=la,
+                        border=leg_border)
+        else:
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
+            _apply_cell(ws.cell(r, 1), "", border=leg_border)
 
-    # Rechte Spalte: H:J Code, K:N Beschreibung
-    for i, (code, desc, ckey) in enumerate(LEGEND_RIGHT):
-        r = leg_start + 1 + i
-        bg, fg = SHIFT_COLORS.get(ckey, (None, None))
-        ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=10)
-        _apply_cell(ws.cell(r, 8), code,
-                    Font(name="Calibri", size=7, bold=True, color=fg or "000000"),
-                    _fill(bg) if bg else None, la, border=None)
-        ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=14)
-        _apply_cell(ws.cell(r, 11), desc,
-                    Font(name="Calibri", size=7), border=None, align=la)
+        # Rechte Hälfte
+        if i < len(LEGEND_RIGHT):
+            code, desc, ckey = LEGEND_RIGHT[i]
+            bg, fg = SHIFT_COLORS.get(ckey, (None, None))
+            ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=10)
+            _apply_cell(ws.cell(r, 8), code,
+                        Font(name="Calibri", size=8, bold=True,
+                             color=fg or "000000"),
+                        _fill(bg) if bg else None, la, leg_border)
+            ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=leg_end_col)
+            _apply_cell(ws.cell(r, 11), desc, leg_font_desc, align=la,
+                        border=leg_border)
+        else:
+            ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=leg_end_col)
+            _apply_cell(ws.cell(r, 8), "", border=leg_border)
 
-    # Wochenende/Feiertag
-    we_row = leg_start + 1 + max(len(LEGEND_LEFT), len(LEGEND_RIGHT))
-    _apply_cell(ws.cell(we_row, 1), "", border=THIN, fill=we_fill)
-    ws.merge_cells(start_row=we_row, start_column=2, end_row=we_row, end_column=6)
-    _apply_cell(ws.cell(we_row, 2), "Wochenende / Feiertag",
-                Font(name="Calibri", size=7), border=None)
+    # WE/Feiertag-Zeile
+    we_row = row + n_leg
+    ws.merge_cells(start_row=we_row, start_column=1, end_row=we_row, end_column=3)
+    _apply_cell(ws.cell(we_row, 1), "", we_fill, border=leg_border)
+    ws.merge_cells(start_row=we_row, start_column=4, end_row=we_row,
+                   end_column=leg_end_col)
+    _apply_cell(ws.cell(we_row, 4), "Wochenende / Feiertag",
+                leg_font_desc, align=la, border=leg_border)
 
-    # --- Unterschrift rechts neben Legende ---
-    sig_col = max(dim - 5, 16)
-    sig_font = Font(name="Calibri", size=9)
-    sig_line = Border(bottom=Side("thin", "000000"))
-    sig_small = Font(name="Calibri", size=7, italic=True, color="999999")
+    leg_end_row = we_row
+    # Dicker Außenrand um Legende
+    _apply_outer_border(ws, leg_start, 1, leg_end_row, leg_end_col)
+
+    # === UNTERSCHRIFTEN-BLOCK (rechts, berahmt) ===
+    sig_col = max(last_col - 7, 16)   # 8 Spalten breit
+    sig_end_col = last_col
+    sig_font = Font(name="Calibri", size=10)
+    sig_label = Font(name="Calibri", size=9, bold=True)
+    sig_hint = Font(name="Calibri", size=8, italic=True, color="999999")
+
+    # Header
+    ws.merge_cells(start_row=leg_start, start_column=sig_col,
+                   end_row=leg_start, end_column=sig_end_col)
+    _apply_cell(ws.cell(leg_start, sig_col), "Unterschriften",
+                Font(name="Calibri", size=9, bold=True, color=C_HDR_FG),
+                hdr_fill, ca)
 
     # Erstellt von:
-    ws.merge_cells(start_row=leg_start + 1, start_column=sig_col,
-                   end_row=leg_start + 1, end_column=sig_col + 1)
-    _apply_cell(ws.cell(leg_start + 1, sig_col), "Erstellt von:",
-                sig_font, border=None, align=la)
-    ws.merge_cells(start_row=leg_start + 2, start_column=sig_col,
-                   end_row=leg_start + 2, end_column=sig_col + 5)
-    _apply_cell(ws.cell(leg_start + 2, sig_col), "", border=sig_line, align=ca)
-    ws.merge_cells(start_row=leg_start + 3, start_column=sig_col,
-                   end_row=leg_start + 3, end_column=sig_col + 5)
-    _apply_cell(ws.cell(leg_start + 3, sig_col), "Datum / Unterschrift",
-                sig_small, border=None, align=ca)
+    r = leg_start + 1
+    ws.merge_cells(start_row=r, start_column=sig_col,
+                   end_row=r, end_column=sig_end_col)
+    _apply_cell(ws.cell(r, sig_col), "Erstellt von:", sig_label, align=la)
+
+    # Linie
+    r += 1
+    ws.merge_cells(start_row=r, start_column=sig_col,
+                   end_row=r, end_column=sig_end_col)
+    _apply_cell(ws.cell(r, sig_col), "", border=Border(
+        bottom=Side("thin", "000000")))
+    ws.row_dimensions[r].height = 22
+
+    # Hinweis
+    r += 1
+    ws.merge_cells(start_row=r, start_column=sig_col,
+                   end_row=r, end_column=sig_end_col)
+    _apply_cell(ws.cell(r, sig_col), "Datum / Unterschrift", sig_hint, align=ca)
+
+    # Leerzeile
+    r += 1
 
     # Genehmigt von:
-    ws.merge_cells(start_row=leg_start + 5, start_column=sig_col,
-                   end_row=leg_start + 5, end_column=sig_col + 1)
-    _apply_cell(ws.cell(leg_start + 5, sig_col), "Genehmigt von:",
-                sig_font, border=None, align=la)
-    ws.merge_cells(start_row=leg_start + 6, start_column=sig_col,
-                   end_row=leg_start + 6, end_column=sig_col + 5)
-    _apply_cell(ws.cell(leg_start + 6, sig_col), "", border=sig_line, align=ca)
-    ws.merge_cells(start_row=leg_start + 7, start_column=sig_col,
-                   end_row=leg_start + 7, end_column=sig_col + 5)
-    _apply_cell(ws.cell(leg_start + 7, sig_col), "Datum / Unterschrift",
-                sig_small, border=None, align=ca)
+    r += 1
+    ws.merge_cells(start_row=r, start_column=sig_col,
+                   end_row=r, end_column=sig_end_col)
+    _apply_cell(ws.cell(r, sig_col), "Genehmigt von:", sig_label, align=la)
 
-    last_row = max(we_row, leg_start + 8)
+    # Linie
+    r += 1
+    ws.merge_cells(start_row=r, start_column=sig_col,
+                   end_row=r, end_column=sig_end_col)
+    _apply_cell(ws.cell(r, sig_col), "", border=Border(
+        bottom=Side("thin", "000000")))
+    ws.row_dimensions[r].height = 22
 
-    # --- Druckeinstellungen: kompakt auf A4 ---
+    # Hinweis
+    r += 1
+    ws.merge_cells(start_row=r, start_column=sig_col,
+                   end_row=r, end_column=sig_end_col)
+    _apply_cell(ws.cell(r, sig_col), "Datum / Unterschrift", sig_hint, align=ca)
+
+    sig_end_row = r
+    # Dicker Außenrand um Unterschriften-Block
+    _apply_outer_border(ws, leg_start, sig_col, sig_end_row, sig_end_col)
+
+    last_row = max(leg_end_row, sig_end_row)
+
+    # === Druckeinstellungen ===
     ws.freeze_panes = "B6"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 1
-    ws.page_margins = PageMargins(left=0.4, right=0.3, top=0.35, bottom=0.3,
+    ws.page_margins = PageMargins(left=0.35, right=0.25, top=0.3, bottom=0.25,
                                   header=0.15, footer=0.15)
-    ws.print_area = f"A1:{get_column_letter(1 + dim)}{last_row}"
+    ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
 
 
 # ---------------------------------------------------------------------------
