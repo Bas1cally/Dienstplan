@@ -355,12 +355,15 @@ def _add_cond_fmt(ws, cell_range):
                        fill=fill, font=font, stopIfTrue=True))
 
 def _missing_critical(emps, mi, day):
+    dt = datetime.date(YEAR, mi + 1, day)
+    # Freitags keine Nachtschicht (NI) nötig
+    check = [s for s in CRITICAL_SHIFTS if not (s == "NI" and dt.weekday() == 4)]
     assigned = set()
     for e in emps:
         s = e.shifts[mi].get(day)
-        if s and s in CRITICAL_SHIFTS:
+        if s and s in check:
             assigned.add(s)
-    return [s for s in CRITICAL_SHIFTS if s not in assigned]
+    return [s for s in check if s not in assigned]
 
 def _feiertag_comments(ws, row, year, month):
     dim = calendar.monthrange(year, month)[1]
@@ -594,9 +597,12 @@ def create_eingabe(ws, emps):
                 continue
             missing = _missing_critical(emps, mi, d)
             if missing:
-                c.value = "!" + "/".join(missing)
+                c.value = "!"
                 c.fill = FILL_WARN
                 c.font = FONT_WARN
+                c.comment = Comment(
+                    f"Fehlt: {', '.join(missing)}", "Dienstplan",
+                    width=120, height=25)
         ws.row_dimensions[row].height = 15
 
         # Medium-Rahmen um den gesamten Monatsblock
@@ -663,6 +669,7 @@ def create_month(wb, mi, emps, layout):
              FONT_TAG_SP if sp else FONT_TAG_NR,
              FILL_WE if sp else FILL_HDR, ALIGN_C)
     _feiertag_comments(ws, tag_row, YEAR, mn)
+    ws.row_dimensions[row].height = 18
     row += 1
 
     # WT
@@ -673,6 +680,7 @@ def create_month(wb, mi, emps, layout):
         _set(ws.cell(row, 1 + d), WEEKDAYS_DE[dt.weekday()],
              FONT_WT_SP if sp else FONT_WT_NR,
              FILL_WE if sp else FILL_HDR, ALIGN_C)
+    ws.row_dimensions[row].height = 18
     row += 1
 
     # KW
@@ -690,6 +698,7 @@ def create_month(wb, mi, emps, layout):
             c.value = kw
             c.font = FONT_KW_W
         last_kw = kw
+    ws.row_dimensions[row].height = 15
     row += 1
 
     # MA-Zeilen
@@ -722,6 +731,7 @@ def create_month(wb, mi, emps, layout):
                 c.fill = FILL_WE
             elif zebra:
                 c.fill = zebra
+        ws.row_dimensions[row].height = 16
         row += 1
 
     # Unterbesetzung
@@ -736,9 +746,13 @@ def create_month(wb, mi, emps, layout):
             continue
         missing = _missing_critical(emps, mi, d)
         if missing:
-            c.value = "!" + "/".join(missing)
+            c.value = "!"
             c.fill = FILL_WARN
             c.font = FONT_WARN
+            c.comment = Comment(
+                f"Fehlt: {', '.join(missing)}", "Dienstplan",
+                width=120, height=25)
+    ws.row_dimensions[row].height = 15
     row += 1
     tbl_end = row - 1
 
@@ -755,6 +769,8 @@ def create_month(wb, mi, emps, layout):
     row += 1
     leg_start = row
     leg_end_col = 14
+    sig_col = 16
+    sig_end = min(sig_col + 8, last_col)
 
     def _lb(top=False, bottom=False, left=False, right=False):
         return Border(
@@ -763,10 +779,18 @@ def create_month(wb, mi, emps, layout):
             left=MEDIUM_SIDE if left else THIN_SIDE,
             right=MEDIUM_SIDE if right else THIN_SIDE)
 
+    # --- Legende Header ---
     ws.merge_cells(start_row=row, start_column=1,
                    end_row=row, end_column=leg_end_col)
     _set(ws.cell(row, 1), "Legende", FONT_HDR, FILL_HDR, ALIGN_C,
          _lb(top=True, left=True, right=True))
+    ws.row_dimensions[row].height = 18
+
+    # --- Unterschriften Header (gleiche Zeile) ---
+    ws.merge_cells(start_row=row, start_column=sig_col,
+                   end_row=row, end_column=sig_end)
+    _set(ws.cell(row, sig_col), "Unterschriften",
+         FONT_HDR, FILL_HDR, ALIGN_C, _lb(top=True, left=True, right=True))
     row += 1
 
     def _leg_font(ckey):
@@ -778,6 +802,7 @@ def create_month(wb, mi, emps, layout):
     n_leg = max(len(LEGEND_LEFT), len(LEGEND_RIGHT))
     for i in range(n_leg):
         r = row + i
+        ws.row_dimensions[r].height = 16
 
         if i < len(LEGEND_LEFT):
             code, desc, ckey = LEGEND_LEFT[i]
@@ -802,6 +827,7 @@ def create_month(wb, mi, emps, layout):
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=leg_end_col)
             _set(ws.cell(r, 8), "", border=_lb(right=True))
 
+    # WE-Zeile am Ende der Legende
     we_row = row + n_leg
     ws.merge_cells(start_row=we_row, start_column=1, end_row=we_row, end_column=3)
     _set(ws.cell(we_row, 1), "", fill=FILL_WE,
@@ -810,47 +836,56 @@ def create_month(wb, mi, emps, layout):
                    end_row=we_row, end_column=leg_end_col)
     _set(ws.cell(we_row, 4), "Wochenende / Feiertag", FONT_LEG_DESC,
          align=ALIGN_L, border=_lb(right=True, bottom=True))
+    ws.row_dimensions[we_row].height = 16
 
-    # Unterschriften
-    sig_col = max(last_col - 7, 16)
-    sig_end = last_col
-
-    ws.merge_cells(start_row=leg_start, start_column=sig_col,
-                   end_row=leg_start, end_column=sig_end)
-    _set(ws.cell(leg_start, sig_col), "Unterschriften",
-         FONT_HDR, FILL_HDR, ALIGN_C, _lb(top=True, left=True, right=True))
-
+    # --- Unterschriften-Block (rechts neben Legende) ---
+    # Erstellt von
     r = leg_start + 1
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Erstellt von:", FONT_SIG_LABEL,
          align=ALIGN_L, border=_lb(left=True, right=True))
+    ws.row_dimensions[r].height = 16
     r += 1
-    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+
+    # Unterschrift-Linie 1
+    ws.merge_cells(start_row=r, start_column=sig_col,
+                   end_row=r + 1, end_column=sig_end)
     _set(ws.cell(r, sig_col), "",
-         border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
-                       top=THIN_SIDE, bottom=Side("thin", "000000")))
-    ws.row_dimensions[r].height = 22
-    r += 1
+         border=_lb(left=True, right=True))
+    ws.row_dimensions[r].height = 28
+    r += 2
+
+    # Datum/Unterschrift Hinweis
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
-         align=ALIGN_C, border=_lb(left=True, right=True))
+         align=ALIGN_C,
+         border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
+                       top=Side("thin", "000000"), bottom=THIN_SIDE))
+    ws.row_dimensions[r].height = 14
     r += 1
-    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
-    _set(ws.cell(r, sig_col), "", border=_lb(left=True, right=True))
-    r += 1
+
+    # Genehmigt von
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Genehmigt von:", FONT_SIG_LABEL,
          align=ALIGN_L, border=_lb(left=True, right=True))
+    ws.row_dimensions[r].height = 16
     r += 1
-    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+
+    # Unterschrift-Linie 2
+    ws.merge_cells(start_row=r, start_column=sig_col,
+                   end_row=r + 1, end_column=sig_end)
     _set(ws.cell(r, sig_col), "",
-         border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
-                       top=THIN_SIDE, bottom=Side("thin", "000000")))
-    ws.row_dimensions[r].height = 22
-    r += 1
+         border=_lb(left=True, right=True))
+    ws.row_dimensions[r].height = 28
+    r += 2
+
+    # Datum/Unterschrift Hinweis 2
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
-         align=ALIGN_C, border=_lb(left=True, right=True, bottom=True))
+         align=ALIGN_C,
+         border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
+                       top=Side("thin", "000000"), bottom=MEDIUM_SIDE))
+    ws.row_dimensions[r].height = 14
 
     last_row = max(we_row, r)
 
