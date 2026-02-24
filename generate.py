@@ -18,6 +18,7 @@ import os
 import shutil
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import Cell
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -346,6 +347,28 @@ def _outer_border(ws, r1, c1, r2, c2):
             bottom = MEDIUM_SIDE if r == r2 else THIN_SIDE
             ws.cell(r, c).border = Border(left=left, right=right,
                                           top=top, bottom=bottom)
+
+BLK_THIN = Side("thin", "000000")
+
+def _force_border(ws, r, c, border):
+    """Border auf eine Zelle setzen, auch wenn sie in einem Merge liegt."""
+    key = (r, c)
+    if key not in ws._cells:
+        ws._cells[key] = Cell(ws, row=r, column=c)
+    ws._cells[key].border = border
+
+def _box_border(ws, r1, c1, r2, c2):
+    """Medium box border – setzt Ränder direkt auf ALLE Rand-Zellen (auch Merged)."""
+    for r in range(r1, r2 + 1):
+        for c in range(c1, c2 + 1):
+            if not (r == r1 or r == r2 or c == c1 or c == c2):
+                continue
+            left = MEDIUM_SIDE if c == c1 else BLK_THIN
+            right = MEDIUM_SIDE if c == c2 else BLK_THIN
+            top = MEDIUM_SIDE if r == r1 else BLK_THIN
+            bottom = MEDIUM_SIDE if r == r2 else BLK_THIN
+            _force_border(ws, r, c, Border(left=left, right=right,
+                                           top=top, bottom=bottom))
 
 def _add_cond_fmt(ws, cell_range):
     for code, fill, font in CF_RULES:
@@ -771,26 +794,19 @@ def create_month(wb, mi, emps, layout):
     leg_end_col = 14
     sig_col = 16
     sig_end = min(sig_col + 8, last_col)
-
-    def _lb(top=False, bottom=False, left=False, right=False):
-        return Border(
-            top=MEDIUM_SIDE if top else THIN_SIDE,
-            bottom=MEDIUM_SIDE if bottom else THIN_SIDE,
-            left=MEDIUM_SIDE if left else THIN_SIDE,
-            right=MEDIUM_SIDE if right else THIN_SIDE)
+    BT = Border(left=BLK_THIN, right=BLK_THIN, top=BLK_THIN, bottom=BLK_THIN)
 
     # --- Legende Header ---
     ws.merge_cells(start_row=row, start_column=1,
                    end_row=row, end_column=leg_end_col)
-    _set(ws.cell(row, 1), "Legende", FONT_HDR, FILL_HDR, ALIGN_C,
-         _lb(top=True, left=True, right=True))
+    _set(ws.cell(row, 1), "Legende", FONT_HDR, FILL_HDR, ALIGN_C, BT)
     ws.row_dimensions[row].height = 18
 
     # --- Unterschriften Header (gleiche Zeile) ---
     ws.merge_cells(start_row=row, start_column=sig_col,
                    end_row=row, end_column=sig_end)
     _set(ws.cell(row, sig_col), "Unterschriften",
-         FONT_HDR, FILL_HDR, ALIGN_C, _lb(top=True, left=True, right=True))
+         FONT_HDR, FILL_HDR, ALIGN_C, BT)
     row += 1
 
     def _leg_font(ckey):
@@ -808,86 +824,91 @@ def create_month(wb, mi, emps, layout):
             code, desc, ckey = LEGEND_LEFT[i]
             sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
-            _set(ws.cell(r, 1), code, _leg_font(ckey), sf, ALIGN_L, _lb(left=True))
+            _set(ws.cell(r, 1), code, _leg_font(ckey), sf, ALIGN_L, BT)
             ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=7)
-            _set(ws.cell(r, 4), desc, FONT_LEG_DESC, align=ALIGN_L, border=_lb())
+            _set(ws.cell(r, 4), desc, FONT_LEG_DESC, align=ALIGN_L, border=BT)
         else:
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
-            _set(ws.cell(r, 1), "", border=_lb(left=True))
+            _set(ws.cell(r, 1), "", border=BT)
 
         if i < len(LEGEND_RIGHT):
             code, desc, ckey = LEGEND_RIGHT[i]
             sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=10)
-            _set(ws.cell(r, 8), code, _leg_font(ckey), sf, ALIGN_L, _lb())
+            _set(ws.cell(r, 8), code, _leg_font(ckey), sf, ALIGN_L, BT)
             ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=leg_end_col)
-            _set(ws.cell(r, 11), desc, FONT_LEG_DESC, align=ALIGN_L,
-                 border=_lb(right=True))
+            _set(ws.cell(r, 11), desc, FONT_LEG_DESC, align=ALIGN_L, border=BT)
         else:
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=leg_end_col)
-            _set(ws.cell(r, 8), "", border=_lb(right=True))
+            _set(ws.cell(r, 8), "", border=BT)
 
     # WE-Zeile am Ende der Legende
     we_row = row + n_leg
     ws.merge_cells(start_row=we_row, start_column=1, end_row=we_row, end_column=3)
-    _set(ws.cell(we_row, 1), "", fill=FILL_WE,
-         border=_lb(left=True, bottom=True))
+    _set(ws.cell(we_row, 1), "", fill=FILL_WE, border=BT)
     ws.merge_cells(start_row=we_row, start_column=4,
                    end_row=we_row, end_column=leg_end_col)
     _set(ws.cell(we_row, 4), "Wochenende / Feiertag", FONT_LEG_DESC,
-         align=ALIGN_L, border=_lb(right=True, bottom=True))
+         align=ALIGN_L, border=BT)
     ws.row_dimensions[we_row].height = 16
 
-    # --- Unterschriften-Block (rechts neben Legende) ---
-    # Erstellt von
+    # Box-Border Legende (medium auf ALLE Rand-Zellen inkl. Merged)
+    _box_border(ws, leg_start, 1, we_row, leg_end_col)
+
+    # --- Unterschriften-Block ---
     r = leg_start + 1
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Erstellt von:", FONT_SIG_LABEL,
-         align=ALIGN_L, border=_lb(left=True, right=True))
-    ws.row_dimensions[r].height = 16
+         align=ALIGN_L, border=BT)
+    ws.row_dimensions[r].height = 18
     r += 1
 
-    # Unterschrift-Linie 1
-    ws.merge_cells(start_row=r, start_column=sig_col,
-                   end_row=r + 1, end_column=sig_end)
-    _set(ws.cell(r, sig_col), "",
-         border=_lb(left=True, right=True))
-    ws.row_dimensions[r].height = 28
-    r += 2
+    # Unterschrift-Linie 1 (leer, zum Unterschreiben)
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "", border=BT)
+    ws.row_dimensions[r].height = 30
+    r += 1
 
     # Datum/Unterschrift Hinweis
+    SIG_LINE = Border(left=BLK_THIN, right=BLK_THIN,
+                      top=Side("thin", "000000"), bottom=BLK_THIN)
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
-         align=ALIGN_C,
-         border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
-                       top=Side("thin", "000000"), bottom=THIN_SIDE))
+         align=ALIGN_C, border=SIG_LINE)
     ws.row_dimensions[r].height = 14
+    r += 1
+
+    # Leerzeile
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "", border=BT)
+    ws.row_dimensions[r].height = 8
     r += 1
 
     # Genehmigt von
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Genehmigt von:", FONT_SIG_LABEL,
-         align=ALIGN_L, border=_lb(left=True, right=True))
-    ws.row_dimensions[r].height = 16
+         align=ALIGN_L, border=BT)
+    ws.row_dimensions[r].height = 18
     r += 1
 
     # Unterschrift-Linie 2
-    ws.merge_cells(start_row=r, start_column=sig_col,
-                   end_row=r + 1, end_column=sig_end)
-    _set(ws.cell(r, sig_col), "",
-         border=_lb(left=True, right=True))
-    ws.row_dimensions[r].height = 28
-    r += 2
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "", border=BT)
+    ws.row_dimensions[r].height = 30
+    r += 1
 
     # Datum/Unterschrift Hinweis 2
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
-         align=ALIGN_C,
-         border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
-                       top=Side("thin", "000000"), bottom=MEDIUM_SIDE))
+         align=ALIGN_C, border=SIG_LINE)
     ws.row_dimensions[r].height = 14
 
-    last_row = max(we_row, r)
+    sig_end_row = r
+
+    # Box-Border Unterschriften (medium auf ALLE Rand-Zellen inkl. Merged)
+    _box_border(ws, leg_start, sig_col, sig_end_row, sig_end)
+
+    last_row = max(we_row, sig_end_row)
 
     ws.freeze_panes = "B6"
     ws.page_setup.orientation = "landscape"
