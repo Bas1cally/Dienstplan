@@ -227,10 +227,12 @@ DROPDOWN_SHIFTS = [
 
 CF_RULES = [
     ("U", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
+    ("U    alt", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
     ("EH", PatternFill("solid", fgColor=C_EH), Font(color=C_RED)),
     ("KU", PatternFill("solid", fgColor=C_KU), Font(color="000000")),
     ("A", PatternFill("solid", fgColor=C_AUSGLEICH), Font(color="000000")),
     ("T-ZUG", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
+    ("T-ZG", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
     ("Fobi", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
     ("GT", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
     ("NST", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
@@ -394,7 +396,7 @@ def _feiertag_comments(ws, row, year, month):
         dt = datetime.date(year, month, d)
         if dt in FEIERTAGE:
             ws.cell(row, 1 + d).comment = Comment(
-                FEIERTAGE[dt], "Dienstplan", width=140, height=30)
+                FEIERTAGE[dt], "Emanuel Siebert", width=140, height=30)
 
 def _ferien_ranges(year, month):
     dim = calendar.monthrange(year, month)[1]
@@ -576,7 +578,7 @@ def create_eingabe(ws, emps):
         ws.row_dimensions[row].height = 18
         row += 1
 
-        # MA-Zeilen
+        # MA-Zeilen (keine statischen Shift-Fills – CF macht das dynamisch)
         first_ma_row = row
         for ei, ed in enumerate(emps):
             layout.emp_rows[mi][ed.name] = row
@@ -588,25 +590,19 @@ def create_eingabe(ws, emps):
                 c = ws.cell(row, 1 + d)
                 c.alignment = ALIGN_C
                 c.border = THIN
+                c.font = FONT_CELL8
                 if shift:
                     c.value = shift
-                    sf, fn = _shift_style(shift)
-                    c.font = fn
-                    if sf:
-                        c.fill = sf
-                    elif _is_special(dt):
-                        c.fill = FILL_WE
-                    elif zebra:
-                        c.fill = zebra
-                else:
-                    if _is_special(dt):
-                        c.fill = FILL_WE
-                    elif zebra:
-                        c.fill = zebra
+                if _is_special(dt):
+                    c.fill = FILL_WE
+                elif zebra:
+                    c.fill = zebra
             ws.row_dimensions[row].height = 16
             row += 1
 
-        dv_ranges.append(f"B{first_ma_row}:{last_cl}{row - 1}")
+        data_range = f"B{first_ma_row}:{last_cl}{row - 1}"
+        dv_ranges.append(data_range)
+        _add_cond_fmt(ws, data_range)
 
         # Unterbesetzungs-Warnung
         _set(ws.cell(row, 1), "Besetzung", FONT_GRAY8, align=ALIGN_L, border=THIN)
@@ -624,7 +620,7 @@ def create_eingabe(ws, emps):
                 c.fill = FILL_WARN
                 c.font = FONT_WARN
                 c.comment = Comment(
-                    f"Fehlt: {', '.join(missing)}", "Dienstplan",
+                    f"Fehlt: {', '.join(missing)}", "Emanuel Siebert",
                     width=120, height=25)
         ws.row_dimensions[row].height = 15
 
@@ -1053,7 +1049,7 @@ def create_monatsdetails(ws, emps, stypes, shrs):
 # ---------------------------------------------------------------------------
 # Urlaubsübersicht
 # ---------------------------------------------------------------------------
-def create_urlaubsuebersicht(ws, emps):
+def create_urlaubsuebersicht(ws, emps, layout):
     print("Erstelle Urlaubsübersicht ...")
     ws.column_dimensions["A"].width = 14
     for i in range(14):
@@ -1075,40 +1071,77 @@ def create_urlaubsuebersicht(ws, emps):
     ws.row_dimensions[row].height = 20
     row += 1
 
-    sum_per_month = [0] * 12
-    sum_total = 0
+    first_data_row = row
+    gc_cl = get_column_letter(gc)
+    rc_cl = get_column_letter(rc)
+    dc_cl = get_column_letter(dc)
 
     for ei, ed in enumerate(emps):
         _set(ws.cell(row, 1), ed.name, FONT_NAME, align=ALIGN_L)
         zebra = FILL_ZEBRA if ei % 2 == 1 else None
-        total = 0
+
         for mi in range(12):
-            cnt = sum(1 for _, c in ed.shifts[mi].items()
-                      if c in ("U", "U    alt"))
-            _set(ws.cell(row, 2 + mi), cnt or "", FONT_CELL10, zebra, ALIGN_C)
-            total += cnt
-            sum_per_month[mi] += cnt
-        _set(ws.cell(row, gc), total, FONT_BOLD10, zebra, ALIGN_C)
-        sum_total += total
+            mn = mi + 1
+            dim = calendar.monthrange(YEAR, mn)[1]
+            emp_row = layout.emp_rows[mi].get(ed.name)
+            cl = get_column_letter(2 + mi)
+            if emp_row:
+                last_cl = get_column_letter(1 + dim)
+                rng = f"Dienstplan!B{emp_row}:{last_cl}{emp_row}"
+                formula = f'=COUNTIF({rng},"U")+COUNTIF({rng},"U    alt")'
+                _set(ws.cell(row, 2 + mi), formula, FONT_CELL10, zebra, ALIGN_C)
+            else:
+                _set(ws.cell(row, 2 + mi), 0, FONT_CELL10, zebra, ALIGN_C)
+
+        # Genommen = Summe aller Monate
+        _set(ws.cell(row, gc), f"=SUM(B{row}:M{row})", FONT_BOLD10, zebra, ALIGN_C)
+        # Anspruch
         _set(ws.cell(row, rc), DEFAULT_URLAUB_TAGE, FONT_CELL10, zebra, ALIGN_C)
-        rest = DEFAULT_URLAUB_TAGE - total
-        color = C_RED if rest < 0 else ("008000" if rest > 5 else C_WARN_FG)
-        _set(ws.cell(row, dc), rest,
-             Font(name="Calibri", size=10, bold=True, color=color), zebra, ALIGN_C)
+        # Rest = Anspruch - Genommen (mit bedingter Farbformatierung)
+        _set(ws.cell(row, dc), f"={rc_cl}{row}-{gc_cl}{row}",
+             FONT_BOLD10, zebra, ALIGN_C)
         ws.row_dimensions[row].height = 18
         row += 1
 
+    # Summe-Zeile
+    last_data_row = row - 1
     _set(ws.cell(row, 1), "Summe", FONT_BOLD10, FILL_SUM, ALIGN_L)
     for mi in range(12):
-        _set(ws.cell(row, 2 + mi), sum_per_month[mi], FONT_BOLD10, FILL_SUM, ALIGN_C)
-    _set(ws.cell(row, gc), sum_total, FONT_BOLD10, FILL_SUM, ALIGN_C)
+        cl = get_column_letter(2 + mi)
+        _set(ws.cell(row, 2 + mi),
+             f"=SUM({cl}{first_data_row}:{cl}{last_data_row})",
+             FONT_BOLD10, FILL_SUM, ALIGN_C)
+    _set(ws.cell(row, gc),
+         f"=SUM({gc_cl}{first_data_row}:{gc_cl}{last_data_row})",
+         FONT_BOLD10, FILL_SUM, ALIGN_C)
     ws.row_dimensions[row].height = 18
 
     _outer_border(ws, 3, 1, row, dc)
 
+    # CF für Rest-Spalte: Rot wenn < 0, Orange wenn <= 5, Grün wenn > 5
+    rest_range = f"{dc_cl}{first_data_row}:{dc_cl}{last_data_row}"
+    ws.conditional_formatting.add(
+        rest_range,
+        CellIsRule(operator="lessThan", formula=["0"],
+                   fill=PatternFill("solid", fgColor=C_WARN_BG),
+                   font=Font(color=C_RED, bold=True),
+                   stopIfTrue=True))
+    ws.conditional_formatting.add(
+        rest_range,
+        CellIsRule(operator="lessThanOrEqual", formula=["5"],
+                   fill=PatternFill("solid", fgColor=C_YELLOW),
+                   font=Font(color=C_WARN_FG, bold=True),
+                   stopIfTrue=True))
+    ws.conditional_formatting.add(
+        rest_range,
+        CellIsRule(operator="greaterThan", formula=["5"],
+                   fill=PatternFill("solid", fgColor=C_URLAUB),
+                   font=Font(color="008000", bold=True),
+                   stopIfTrue=True))
+
     row += 2
     _set(ws.cell(row, 1),
-         f"Anspruch: {DEFAULT_URLAUB_TAGE} Tage/Jahr (anpassbar in Spalte {get_column_letter(rc)})",
+         f"Anspruch: {DEFAULT_URLAUB_TAGE} Tage/Jahr (anpassbar in Spalte {rc_cl})",
          Font(name="Calibri", size=8, italic=True, color="666666"), border=None)
 
     ws.freeze_panes = "B4"
@@ -1198,7 +1231,7 @@ def main():
                                 emps, stypes_default)
         create_monatsdetails(wb.create_sheet("Monatsdetails"),
                              emps, stypes_default, shrs_default)
-        create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps)
+        create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps, layout)
 
         print(f"\nSpeichere {dst_file} ...")
         wb.save(dst_file)
@@ -1229,7 +1262,7 @@ def main():
 
     create_jahresuebersicht(wb.create_sheet("Jahresübersicht"), emps, stypes)
     create_monatsdetails(wb.create_sheet("Monatsdetails"), emps, stypes, shrs)
-    create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps)
+    create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps, layout)
 
     print(f"\nSpeichere {dst_file} ...")
     wb.save(dst_file)
