@@ -18,6 +18,7 @@ import os
 import shutil
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import Cell
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -226,10 +227,12 @@ DROPDOWN_SHIFTS = [
 
 CF_RULES = [
     ("U", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
+    ("U    alt", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
     ("EH", PatternFill("solid", fgColor=C_EH), Font(color=C_RED)),
     ("KU", PatternFill("solid", fgColor=C_KU), Font(color="000000")),
     ("A", PatternFill("solid", fgColor=C_AUSGLEICH), Font(color="000000")),
     ("T-ZUG", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
+    ("T-ZG", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
     ("Fobi", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
     ("GT", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
     ("NST", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
@@ -347,6 +350,28 @@ def _outer_border(ws, r1, c1, r2, c2):
             ws.cell(r, c).border = Border(left=left, right=right,
                                           top=top, bottom=bottom)
 
+BLK_THIN = Side("thin", "000000")
+
+def _force_border(ws, r, c, border):
+    """Border auf eine Zelle setzen, auch wenn sie in einem Merge liegt."""
+    key = (r, c)
+    if key not in ws._cells:
+        ws._cells[key] = Cell(ws, row=r, column=c)
+    ws._cells[key].border = border
+
+def _box_border(ws, r1, c1, r2, c2):
+    """Medium box border – setzt Ränder direkt auf ALLE Rand-Zellen (auch Merged)."""
+    for r in range(r1, r2 + 1):
+        for c in range(c1, c2 + 1):
+            if not (r == r1 or r == r2 or c == c1 or c == c2):
+                continue
+            left = MEDIUM_SIDE if c == c1 else BLK_THIN
+            right = MEDIUM_SIDE if c == c2 else BLK_THIN
+            top = MEDIUM_SIDE if r == r1 else BLK_THIN
+            bottom = MEDIUM_SIDE if r == r2 else BLK_THIN
+            _force_border(ws, r, c, Border(left=left, right=right,
+                                           top=top, bottom=bottom))
+
 def _add_cond_fmt(ws, cell_range):
     for code, fill, font in CF_RULES:
         ws.conditional_formatting.add(
@@ -371,7 +396,7 @@ def _feiertag_comments(ws, row, year, month):
         dt = datetime.date(year, month, d)
         if dt in FEIERTAGE:
             ws.cell(row, 1 + d).comment = Comment(
-                FEIERTAGE[dt], "Dienstplan", width=140, height=30)
+                FEIERTAGE[dt], "Emanuel Siebert", width=140, height=30)
 
 def _ferien_ranges(year, month):
     dim = calendar.monthrange(year, month)[1]
@@ -553,7 +578,7 @@ def create_eingabe(ws, emps):
         ws.row_dimensions[row].height = 18
         row += 1
 
-        # MA-Zeilen
+        # MA-Zeilen (keine statischen Shift-Fills – CF macht das dynamisch)
         first_ma_row = row
         for ei, ed in enumerate(emps):
             layout.emp_rows[mi][ed.name] = row
@@ -565,25 +590,19 @@ def create_eingabe(ws, emps):
                 c = ws.cell(row, 1 + d)
                 c.alignment = ALIGN_C
                 c.border = THIN
+                c.font = FONT_CELL8
                 if shift:
                     c.value = shift
-                    sf, fn = _shift_style(shift)
-                    c.font = fn
-                    if sf:
-                        c.fill = sf
-                    elif _is_special(dt):
-                        c.fill = FILL_WE
-                    elif zebra:
-                        c.fill = zebra
-                else:
-                    if _is_special(dt):
-                        c.fill = FILL_WE
-                    elif zebra:
-                        c.fill = zebra
+                if _is_special(dt):
+                    c.fill = FILL_WE
+                elif zebra:
+                    c.fill = zebra
             ws.row_dimensions[row].height = 16
             row += 1
 
-        dv_ranges.append(f"B{first_ma_row}:{last_cl}{row - 1}")
+        data_range = f"B{first_ma_row}:{last_cl}{row - 1}"
+        dv_ranges.append(data_range)
+        _add_cond_fmt(ws, data_range)
 
         # Unterbesetzungs-Warnung
         _set(ws.cell(row, 1), "Besetzung", FONT_GRAY8, align=ALIGN_L, border=THIN)
@@ -601,7 +620,7 @@ def create_eingabe(ws, emps):
                 c.fill = FILL_WARN
                 c.font = FONT_WARN
                 c.comment = Comment(
-                    f"Fehlt: {', '.join(missing)}", "Dienstplan",
+                    f"Fehlt: {', '.join(missing)}", "Emanuel Siebert",
                     width=120, height=25)
         ws.row_dimensions[row].height = 15
 
@@ -771,26 +790,19 @@ def create_month(wb, mi, emps, layout):
     leg_end_col = 14
     sig_col = 16
     sig_end = min(sig_col + 8, last_col)
-
-    def _lb(top=False, bottom=False, left=False, right=False):
-        return Border(
-            top=MEDIUM_SIDE if top else THIN_SIDE,
-            bottom=MEDIUM_SIDE if bottom else THIN_SIDE,
-            left=MEDIUM_SIDE if left else THIN_SIDE,
-            right=MEDIUM_SIDE if right else THIN_SIDE)
+    BT = Border(left=BLK_THIN, right=BLK_THIN, top=BLK_THIN, bottom=BLK_THIN)
 
     # --- Legende Header ---
     ws.merge_cells(start_row=row, start_column=1,
                    end_row=row, end_column=leg_end_col)
-    _set(ws.cell(row, 1), "Legende", FONT_HDR, FILL_HDR, ALIGN_C,
-         _lb(top=True, left=True, right=True))
+    _set(ws.cell(row, 1), "Legende", FONT_HDR, FILL_HDR, ALIGN_C, BT)
     ws.row_dimensions[row].height = 18
 
     # --- Unterschriften Header (gleiche Zeile) ---
     ws.merge_cells(start_row=row, start_column=sig_col,
                    end_row=row, end_column=sig_end)
     _set(ws.cell(row, sig_col), "Unterschriften",
-         FONT_HDR, FILL_HDR, ALIGN_C, _lb(top=True, left=True, right=True))
+         FONT_HDR, FILL_HDR, ALIGN_C, BT)
     row += 1
 
     def _leg_font(ckey):
@@ -808,86 +820,91 @@ def create_month(wb, mi, emps, layout):
             code, desc, ckey = LEGEND_LEFT[i]
             sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
-            _set(ws.cell(r, 1), code, _leg_font(ckey), sf, ALIGN_L, _lb(left=True))
+            _set(ws.cell(r, 1), code, _leg_font(ckey), sf, ALIGN_L, BT)
             ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=7)
-            _set(ws.cell(r, 4), desc, FONT_LEG_DESC, align=ALIGN_L, border=_lb())
+            _set(ws.cell(r, 4), desc, FONT_LEG_DESC, align=ALIGN_L, border=BT)
         else:
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
-            _set(ws.cell(r, 1), "", border=_lb(left=True))
+            _set(ws.cell(r, 1), "", border=BT)
 
         if i < len(LEGEND_RIGHT):
             code, desc, ckey = LEGEND_RIGHT[i]
             sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=10)
-            _set(ws.cell(r, 8), code, _leg_font(ckey), sf, ALIGN_L, _lb())
+            _set(ws.cell(r, 8), code, _leg_font(ckey), sf, ALIGN_L, BT)
             ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=leg_end_col)
-            _set(ws.cell(r, 11), desc, FONT_LEG_DESC, align=ALIGN_L,
-                 border=_lb(right=True))
+            _set(ws.cell(r, 11), desc, FONT_LEG_DESC, align=ALIGN_L, border=BT)
         else:
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=leg_end_col)
-            _set(ws.cell(r, 8), "", border=_lb(right=True))
+            _set(ws.cell(r, 8), "", border=BT)
 
     # WE-Zeile am Ende der Legende
     we_row = row + n_leg
     ws.merge_cells(start_row=we_row, start_column=1, end_row=we_row, end_column=3)
-    _set(ws.cell(we_row, 1), "", fill=FILL_WE,
-         border=_lb(left=True, bottom=True))
+    _set(ws.cell(we_row, 1), "", fill=FILL_WE, border=BT)
     ws.merge_cells(start_row=we_row, start_column=4,
                    end_row=we_row, end_column=leg_end_col)
     _set(ws.cell(we_row, 4), "Wochenende / Feiertag", FONT_LEG_DESC,
-         align=ALIGN_L, border=_lb(right=True, bottom=True))
+         align=ALIGN_L, border=BT)
     ws.row_dimensions[we_row].height = 16
 
-    # --- Unterschriften-Block (rechts neben Legende) ---
-    # Erstellt von
+    # Box-Border Legende (medium auf ALLE Rand-Zellen inkl. Merged)
+    _box_border(ws, leg_start, 1, we_row, leg_end_col)
+
+    # --- Unterschriften-Block ---
     r = leg_start + 1
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Erstellt von:", FONT_SIG_LABEL,
-         align=ALIGN_L, border=_lb(left=True, right=True))
-    ws.row_dimensions[r].height = 16
+         align=ALIGN_L, border=BT)
+    ws.row_dimensions[r].height = 18
     r += 1
 
-    # Unterschrift-Linie 1
-    ws.merge_cells(start_row=r, start_column=sig_col,
-                   end_row=r + 1, end_column=sig_end)
-    _set(ws.cell(r, sig_col), "",
-         border=_lb(left=True, right=True))
-    ws.row_dimensions[r].height = 28
-    r += 2
+    # Unterschrift-Linie 1 (leer, zum Unterschreiben)
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "", border=BT)
+    ws.row_dimensions[r].height = 30
+    r += 1
 
     # Datum/Unterschrift Hinweis
+    SIG_LINE = Border(left=BLK_THIN, right=BLK_THIN,
+                      top=Side("thin", "000000"), bottom=BLK_THIN)
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
-         align=ALIGN_C,
-         border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
-                       top=Side("thin", "000000"), bottom=THIN_SIDE))
+         align=ALIGN_C, border=SIG_LINE)
     ws.row_dimensions[r].height = 14
+    r += 1
+
+    # Leerzeile
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "", border=BT)
+    ws.row_dimensions[r].height = 8
     r += 1
 
     # Genehmigt von
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Genehmigt von:", FONT_SIG_LABEL,
-         align=ALIGN_L, border=_lb(left=True, right=True))
-    ws.row_dimensions[r].height = 16
+         align=ALIGN_L, border=BT)
+    ws.row_dimensions[r].height = 18
     r += 1
 
     # Unterschrift-Linie 2
-    ws.merge_cells(start_row=r, start_column=sig_col,
-                   end_row=r + 1, end_column=sig_end)
-    _set(ws.cell(r, sig_col), "",
-         border=_lb(left=True, right=True))
-    ws.row_dimensions[r].height = 28
-    r += 2
+    ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
+    _set(ws.cell(r, sig_col), "", border=BT)
+    ws.row_dimensions[r].height = 30
+    r += 1
 
     # Datum/Unterschrift Hinweis 2
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
-         align=ALIGN_C,
-         border=Border(left=MEDIUM_SIDE, right=MEDIUM_SIDE,
-                       top=Side("thin", "000000"), bottom=MEDIUM_SIDE))
+         align=ALIGN_C, border=SIG_LINE)
     ws.row_dimensions[r].height = 14
 
-    last_row = max(we_row, r)
+    sig_end_row = r
+
+    # Box-Border Unterschriften (medium auf ALLE Rand-Zellen inkl. Merged)
+    _box_border(ws, leg_start, sig_col, sig_end_row, sig_end)
+
+    last_row = max(we_row, sig_end_row)
 
     ws.freeze_panes = "B6"
     ws.page_setup.orientation = "landscape"
@@ -1032,7 +1049,7 @@ def create_monatsdetails(ws, emps, stypes, shrs):
 # ---------------------------------------------------------------------------
 # Urlaubsübersicht
 # ---------------------------------------------------------------------------
-def create_urlaubsuebersicht(ws, emps):
+def create_urlaubsuebersicht(ws, emps, layout):
     print("Erstelle Urlaubsübersicht ...")
     ws.column_dimensions["A"].width = 14
     for i in range(14):
@@ -1054,40 +1071,77 @@ def create_urlaubsuebersicht(ws, emps):
     ws.row_dimensions[row].height = 20
     row += 1
 
-    sum_per_month = [0] * 12
-    sum_total = 0
+    first_data_row = row
+    gc_cl = get_column_letter(gc)
+    rc_cl = get_column_letter(rc)
+    dc_cl = get_column_letter(dc)
 
     for ei, ed in enumerate(emps):
         _set(ws.cell(row, 1), ed.name, FONT_NAME, align=ALIGN_L)
         zebra = FILL_ZEBRA if ei % 2 == 1 else None
-        total = 0
+
         for mi in range(12):
-            cnt = sum(1 for _, c in ed.shifts[mi].items()
-                      if c in ("U", "U    alt"))
-            _set(ws.cell(row, 2 + mi), cnt or "", FONT_CELL10, zebra, ALIGN_C)
-            total += cnt
-            sum_per_month[mi] += cnt
-        _set(ws.cell(row, gc), total, FONT_BOLD10, zebra, ALIGN_C)
-        sum_total += total
+            mn = mi + 1
+            dim = calendar.monthrange(YEAR, mn)[1]
+            emp_row = layout.emp_rows[mi].get(ed.name)
+            cl = get_column_letter(2 + mi)
+            if emp_row:
+                last_cl = get_column_letter(1 + dim)
+                rng = f"Dienstplan!B{emp_row}:{last_cl}{emp_row}"
+                formula = f'=COUNTIF({rng},"U")+COUNTIF({rng},"U    alt")'
+                _set(ws.cell(row, 2 + mi), formula, FONT_CELL10, zebra, ALIGN_C)
+            else:
+                _set(ws.cell(row, 2 + mi), 0, FONT_CELL10, zebra, ALIGN_C)
+
+        # Genommen = Summe aller Monate
+        _set(ws.cell(row, gc), f"=SUM(B{row}:M{row})", FONT_BOLD10, zebra, ALIGN_C)
+        # Anspruch
         _set(ws.cell(row, rc), DEFAULT_URLAUB_TAGE, FONT_CELL10, zebra, ALIGN_C)
-        rest = DEFAULT_URLAUB_TAGE - total
-        color = C_RED if rest < 0 else ("008000" if rest > 5 else C_WARN_FG)
-        _set(ws.cell(row, dc), rest,
-             Font(name="Calibri", size=10, bold=True, color=color), zebra, ALIGN_C)
+        # Rest = Anspruch - Genommen (mit bedingter Farbformatierung)
+        _set(ws.cell(row, dc), f"={rc_cl}{row}-{gc_cl}{row}",
+             FONT_BOLD10, zebra, ALIGN_C)
         ws.row_dimensions[row].height = 18
         row += 1
 
+    # Summe-Zeile
+    last_data_row = row - 1
     _set(ws.cell(row, 1), "Summe", FONT_BOLD10, FILL_SUM, ALIGN_L)
     for mi in range(12):
-        _set(ws.cell(row, 2 + mi), sum_per_month[mi], FONT_BOLD10, FILL_SUM, ALIGN_C)
-    _set(ws.cell(row, gc), sum_total, FONT_BOLD10, FILL_SUM, ALIGN_C)
+        cl = get_column_letter(2 + mi)
+        _set(ws.cell(row, 2 + mi),
+             f"=SUM({cl}{first_data_row}:{cl}{last_data_row})",
+             FONT_BOLD10, FILL_SUM, ALIGN_C)
+    _set(ws.cell(row, gc),
+         f"=SUM({gc_cl}{first_data_row}:{gc_cl}{last_data_row})",
+         FONT_BOLD10, FILL_SUM, ALIGN_C)
     ws.row_dimensions[row].height = 18
 
     _outer_border(ws, 3, 1, row, dc)
 
+    # CF für Rest-Spalte: Rot wenn < 0, Orange wenn <= 5, Grün wenn > 5
+    rest_range = f"{dc_cl}{first_data_row}:{dc_cl}{last_data_row}"
+    ws.conditional_formatting.add(
+        rest_range,
+        CellIsRule(operator="lessThan", formula=["0"],
+                   fill=PatternFill("solid", fgColor=C_WARN_BG),
+                   font=Font(color=C_RED, bold=True),
+                   stopIfTrue=True))
+    ws.conditional_formatting.add(
+        rest_range,
+        CellIsRule(operator="lessThanOrEqual", formula=["5"],
+                   fill=PatternFill("solid", fgColor=C_YELLOW),
+                   font=Font(color=C_WARN_FG, bold=True),
+                   stopIfTrue=True))
+    ws.conditional_formatting.add(
+        rest_range,
+        CellIsRule(operator="greaterThan", formula=["5"],
+                   fill=PatternFill("solid", fgColor=C_URLAUB),
+                   font=Font(color="008000", bold=True),
+                   stopIfTrue=True))
+
     row += 2
     _set(ws.cell(row, 1),
-         f"Anspruch: {DEFAULT_URLAUB_TAGE} Tage/Jahr (anpassbar in Spalte {get_column_letter(rc)})",
+         f"Anspruch: {DEFAULT_URLAUB_TAGE} Tage/Jahr (anpassbar in Spalte {rc_cl})",
          Font(name="Calibri", size=8, italic=True, color="666666"), border=None)
 
     ws.freeze_panes = "B4"
@@ -1177,7 +1231,7 @@ def main():
                                 emps, stypes_default)
         create_monatsdetails(wb.create_sheet("Monatsdetails"),
                              emps, stypes_default, shrs_default)
-        create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps)
+        create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps, layout)
 
         print(f"\nSpeichere {dst_file} ...")
         wb.save(dst_file)
@@ -1208,7 +1262,7 @@ def main():
 
     create_jahresuebersicht(wb.create_sheet("Jahresübersicht"), emps, stypes)
     create_monatsdetails(wb.create_sheet("Monatsdetails"), emps, stypes, shrs)
-    create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps)
+    create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps, layout)
 
     print(f"\nSpeichere {dst_file} ...")
     wb.save(dst_file)
