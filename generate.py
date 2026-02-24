@@ -350,8 +350,6 @@ def _outer_border(ws, r1, c1, r2, c2):
             ws.cell(r, c).border = Border(left=left, right=right,
                                           top=top, bottom=bottom)
 
-BLK_THIN = Side("thin", "000000")
-
 def _force_border(ws, r, c, border):
     """Border auf eine Zelle setzen, auch wenn sie in einem Merge liegt."""
     key = (r, c)
@@ -360,17 +358,16 @@ def _force_border(ws, r, c, border):
     ws._cells[key].border = border
 
 def _box_border(ws, r1, c1, r2, c2):
-    """Medium box border – setzt Ränder direkt auf ALLE Rand-Zellen (auch Merged)."""
+    """Nur Außenrahmen (medium) – keine inneren Linien."""
     for r in range(r1, r2 + 1):
         for c in range(c1, c2 + 1):
-            if not (r == r1 or r == r2 or c == c1 or c == c2):
-                continue
-            left = MEDIUM_SIDE if c == c1 else BLK_THIN
-            right = MEDIUM_SIDE if c == c2 else BLK_THIN
-            top = MEDIUM_SIDE if r == r1 else BLK_THIN
-            bottom = MEDIUM_SIDE if r == r2 else BLK_THIN
-            _force_border(ws, r, c, Border(left=left, right=right,
-                                           top=top, bottom=bottom))
+            top = MEDIUM_SIDE if r == r1 else None
+            bottom = MEDIUM_SIDE if r == r2 else None
+            left = MEDIUM_SIDE if c == c1 else None
+            right = MEDIUM_SIDE if c == c2 else None
+            if top or bottom or left or right:
+                _force_border(ws, r, c, Border(top=top, bottom=bottom,
+                                               left=left, right=right))
 
 def _add_cond_fmt(ws, cell_range):
     for code, fill, font in CF_RULES:
@@ -578,7 +575,7 @@ def create_eingabe(ws, emps):
         ws.row_dimensions[row].height = 18
         row += 1
 
-        # MA-Zeilen (keine statischen Shift-Fills – CF macht das dynamisch)
+        # MA-Zeilen (statische Fills + CF für dynamische Änderungen)
         first_ma_row = row
         for ei, ed in enumerate(emps):
             layout.emp_rows[mi][ed.name] = row
@@ -595,6 +592,12 @@ def create_eingabe(ws, emps):
                     c.value = shift
                 if _is_special(dt):
                     c.fill = FILL_WE
+                elif shift:
+                    sf, fn = _shift_style(shift)
+                    if sf:
+                        c.fill = sf
+                    if fn:
+                        c.font = fn
                 elif zebra:
                     c.fill = zebra
             ws.row_dimensions[row].height = 16
@@ -604,7 +607,8 @@ def create_eingabe(ws, emps):
         dv_ranges.append(data_range)
         _add_cond_fmt(ws, data_range)
 
-        # Unterbesetzungs-Warnung
+        # Unterbesetzungs-Warnung (dynamische COUNTIF-Formeln)
+        last_ma_row = row - 1
         _set(ws.cell(row, 1), "Besetzung", FONT_GRAY8, align=ALIGN_L, border=THIN)
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
@@ -614,14 +618,22 @@ def create_eingabe(ws, emps):
             if _is_special(dt):
                 c.fill = FILL_WE
                 continue
-            missing = _missing_critical(emps, mi, d)
-            if missing:
-                c.value = "!"
-                c.fill = FILL_WARN
-                c.font = FONT_WARN
-                c.comment = Comment(
-                    f"Fehlt: {', '.join(missing)}", "Emanuel Siebert",
-                    width=120, height=25)
+            cl = get_column_letter(1 + d)
+            rng = f"{cl}{first_ma_row}:{cl}{last_ma_row}"
+            # Freitags keine NI nötig
+            if dt.weekday() == 4:
+                checks = ['COUNTIF({r},"FI")>0', 'COUNTIF({r},"SI")>0']
+            else:
+                checks = ['COUNTIF({r},"FI")>0', 'COUNTIF({r},"SI")>0',
+                           'COUNTIF({r},"NI")>0']
+            cond = ",".join(ch.format(r=rng) for ch in checks)
+            c.value = f'=IF(AND({cond}),"","!")'
+        # Bedingte Formatierung für die Besetzungszeile
+        bes_range = f"B{row}:{last_cl}{row}"
+        ws.conditional_formatting.add(
+            bes_range,
+            CellIsRule(operator="equal", formula=['"!"'],
+                       fill=FILL_WARN, font=FONT_WARN, stopIfTrue=True))
         ws.row_dimensions[row].height = 15
 
         # Medium-Rahmen um den gesamten Monatsblock
@@ -753,7 +765,8 @@ def create_month(wb, mi, emps, layout):
         ws.row_dimensions[row].height = 16
         row += 1
 
-    # Unterbesetzung
+    # Unterbesetzung (dynamische COUNTIF-Formeln)
+    last_ma_row = row - 1
     _set(ws.cell(row, 1), "Besetzung", FONT_GRAY8, align=ALIGN_L, border=THIN)
     for d in range(1, dim + 1):
         dt = datetime.date(YEAR, mn, d)
@@ -763,14 +776,21 @@ def create_month(wb, mi, emps, layout):
         if _is_special(dt):
             c.fill = FILL_WE
             continue
-        missing = _missing_critical(emps, mi, d)
-        if missing:
-            c.value = "!"
-            c.fill = FILL_WARN
-            c.font = FONT_WARN
-            c.comment = Comment(
-                f"Fehlt: {', '.join(missing)}", "Dienstplan",
-                width=120, height=25)
+        cl = get_column_letter(1 + d)
+        rng = f"{cl}{first_data_row}:{cl}{last_ma_row}"
+        if dt.weekday() == 4:
+            checks = ['COUNTIF({r},"FI")>0', 'COUNTIF({r},"SI")>0']
+        else:
+            checks = ['COUNTIF({r},"FI")>0', 'COUNTIF({r},"SI")>0',
+                       'COUNTIF({r},"NI")>0']
+        cond = ",".join(ch.format(r=rng) for ch in checks)
+        c.value = f'=IF(AND({cond}),"","!")'
+    # Bedingte Formatierung für Besetzungszeile
+    bes_range = f"B{row}:{last_cl}{row}"
+    ws.conditional_formatting.add(
+        bes_range,
+        CellIsRule(operator="equal", formula=['"!"'],
+                   fill=FILL_WARN, font=FONT_WARN, stopIfTrue=True))
     ws.row_dimensions[row].height = 15
     row += 1
     tbl_end = row - 1
@@ -784,25 +804,25 @@ def create_month(wb, mi, emps, layout):
         for r in range(first_sekr_row, first_sekr_row + len(sekr)):
             ws.row_dimensions[r].hidden = True
 
-    # === LEGENDE + UNTERSCHRIFTEN ===
+    # === LEGENDE + UNTERSCHRIFTEN (nur Außenrahmen) ===
     row += 1
     leg_start = row
     leg_end_col = 14
     sig_col = 16
     sig_end = min(sig_col + 8, last_col)
-    BT = Border(left=BLK_THIN, right=BLK_THIN, top=BLK_THIN, bottom=BLK_THIN)
+    NO_BDR = None  # kein innerer Rahmen
 
     # --- Legende Header ---
     ws.merge_cells(start_row=row, start_column=1,
                    end_row=row, end_column=leg_end_col)
-    _set(ws.cell(row, 1), "Legende", FONT_HDR, FILL_HDR, ALIGN_C, BT)
+    _set(ws.cell(row, 1), "Legende", FONT_HDR, FILL_HDR, ALIGN_C, NO_BDR)
     ws.row_dimensions[row].height = 18
 
     # --- Unterschriften Header (gleiche Zeile) ---
     ws.merge_cells(start_row=row, start_column=sig_col,
                    end_row=row, end_column=sig_end)
     _set(ws.cell(row, sig_col), "Unterschriften",
-         FONT_HDR, FILL_HDR, ALIGN_C, BT)
+         FONT_HDR, FILL_HDR, ALIGN_C, NO_BDR)
     row += 1
 
     def _leg_font(ckey):
@@ -820,88 +840,86 @@ def create_month(wb, mi, emps, layout):
             code, desc, ckey = LEGEND_LEFT[i]
             sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
-            _set(ws.cell(r, 1), code, _leg_font(ckey), sf, ALIGN_L, BT)
+            _set(ws.cell(r, 1), code, _leg_font(ckey), sf, ALIGN_L, NO_BDR)
             ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=7)
-            _set(ws.cell(r, 4), desc, FONT_LEG_DESC, align=ALIGN_L, border=BT)
+            _set(ws.cell(r, 4), desc, FONT_LEG_DESC, align=ALIGN_L, border=NO_BDR)
         else:
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
-            _set(ws.cell(r, 1), "", border=BT)
+            _set(ws.cell(r, 1), "", border=NO_BDR)
 
         if i < len(LEGEND_RIGHT):
             code, desc, ckey = LEGEND_RIGHT[i]
             sf, _ = SHIFT_COLORS.get(ckey, (None, None))
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=10)
-            _set(ws.cell(r, 8), code, _leg_font(ckey), sf, ALIGN_L, BT)
+            _set(ws.cell(r, 8), code, _leg_font(ckey), sf, ALIGN_L, NO_BDR)
             ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=leg_end_col)
-            _set(ws.cell(r, 11), desc, FONT_LEG_DESC, align=ALIGN_L, border=BT)
+            _set(ws.cell(r, 11), desc, FONT_LEG_DESC, align=ALIGN_L, border=NO_BDR)
         else:
             ws.merge_cells(start_row=r, start_column=8, end_row=r, end_column=leg_end_col)
-            _set(ws.cell(r, 8), "", border=BT)
+            _set(ws.cell(r, 8), "", border=NO_BDR)
 
     # WE-Zeile am Ende der Legende
     we_row = row + n_leg
     ws.merge_cells(start_row=we_row, start_column=1, end_row=we_row, end_column=3)
-    _set(ws.cell(we_row, 1), "", fill=FILL_WE, border=BT)
+    _set(ws.cell(we_row, 1), "", fill=FILL_WE, border=NO_BDR)
     ws.merge_cells(start_row=we_row, start_column=4,
                    end_row=we_row, end_column=leg_end_col)
     _set(ws.cell(we_row, 4), "Wochenende / Feiertag", FONT_LEG_DESC,
-         align=ALIGN_L, border=BT)
+         align=ALIGN_L, border=NO_BDR)
     ws.row_dimensions[we_row].height = 16
 
-    # Box-Border Legende (medium auf ALLE Rand-Zellen inkl. Merged)
+    # Nur Außenrahmen Legende (medium, keine inneren Linien)
     _box_border(ws, leg_start, 1, we_row, leg_end_col)
 
     # --- Unterschriften-Block ---
     r = leg_start + 1
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Erstellt von:", FONT_SIG_LABEL,
-         align=ALIGN_L, border=BT)
+         align=ALIGN_L, border=NO_BDR)
     ws.row_dimensions[r].height = 18
     r += 1
 
     # Unterschrift-Linie 1 (leer, zum Unterschreiben)
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
-    _set(ws.cell(r, sig_col), "", border=BT)
+    _set(ws.cell(r, sig_col), "", border=NO_BDR)
     ws.row_dimensions[r].height = 30
     r += 1
 
     # Datum/Unterschrift Hinweis
-    SIG_LINE = Border(left=BLK_THIN, right=BLK_THIN,
-                      top=Side("thin", "000000"), bottom=BLK_THIN)
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
-         align=ALIGN_C, border=SIG_LINE)
+         align=ALIGN_C, border=NO_BDR)
     ws.row_dimensions[r].height = 14
     r += 1
 
     # Leerzeile
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
-    _set(ws.cell(r, sig_col), "", border=BT)
+    _set(ws.cell(r, sig_col), "", border=NO_BDR)
     ws.row_dimensions[r].height = 8
     r += 1
 
     # Genehmigt von
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Genehmigt von:", FONT_SIG_LABEL,
-         align=ALIGN_L, border=BT)
+         align=ALIGN_L, border=NO_BDR)
     ws.row_dimensions[r].height = 18
     r += 1
 
     # Unterschrift-Linie 2
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
-    _set(ws.cell(r, sig_col), "", border=BT)
+    _set(ws.cell(r, sig_col), "", border=NO_BDR)
     ws.row_dimensions[r].height = 30
     r += 1
 
     # Datum/Unterschrift Hinweis 2
     ws.merge_cells(start_row=r, start_column=sig_col, end_row=r, end_column=sig_end)
     _set(ws.cell(r, sig_col), "Datum / Unterschrift", FONT_SIG_HINT,
-         align=ALIGN_C, border=SIG_LINE)
+         align=ALIGN_C, border=NO_BDR)
     ws.row_dimensions[r].height = 14
 
     sig_end_row = r
 
-    # Box-Border Unterschriften (medium auf ALLE Rand-Zellen inkl. Merged)
+    # Nur Außenrahmen Unterschriften (medium, keine inneren Linien)
     _box_border(ws, leg_start, sig_col, sig_end_row, sig_end)
 
     last_row = max(we_row, sig_end_row)
@@ -968,19 +986,83 @@ def create_jahresuebersicht(ws, emps, stypes):
 # ---------------------------------------------------------------------------
 # Monatsdetails
 # ---------------------------------------------------------------------------
-def create_monatsdetails(ws, emps, stypes, shrs):
+def create_monatsdetails(ws, emps, stypes, shrs, layout):
     print("Erstelle Monatsdetails ...")
     ws.column_dimensions["A"].width = 14
     for i in range(len(stypes) + 5):
         ws.column_dimensions[get_column_letter(2 + i)].width = 6.5
 
     _set(ws.cell(1, 1), f"Monatsdetails {YEAR}", FONT_TITLE, border=None)
-    row = 3
 
+    # === KONFIGURATIONSTABELLE (rechts) ===
+    DEFAULT_HRS = {
+        "FI": 7.25, "FII": 7.5, "SI": 7.5, "SII": 7.0, "NI": 7.5,
+        "DI": 8.0, "DII": 8.0, "SD": 7.0, "EH": 8.0, "KT": 8.0,
+        "KU": 8.0, "Sek": 7.0,
+    }
+    cfg_col = len(stypes) + 7
+
+    # --- Mitarbeiter + IRTAZ ---
+    ma_col = cfg_col
+    irtaz_col = cfg_col + 1
+    ws.column_dimensions[get_column_letter(ma_col)].width = 14
+    ws.column_dimensions[get_column_letter(irtaz_col)].width = 8
+
+    _set(ws.cell(1, ma_col), "Konfiguration", FONT_TITLE, border=None)
+    _set(ws.cell(2, ma_col), "Mitarbeiter", FONT_HDR, FILL_HDR, ALIGN_C)
+    _set(ws.cell(2, irtaz_col), "IRTAZ", FONT_HDR, FILL_HDR, ALIGN_C)
+
+    irtaz_cells = {}
+    for ei, ed in enumerate(emps):
+        r = 3 + ei
+        _set(ws.cell(r, ma_col), ed.name, FONT_NAME9, align=ALIGN_L)
+        _set(ws.cell(r, irtaz_col), ed.irtaz, FONT_CELL10, align=ALIGN_C)
+        irtaz_cells[ed.name] = f"${get_column_letter(irtaz_col)}${r}"
+    _outer_border(ws, 2, ma_col, 2 + len(emps), irtaz_col)
+
+    # --- Schichten + Stunden ---
+    shift_col = cfg_col + 3
+    hrs_col = cfg_col + 4
+    ws.column_dimensions[get_column_letter(shift_col)].width = 8
+    ws.column_dimensions[get_column_letter(hrs_col)].width = 10
+
+    _set(ws.cell(2, shift_col), "Schicht", FONT_HDR, FILL_HDR, ALIGN_C)
+    _set(ws.cell(2, hrs_col), "Stunden", FONT_HDR, FILL_HDR, ALIGN_C)
+
+    hrs_cells = {}
+    for si, st in enumerate(stypes):
+        r = 3 + si
+        _set(ws.cell(r, shift_col), st, FONT_BOLD9, align=ALIGN_C)
+        hrs_val = shrs.get(st)
+        if hrs_val is None:
+            hrs_val = DEFAULT_HRS.get(st)
+        if hrs_val is not None:
+            _set(ws.cell(r, hrs_col), hrs_val, FONT_CELL10, align=ALIGN_C)
+        else:
+            _set(ws.cell(r, hrs_col), "IRTAZ", FONT_GRAY_SM, align=ALIGN_C)
+            ws.cell(r, hrs_col).comment = Comment(
+                "Verwendet individuelle IRTAZ des Mitarbeiters",
+                "Dienstplan", width=200, height=30)
+        hrs_cells[st] = f"${get_column_letter(hrs_col)}${r}"
+    _outer_border(ws, 2, shift_col, 2 + len(stypes), hrs_col)
+
+    # Hinweise
+    hint_r = 3 + max(len(stypes), len(emps)) + 1
+    _set(ws.cell(hint_r, ma_col),
+         "Soll AZ = IRTAZ \u00d7 Arbeitstage", FONT_GRAY8, border=None)
+    _set(ws.cell(hint_r + 1, ma_col),
+         '"IRTAZ" = individuelle Tagesarbeitszeit', FONT_GRAY8, border=None)
+    _set(ws.cell(hint_r + 2, ma_col),
+         "Stunden/IRTAZ hier \u00e4ndern \u2192 Formeln aktualisieren sich",
+         FONT_GRAY8, border=None)
+
+    # === MONATSTABELLEN (mit COUNTIF-Formeln) ===
+    row = 3
     for mi in range(12):
         mn = mi + 1
         at = _arbeitstage(YEAR, mn)
         sa = _samstage(YEAR, mn)
+        dim = calendar.monthrange(YEAR, mn)[1]
 
         _set(ws.cell(row, 1), MONTHS_DE[mi], FONT_MONTH, border=None)
         _set(ws.cell(row, 3), "AT:", border=None)
@@ -996,47 +1078,81 @@ def create_monatsdetails(ws, emps, stypes, shrs):
         ws.row_dimensions[row].height = 18
         row += 1
 
-        s_sums = {st: 0 for st in stypes}
-        sum_soll = sum_ist = 0.0
+        sc = 2 + len(stypes)
+        first_data = row
 
         for ei, ed in enumerate(emps):
             _set(ws.cell(row, 1), ed.name, FONT_NAME9, align=ALIGN_L)
             zebra = FILL_ZEBRA if ei % 2 == 1 else None
+
+            emp_row = layout.emp_rows[mi].get(ed.name)
+            last_cl = get_column_letter(1 + dim)
+
+            # Schicht-Anzahlen per COUNTIF
             for i, st in enumerate(stypes):
-                cnt = sum(1 for _, c in ed.shifts[mi].items() if c == st)
-                _set(ws.cell(row, 2 + i), cnt or "", FONT_CELL, zebra, ALIGN_C)
-                s_sums[st] += cnt
-
-            sc = 2 + len(stypes)
-            soll = at * ed.irtaz
-            _set(ws.cell(row, sc), round(soll, 1), FONT_CELL, zebra, ALIGN_C)
-            sum_soll += soll
-
-            ist = 0.0
-            for _, code in ed.shifts[mi].items():
-                h = shrs.get(code)
-                if h is not None:
-                    ist += h
+                if emp_row:
+                    rng = f"Dienstplan!B{emp_row}:{last_cl}{emp_row}"
+                    _set(ws.cell(row, 2 + i),
+                         f'=COUNTIF({rng},"{st}")', FONT_CELL, zebra, ALIGN_C)
                 else:
-                    ist += ed.irtaz
-            _set(ws.cell(row, sc + 1), round(ist, 2), FONT_CELL, zebra, ALIGN_C)
-            sum_ist += ist
+                    _set(ws.cell(row, 2 + i), 0, FONT_CELL, zebra, ALIGN_C)
 
-            diff = ist - soll
-            _set(ws.cell(row, sc + 2), round(diff, 2),
-                 Font(name="Calibri", size=9,
-                      color=C_RED if diff < 0 else "008000"), zebra, ALIGN_C)
+            # Soll = AT × IRTAZ (Referenz auf Konfig)
+            irtaz_ref = irtaz_cells[ed.name]
+            _set(ws.cell(row, sc),
+                 f"={at}*{irtaz_ref}", FONT_CELL, zebra, ALIGN_C)
+
+            # Ist = Summe(Anzahl × Stunden) pro Schichttyp
+            # ISNUMBER prüft ob feste Stunden oder IRTAZ-Text
+            terms = []
+            for i, st in enumerate(stypes):
+                cnt_cl = get_column_letter(2 + i)
+                hrs_ref = hrs_cells[st]
+                terms.append(
+                    f"IF(ISNUMBER({hrs_ref}),"
+                    f"{cnt_cl}{row}*{hrs_ref},"
+                    f"{cnt_cl}{row}*{irtaz_ref})")
+            _set(ws.cell(row, sc + 1),
+                 "=" + "+".join(terms), FONT_CELL, zebra, ALIGN_C)
+
+            # Diff = Ist - Soll
+            ist_cl = get_column_letter(sc + 1)
+            soll_cl = get_column_letter(sc)
+            _set(ws.cell(row, sc + 2),
+                 f"={ist_cl}{row}-{soll_cl}{row}", FONT_CELL, zebra, ALIGN_C)
+
             ws.row_dimensions[row].height = 16
             row += 1
 
+        last_data = row - 1
+
+        # Summe-Zeile (SUM-Formeln)
         _set(ws.cell(row, 1), "Summe", FONT_BOLD9, FILL_SUM, ALIGN_L)
-        for i, st in enumerate(stypes):
-            _set(ws.cell(row, 2 + i), s_sums[st], FONT_BOLD9, FILL_SUM, ALIGN_C)
-        sc = 2 + len(stypes)
-        for off, val in enumerate([round(sum_soll, 1), round(sum_ist, 2),
-                                    round(sum_ist - sum_soll, 2)]):
-            _set(ws.cell(row, sc + off), val, FONT_BOLD9, FILL_SUM, ALIGN_C)
+        for i in range(len(stypes)):
+            cl = get_column_letter(2 + i)
+            _set(ws.cell(row, 2 + i),
+                 f"=SUM({cl}{first_data}:{cl}{last_data})",
+                 FONT_BOLD9, FILL_SUM, ALIGN_C)
+        for off in range(3):
+            cl = get_column_letter(sc + off)
+            _set(ws.cell(row, sc + off),
+                 f"=SUM({cl}{first_data}:{cl}{last_data})",
+                 FONT_BOLD9, FILL_SUM, ALIGN_C)
         ws.row_dimensions[row].height = 18
+
+        # Bedingte Formatierung Diff-Spalte
+        diff_cl = get_column_letter(sc + 2)
+        diff_range = f"{diff_cl}{first_data}:{diff_cl}{last_data}"
+        ws.conditional_formatting.add(
+            diff_range,
+            CellIsRule(operator="lessThan", formula=["0"],
+                       font=Font(name="Calibri", size=9, color=C_RED),
+                       stopIfTrue=True))
+        ws.conditional_formatting.add(
+            diff_range,
+            CellIsRule(operator="greaterThanOrEqual", formula=["0"],
+                       font=Font(name="Calibri", size=9, color="008000"),
+                       stopIfTrue=True))
 
         _outer_border(ws, hdr_row, 1, row, sc + 2)
         row += 2
@@ -1230,7 +1346,7 @@ def main():
         create_jahresuebersicht(wb.create_sheet("Jahresübersicht"),
                                 emps, stypes_default)
         create_monatsdetails(wb.create_sheet("Monatsdetails"),
-                             emps, stypes_default, shrs_default)
+                             emps, stypes_default, shrs_default, layout)
         create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps, layout)
 
         print(f"\nSpeichere {dst_file} ...")
@@ -1261,7 +1377,7 @@ def main():
         print(f"  {MONTHS_DE[mi]}")
 
     create_jahresuebersicht(wb.create_sheet("Jahresübersicht"), emps, stypes)
-    create_monatsdetails(wb.create_sheet("Monatsdetails"), emps, stypes, shrs)
+    create_monatsdetails(wb.create_sheet("Monatsdetails"), emps, stypes, shrs, layout)
     create_urlaubsuebersicht(wb.create_sheet("Urlaubsübersicht"), emps, layout)
 
     print(f"\nSpeichere {dst_file} ...")
