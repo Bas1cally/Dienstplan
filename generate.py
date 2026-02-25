@@ -235,7 +235,7 @@ CF_RULES = [
     ("T-ZUG", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
     ("T-ZG", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
     ("Fobi", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
-    ("GT", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
+    ("GT", PatternFill("solid", fgColor=C_URLAUB), Font(color="000000")),
     ("NST", PatternFill("solid", fgColor="FFFFFF"), Font(color=C_RED)),
 ]
 
@@ -793,39 +793,12 @@ def create_month(wb, mi, emps, layout):
         ws.row_dimensions[row].height = 16
         row += 1
 
-    # Unterbesetzung (dynamische COUNTIF-Formeln)
-    last_ma_row = row - 1
-    _set(ws.cell(row, 1), "Besetzung", FONT_GRAY8, align=ALIGN_L, border=THIN)
-    for d in range(1, dim + 1):
-        dt = datetime.date(YEAR, mn, d)
-        c = ws.cell(row, 1 + d)
-        c.alignment = ALIGN_C
-        c.border = THIN
-        if _is_special(dt):
-            c.fill = FILL_WE
-            continue
-        cl = get_column_letter(1 + d)
-        rng = f"{cl}{first_data_row}:{cl}{last_ma_row}"
-        if dt.weekday() == 4:
-            checks = ['COUNTIF({r},"FI")>0', 'COUNTIF({r},"SI")>0']
-        else:
-            checks = ['COUNTIF({r},"FI")>0', 'COUNTIF({r},"SI")>0',
-                       'COUNTIF({r},"NI")>0']
-        cond = ",".join(ch.format(r=rng) for ch in checks)
-        c.value = f'=IF(AND({cond}),"","!")'
-    # Bedingte Formatierung für Besetzungszeile
-    bes_range = f"B{row}:{last_cl}{row}"
-    ws.conditional_formatting.add(
-        bes_range,
-        CellIsRule(operator="equal", formula=['"!"'],
-                   fill=FILL_WARN, font=FONT_WARN, stopIfTrue=True))
-    ws.row_dimensions[row].height = 15
-    row += 1
+    # Besetzung nur im Dienstplan-Sheet (nicht in Druckansicht)
     tbl_end = row - 1
 
     _outer_border(ws, tbl_start, 1, tbl_end, last_col)
 
-    data_range = f"B{first_data_row}:{last_cl}{tbl_end - 1}"
+    data_range = f"B{first_data_row}:{last_cl}{tbl_end}"
     _add_cond_fmt(ws, data_range)
 
     if first_sekr_row:
