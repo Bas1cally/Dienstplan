@@ -189,6 +189,7 @@ FONT_SIG_HINT = Font(name="Calibri", size=8, italic=True, color="999999")
 FONT_SEKR = Font(name="Calibri", size=9, bold=True, italic=True, color="999999")
 
 ALIGN_C = Alignment(horizontal="center", vertical="center")
+ALIGN_CS = Alignment(horizontal="center", vertical="center", shrinkToFit=True)
 ALIGN_L = Alignment(horizontal="left", vertical="center")
 
 SHIFT_COLORS = {
@@ -575,7 +576,9 @@ def create_eingabe(ws, emps):
         ws.row_dimensions[row].height = 18
         row += 1
 
-        # MA-Zeilen (statische Fills + CF für dynamische Änderungen)
+        # MA-Zeilen (nur Basis-Fills – Schichtfarben rein über CF)
+        ges_col = 1 + dim + 1  # Gesamt-Spalte rechts neben letztem Tag
+        ges_cl = get_column_letter(ges_col)
         first_ma_row = row
         for ei, ed in enumerate(emps):
             layout.emp_rows[mi][ed.name] = row
@@ -585,27 +588,29 @@ def create_eingabe(ws, emps):
                 dt = datetime.date(YEAR, mn, d)
                 shift = ed.shifts[mi].get(d)
                 c = ws.cell(row, 1 + d)
-                c.alignment = ALIGN_C
+                c.alignment = ALIGN_CS
                 c.border = THIN
                 c.font = FONT_CELL8
                 if shift:
                     c.value = shift
                 if _is_special(dt):
                     c.fill = FILL_WE
-                elif shift:
-                    sf, fn = _shift_style(shift)
-                    if sf:
-                        c.fill = sf
-                    if fn:
-                        c.font = fn
                 elif zebra:
                     c.fill = zebra
+            # Gesamt-Spalte: Anzahl eingetragener Schichten
+            _set(ws.cell(row, ges_col),
+                 f"=COUNTA(B{row}:{last_cl}{row})",
+                 FONT_BOLD9, FILL_SUM, ALIGN_C)
             ws.row_dimensions[row].height = 16
             row += 1
 
         data_range = f"B{first_ma_row}:{last_cl}{row - 1}"
         dv_ranges.append(data_range)
         _add_cond_fmt(ws, data_range)
+
+        # Gesamt-Header (in Tag-/WT-Zeile)
+        _set(ws.cell(tag_row, ges_col), "Ges", FONT_HDR, FILL_HDR, ALIGN_C)
+        _set(ws.cell(tag_row - 1, ges_col), "", FONT_HDR, FILL_HDR, ALIGN_C)
 
         # Unterbesetzungs-Warnung (dynamische COUNTIF-Formeln)
         last_ma_row = row - 1
@@ -633,6 +638,29 @@ def create_eingabe(ws, emps):
         ws.conditional_formatting.add(
             bes_range,
             CellIsRule(operator="equal", formula=['"!"'],
+                       fill=FILL_WARN, font=FONT_WARN, stopIfTrue=True))
+        ws.row_dimensions[row].height = 15
+        row += 1
+
+        # Doppelbelegung-Warnung (gleiche kritische Schicht doppelt vergeben)
+        _set(ws.cell(row, 1), "Doppelt", FONT_GRAY8, align=ALIGN_L, border=THIN)
+        for d in range(1, dim + 1):
+            dt = datetime.date(YEAR, mn, d)
+            c = ws.cell(row, 1 + d)
+            c.alignment = ALIGN_C
+            c.border = THIN
+            if _is_special(dt):
+                c.fill = FILL_WE
+                continue
+            cl = get_column_letter(1 + d)
+            rng = f"{cl}{first_ma_row}:{cl}{last_ma_row}"
+            dbl = ','.join(
+                f'COUNTIF({rng},"{s}")>1' for s in CRITICAL_SHIFTS)
+            c.value = f'=IF(OR({dbl}),"!!","")'
+        dbl_range = f"B{row}:{last_cl}{row}"
+        ws.conditional_formatting.add(
+            dbl_range,
+            CellIsRule(operator="equal", formula=['"!!"'],
                        fill=FILL_WARN, font=FONT_WARN, stopIfTrue=True))
         ws.row_dimensions[row].height = 15
 
@@ -752,7 +780,7 @@ def create_month(wb, mi, emps, layout):
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
             c = ws.cell(row, 1 + d)
-            c.alignment = ALIGN_C
+            c.alignment = ALIGN_CS
             c.border = THIN
             c.font = FONT_CELL8
             if src_row:
@@ -1057,6 +1085,11 @@ def create_monatsdetails(ws, emps, stypes, shrs, layout):
          FONT_GRAY8, border=None)
 
     # === MONATSTABELLEN (mit COUNTIF-Formeln) ===
+    gc = 2 + len(stypes) + 3  # Gesamt-Spalte (nach Diff)
+    gc_cl = get_column_letter(gc)
+    ws.column_dimensions[gc_cl].width = 8
+    prev_gesamt = {}  # emp_name -> vorherige Gesamt-Zellreferenz
+
     row = 3
     for mi in range(12):
         mn = mi + 1
@@ -1072,7 +1105,7 @@ def create_monatsdetails(ws, emps, stypes, shrs, layout):
         row += 1
 
         hdr_row = row
-        headers = ["MA"] + stypes + ["Soll", "Ist", "Diff"]
+        headers = ["MA"] + stypes + ["Soll", "Ist", "Diff", "Gesamt"]
         for i, h in enumerate(headers):
             _set(ws.cell(row, 1 + i), h, FONT_HDR, FILL_HDR, ALIGN_C)
         ws.row_dimensions[row].height = 18
@@ -1116,10 +1149,21 @@ def create_monatsdetails(ws, emps, stypes, shrs, layout):
                  "=" + "+".join(terms), FONT_CELL, zebra, ALIGN_C)
 
             # Diff = Ist - Soll
+            diff_cl = get_column_letter(sc + 2)
             ist_cl = get_column_letter(sc + 1)
             soll_cl = get_column_letter(sc)
             _set(ws.cell(row, sc + 2),
                  f"={ist_cl}{row}-{soll_cl}{row}", FONT_CELL, zebra, ALIGN_C)
+
+            # Gesamt = kumulative Diff über alle Monate
+            if ed.name in prev_gesamt:
+                _set(ws.cell(row, gc),
+                     f"={prev_gesamt[ed.name]}+{diff_cl}{row}",
+                     FONT_BOLD9, zebra, ALIGN_C)
+            else:
+                _set(ws.cell(row, gc),
+                     f"={diff_cl}{row}", FONT_BOLD9, zebra, ALIGN_C)
+            prev_gesamt[ed.name] = f"{gc_cl}{row}"
 
             ws.row_dimensions[row].height = 16
             row += 1
@@ -1133,28 +1177,29 @@ def create_monatsdetails(ws, emps, stypes, shrs, layout):
             _set(ws.cell(row, 2 + i),
                  f"=SUM({cl}{first_data}:{cl}{last_data})",
                  FONT_BOLD9, FILL_SUM, ALIGN_C)
-        for off in range(3):
+        for off in range(4):  # Soll, Ist, Diff, Gesamt
             cl = get_column_letter(sc + off)
             _set(ws.cell(row, sc + off),
                  f"=SUM({cl}{first_data}:{cl}{last_data})",
                  FONT_BOLD9, FILL_SUM, ALIGN_C)
         ws.row_dimensions[row].height = 18
 
-        # Bedingte Formatierung Diff-Spalte
-        diff_cl = get_column_letter(sc + 2)
-        diff_range = f"{diff_cl}{first_data}:{diff_cl}{last_data}"
-        ws.conditional_formatting.add(
-            diff_range,
-            CellIsRule(operator="lessThan", formula=["0"],
-                       font=Font(name="Calibri", size=9, color=C_RED),
-                       stopIfTrue=True))
-        ws.conditional_formatting.add(
-            diff_range,
-            CellIsRule(operator="greaterThanOrEqual", formula=["0"],
-                       font=Font(name="Calibri", size=9, color="008000"),
-                       stopIfTrue=True))
+        # Bedingte Formatierung Diff + Gesamt
+        for col_off in [2, 3]:  # Diff und Gesamt
+            fmt_cl = get_column_letter(sc + col_off)
+            fmt_range = f"{fmt_cl}{first_data}:{fmt_cl}{last_data}"
+            ws.conditional_formatting.add(
+                fmt_range,
+                CellIsRule(operator="lessThan", formula=["0"],
+                           font=Font(name="Calibri", size=9, color=C_RED),
+                           stopIfTrue=True))
+            ws.conditional_formatting.add(
+                fmt_range,
+                CellIsRule(operator="greaterThanOrEqual", formula=["0"],
+                           font=Font(name="Calibri", size=9, color="008000"),
+                           stopIfTrue=True))
 
-        _outer_border(ws, hdr_row, 1, row, sc + 2)
+        _outer_border(ws, hdr_row, 1, row, gc)
         row += 2
 
     ws.freeze_panes = "B4"
@@ -1334,6 +1379,8 @@ def main():
             e.shifts = {m: {} for m in range(12)}
 
         wb = Workbook()
+        wb.properties.creator = "Emanuel Siebert"
+        wb.properties.lastModifiedBy = "Emanuel Siebert"
         ws = wb.active
         ws.title = "Dienstplan"
         layout = create_eingabe(ws, emps)
@@ -1367,6 +1414,8 @@ def main():
         save_default_config(emps)
 
     wb = Workbook()
+    wb.properties.creator = "Emanuel Siebert"
+    wb.properties.lastModifiedBy = "Emanuel Siebert"
     ws = wb.active
     ws.title = "Dienstplan"
     layout = create_eingabe(ws, emps)
