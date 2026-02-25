@@ -20,7 +20,7 @@ import shutil
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import Cell
 from openpyxl.comments import Comment
-from openpyxl.formatting.rule import CellIsRule
+from openpyxl.formatting.rule import CellIsRule, FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -371,11 +371,15 @@ def _box_border(ws, r1, c1, r2, c2):
                                                left=left, right=right))
 
 def _add_cond_fmt(ws, cell_range):
+    # Erste Zelle des Bereichs für relative Formel-Referenz ermitteln
+    import re as _re
+    m = _re.match(r"([A-Z]+)(\d+)", cell_range.split(":")[0])
+    top_left = m.group(0)  # z.B. "B7"
     for code, fill, font in CF_RULES:
         ws.conditional_formatting.add(
             cell_range,
-            CellIsRule(operator="equal", formula=[f'"{code}"'],
-                       fill=fill, font=font, stopIfTrue=True))
+            FormulaRule(formula=[f'{top_left}="{code}"'],
+                        fill=fill, font=font, stopIfTrue=True))
 
 def _missing_critical(emps, mi, day):
     dt = datetime.date(YEAR, mi + 1, day)
@@ -796,14 +800,18 @@ def create_month(wb, mi, emps, layout):
     # Besetzung nur im Dienstplan-Sheet (nicht in Druckansicht)
     tbl_end = row - 1
 
-    _outer_border(ws, tbl_start, 1, tbl_end, last_col)
+    # Rahmen: bis zur letzten sichtbaren Zeile (vor Sekretariat)
+    visible_end = (first_sekr_row - 1) if first_sekr_row else tbl_end
+    _outer_border(ws, tbl_start, 1, visible_end, last_col)
+    # Sekretariat-Zeilen: eigener Rahmen (wird ausgeblendet)
+    if first_sekr_row:
+        for r in range(first_sekr_row, tbl_end + 1):
+            for c in range(1, last_col + 1):
+                ws.cell(r, c).border = THIN
+            ws.row_dimensions[r].hidden = True
 
     data_range = f"B{first_data_row}:{last_cl}{tbl_end}"
     _add_cond_fmt(ws, data_range)
-
-    if first_sekr_row:
-        for r in range(first_sekr_row, first_sekr_row + len(sekr)):
-            ws.row_dimensions[r].hidden = True
 
     # === LEGENDE + UNTERSCHRIFTEN (nur Außenrahmen) ===
     row += 1
