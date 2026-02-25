@@ -189,6 +189,7 @@ FONT_SIG_HINT = Font(name="Calibri", size=8, italic=True, color="999999")
 FONT_SEKR = Font(name="Calibri", size=9, bold=True, italic=True, color="999999")
 
 ALIGN_C = Alignment(horizontal="center", vertical="center")
+ALIGN_CS = Alignment(horizontal="center", vertical="center", shrinkToFit=True)
 ALIGN_L = Alignment(horizontal="left", vertical="center")
 
 SHIFT_COLORS = {
@@ -575,7 +576,7 @@ def create_eingabe(ws, emps):
         ws.row_dimensions[row].height = 18
         row += 1
 
-        # MA-Zeilen (statische Fills + CF für dynamische Änderungen)
+        # MA-Zeilen (nur Basis-Fills – Schichtfarben rein über CF)
         first_ma_row = row
         for ei, ed in enumerate(emps):
             layout.emp_rows[mi][ed.name] = row
@@ -585,19 +586,13 @@ def create_eingabe(ws, emps):
                 dt = datetime.date(YEAR, mn, d)
                 shift = ed.shifts[mi].get(d)
                 c = ws.cell(row, 1 + d)
-                c.alignment = ALIGN_C
+                c.alignment = ALIGN_CS
                 c.border = THIN
                 c.font = FONT_CELL8
                 if shift:
                     c.value = shift
                 if _is_special(dt):
                     c.fill = FILL_WE
-                elif shift:
-                    sf, fn = _shift_style(shift)
-                    if sf:
-                        c.fill = sf
-                    if fn:
-                        c.font = fn
                 elif zebra:
                     c.fill = zebra
             ws.row_dimensions[row].height = 16
@@ -752,7 +747,7 @@ def create_month(wb, mi, emps, layout):
         for d in range(1, dim + 1):
             dt = datetime.date(YEAR, mn, d)
             c = ws.cell(row, 1 + d)
-            c.alignment = ALIGN_C
+            c.alignment = ALIGN_CS
             c.border = THIN
             c.font = FONT_CELL8
             if src_row:
