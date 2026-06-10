@@ -87,6 +87,20 @@ class AutopilotConfig:
 
 
 @dataclass
+class ValidationConfig:
+    enabled: bool = True
+    interval: str = "15m"            # Trading-Timeframe der Technik-Prüfung
+    confirm_interval: str = "1h"     # Bestätigungs-Timeframe
+    lookback: int = 120
+    rsi_max_long: float = 75         # hartes Veto: kein Long darüber
+    rsi_min_short: float = 25        # hartes Veto: kein Short darunter
+    min_score: int = 2               # von 3 Technik-Checks müssen bestehen
+    cache_seconds: int = 120
+    llm_enabled: bool = False        # Claude-Zweitmeinung (ANTHROPIC_API_KEY)
+    llm_model: str = "claude-opus-4-8"
+
+
+@dataclass
 class ConvergenceConfig:
     enabled: bool = True
     sources: list = None  # type: ignore[assignment]  # binance | okx | bybit
@@ -135,6 +149,7 @@ class Config:
     shock: ShockConfig
     autopilot: AutopilotConfig
     convergence: ConvergenceConfig
+    validation: ValidationConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -159,6 +174,7 @@ def load_config(path: Path | None = None) -> Config:
         shock=ShockConfig(**raw.get("shock", {})),
         autopilot=AutopilotConfig(**raw.get("autopilot", {})),
         convergence=ConvergenceConfig(**raw.get("convergence", {})),
+        validation=ValidationConfig(**raw.get("validation", {})),
     )
     _validate(cfg)
     return cfg

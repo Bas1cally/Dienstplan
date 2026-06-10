@@ -171,8 +171,13 @@ class Autopilot:
         tracker = LeaderTracker(leader_info, [l["address"] for l in self.leaders])
         weights = {l["address"]: float(l["weight"]) for l in self.leaders}
         convergence = ConvergenceEngine(self.cfg.convergence) if self.cfg.convergence.enabled else None
+        validator = None
+        if self.cfg.validation.enabled:
+            from .validator import TradeValidator
+
+            validator = TradeValidator(self.cfg.validation, self.client)
         self.copier = CopyTrader(self.cfg, self.client, tracker, weights,
-                                 guard=self.guard, convergence=convergence)
+                                 guard=self.guard, convergence=convergence, validator=validator)
 
     # ---------- Leader-Analyse & Rotation ----------
 

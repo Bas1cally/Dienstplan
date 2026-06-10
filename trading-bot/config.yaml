@@ -91,6 +91,22 @@ autopilot:
   server_host: 127.0.0.1  # Web-UI nur lokal - NIE ungeschützt ins Internet!
   server_port: 8000
 
+# === Zwei-Bot-Prinzip: Trade-Validator (Bot 2) ===
+# Bot 1 (Copy-Engine) schlägt vor, Bot 2 prüft gegen die Markttechnik
+# (EMA-Trend 15m+1h, Momentum, RSI-Extreme). Nur wenn BEIDE Ja sagen, wird
+# Exposure aufgebaut. Reduzieren/Schließen läuft IMMER durch (Risikoabbau
+# braucht keine Genehmigung). Validator-Ausfall = konservativ ablehnen.
+validation:
+  enabled: true
+  interval: 15m            # Trading-Timeframe
+  confirm_interval: 1h     # Bestätigungs-Timeframe
+  rsi_max_long: 75         # hartes Veto: kein Long darüber
+  rsi_min_short: 25        # hartes Veto: kein Short darunter
+  min_score: 2             # 2 von 3 Technik-Checks müssen bestehen
+  cache_seconds: 120
+  llm_enabled: false       # Claude als dritte Stimme (ANTHROPIC_API_KEY in .env)
+  llm_model: claude-opus-4-8
+
 # === Multi-Exchange-Konvergenz ===
 # Positionierung der Top-Trader auf Binance/OKX/Bybit als Verstärker:
 # Übereinstimmung mit unseren HL-Leadern -> Position bis 1.25x größer,

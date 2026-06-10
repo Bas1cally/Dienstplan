@@ -17,6 +17,9 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
     avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
     rs = avg_gain / avg_loss.replace(0.0, np.nan)
     out = 100 - 100 / (1 + rs)
+    # Sonderfall avg_loss == 0: reine Gewinnserie ist RSI 100 (nicht neutral 50),
+    # sonst greift das Überkauft-Veto des Validators bei Parabel-Moves nicht.
+    out = out.where(avg_loss > 0, np.where(avg_gain > 0, 100.0, 50.0))
     return out.fillna(50.0)
 
 

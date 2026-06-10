@@ -184,6 +184,38 @@ python tests/test_autopilot.py    # Unit-Tests Leader-Rotation + KI-Merge
 3. **Copy-Loop + MarketGuard** wie gehabt, plus `runtime/status.json` als
    Live-Zustand für das Web-Frontend.
 
+## Zwei-Bot-Prinzip: der Trade-Validator (Bot 2)
+
+Jeder Einstieg braucht zwei unabhängige Ja-Stimmen:
+
+```
+Bot 1 (Copy-Engine)        Bot 2 (Validator)
+"Leader sind long BTC"  →  prüft Markttechnik:        →  beide OK? → Order
+                           · EMA(20/50)-Trend 15m + 1h
+                           · Momentum (Preis vs EMA20)
+                           · RSI-Extreme = hartes Veto
+                           · optional: Claude-Zweitmeinung
+```
+
+Drei bewusste Design-Entscheidungen (`bot/validator.py`):
+
+1. **Asymmetrie:** Der Validator blockt nur Exposure-*Erhöhungen*.
+   Reduzieren und Schließen läuft immer durch - Risikoabbau braucht keine
+   Genehmigung, sonst sitzt man im Crash auf einer Position fest.
+2. **Fail-closed:** Ist der Validator nicht verfügbar (API-Ausfall), wird der
+   Einstieg konservativ abgelehnt - lieber einen Trade verpassen als blind rein.
+3. **Score statt Alles-oder-Nichts:** 2 von 3 Technik-Checks müssen bestehen
+   (konfigurierbar); RSI-Extreme (>75 Long / <25 Short) sind ein hartes Veto.
+
+Mit `validation.llm_enabled: true` wird **Claude zur dritten Stimme**: Er
+bekommt die kompakten Marktdaten (EMAs, RSI, ATR%, Trend-Score) plus den
+Trade-Vorschlag und darf nur vetoen, nicht selbst Trades vorschlagen.
+
+> Ehrliche Einordnung: EMA/RSI sind bewährte Heuristiken, keine
+> "wissenschaftlich bewiesenen" Edges. Der Wert des Validators liegt im
+> Filtern offensichtlich schlechter Einstiege (Long ins fallende Messer) -
+> der Preis dafür sind weniger Trades und etwas spätere Einstiege.
+
 ## Multi-Exchange-Konvergenz (Binance, OKX, Bybit)
 
 **Realitätscheck:** Das alte Binance-Leaderboard mit einzelnen Trader-Positionen
@@ -317,6 +349,7 @@ trading-bot/
     │   ├── larp.py         # harte K.O.-Gates gegen Blender
     │   ├── tracker.py      # Snapshots der Leader-Positionen
     │   └── copier.py       # Ziel-Portfolio + Rebalancing mit Risiko-Caps
+    ├── validator.py        # Bot 2: prüft jeden Einstieg (EMA/RSI + Claude-Option)
     ├── convergence.py      # Top-Trader-Ratios Binance/OKX/Bybit als Verstärker
     ├── notify.py           # Telegram-Alerts
     ├── news/

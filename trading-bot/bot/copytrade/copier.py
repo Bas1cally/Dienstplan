@@ -118,7 +118,8 @@ def plan_rebalance(
 
 
 class CopyTrader:
-    def __init__(self, cfg, client, tracker, weights: dict[str, float], guard=None, convergence=None):
+    def __init__(self, cfg, client, tracker, weights: dict[str, float], guard=None,
+                 convergence=None, validator=None):
         self.cfg = cfg                      # vollständige Config
         self.ct: CopytradeConfig = cfg.copytrade
         self.client = client
@@ -126,6 +127,7 @@ class CopyTrader:
         self.weights = weights
         self.guard = guard                  # MarketGuard (optional)
         self.convergence = convergence      # ConvergenceEngine (optional)
+        self.validator = validator          # TradeValidator (optional, Bot 2)
         self.last_snapshots: list[LeaderSnapshot] = []  # für Performance-Tracking
         self.risk = RiskManager(cfg.risk)
         self.day_start_equity = 0.0
@@ -169,6 +171,7 @@ class CopyTrader:
         if caution:
             # Im Vorsichtsmodus nur Orders ausführen, die das Exposure senken
             orders = [o for o in orders if abs(o.target_notional) < abs(o.current_notional)]
+        orders = self._validate_orders(orders)
 
         for o in orders:
             side = "BUY" if o.is_buy else "SELL"
@@ -184,6 +187,30 @@ class CopyTrader:
                     self.client.market_open(o.coin, o.is_buy, abs(o.delta_size), self.cfg.risk.slippage)
                 except Exception:
                     log.exception("Order für %s fehlgeschlagen", o.coin)
+
+    # ---------- Zwei-Bot-Prinzip: Validator prüft jeden Einstieg ----------
+
+    def _validate_orders(self, orders: list[RebalanceOrder]) -> list[RebalanceOrder]:
+        """Bot 2 (Validator) muss jeder Exposure-ERHÖHUNG zustimmen.
+
+        Reduzierungen und Schließungen laufen IMMER durch - Risikoabbau
+        braucht keine Genehmigung.
+        """
+        if not self.validator:
+            return orders
+        out = []
+        for o in orders:
+            increases = abs(o.target_notional) > abs(o.current_notional)
+            if not increases:
+                out.append(o)
+                continue
+            verdict = self.validator.check(o.coin, is_long=o.target_notional > 0)
+            if verdict.ok:
+                log.info("Validator %s: %s", o.coin, verdict.summary())
+                out.append(o)
+            else:
+                log.info("Validator blockt %s-Einstieg: %s", o.coin, verdict.summary())
+        return out
 
     # ---------- Hilfsfunktionen ----------
 
