@@ -5,3 +5,5 @@ bot.log
 *.pyc
 copy_bot.log
 trading-bot/leaders.json
+autopilot.log
+trading-bot/runtime/

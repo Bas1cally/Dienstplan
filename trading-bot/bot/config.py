@@ -67,6 +67,8 @@ class NewsConfig:
     caution_score: float = 4.0
     risk_off_score: float = 8.0
     half_life_minutes: float = 30.0
+    llm_enabled: bool = False        # Claude bewertet Schlagzeilen zusätzlich (ANTHROPIC_API_KEY)
+    llm_model: str = "claude-opus-4-8"  # günstigere Alternative: claude-haiku-4-5
 
     def __post_init__(self):
         if self.rss_feeds is None:
@@ -74,6 +76,14 @@ class NewsConfig:
                 "https://www.coindesk.com/arc/outboundfeeds/rss/",
                 "https://cointelegraph.com/rss",
             ]
+
+
+@dataclass
+class AutopilotConfig:
+    reanalyze_hours: float = 24      # wie oft das Leaderboard neu analysiert wird
+    min_keep_score: float = 35       # Leader unter diesem Score werden rotiert
+    server_host: str = "127.0.0.1"
+    server_port: int = 8000
 
 
 @dataclass
@@ -108,6 +118,7 @@ class Config:
     copytrade: CopytradeConfig
     news: NewsConfig
     shock: ShockConfig
+    autopilot: AutopilotConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -130,6 +141,7 @@ def load_config(path: Path | None = None) -> Config:
         copytrade=CopytradeConfig(analysis=analysis, **ct_raw),
         news=NewsConfig(**raw.get("news", {})),
         shock=ShockConfig(**raw.get("shock", {})),
+        autopilot=AutopilotConfig(**raw.get("autopilot", {})),
     )
     _validate(cfg)
     return cfg

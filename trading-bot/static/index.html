@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hyperliquid Autopilot</title>
+<style>
+  :root { --bg:#0b0e14; --card:#141a26; --border:#232b3d; --text:#e6e9f0; --dim:#8a94ab;
+          --green:#2dd4a7; --red:#f06a6a; --amber:#f0b35e; --accent:#5e8bf0; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font:15px/1.5 'Segoe UI',system-ui,sans-serif; padding:24px; }
+  .wrap { max-width:980px; margin:0 auto; }
+  h1 { font-size:20px; letter-spacing:.5px; margin-bottom:18px; }
+  h1 small { color:var(--dim); font-weight:400; font-size:13px; margin-left:10px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-bottom:14px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; }
+  .card h3 { font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--dim); margin-bottom:8px; }
+  .big { font-size:24px; font-weight:600; }
+  .badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:12px; font-weight:600; }
+  .b-green { background:rgba(45,212,167,.15); color:var(--green); }
+  .b-red { background:rgba(240,106,106,.15); color:var(--red); }
+  .b-amber { background:rgba(240,179,94,.15); color:var(--amber); }
+  .b-dim { background:rgba(138,148,171,.15); color:var(--dim); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 18px;
+           font-size:14px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.4; cursor:default; }
+  button.stop { background:var(--red); }
+  button.ghost { background:transparent; border:1px solid var(--border); color:var(--text); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:var(--dim); font-weight:500; padding:6px 8px; border-bottom:1px solid var(--border); }
+  td { padding:6px 8px; border-bottom:1px solid var(--border); }
+  .pos { color:var(--green); } .neg { color:var(--red); }
+  .mono { font-family:ui-monospace,monospace; font-size:12px; }
+  .steps { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  #msg { color:var(--dim); font-size:13px; margin-top:10px; min-height:18px; }
+  .warn { background:rgba(240,179,94,.08); border:1px solid rgba(240,179,94,.3); border-radius:8px;
+          padding:10px 14px; font-size:13px; color:var(--amber); margin-bottom:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚡ Hyperliquid Autopilot <small id="net"></small></h1>
+  <div class="warn">Trading mit Leverage kann zum Totalverlust führen. Der Autopilot handelt selbstständig –
+    Risiko-Limits in <span class="mono">config.yaml</span> prüfen, bevor echtes Geld fließt.</div>
+
+  <div class="card" style="margin-bottom:14px">
+    <h3>Setup – einmal verbinden, der Bot macht den Rest</h3>
+    <div class="steps">
+      <button id="btnConnect">1 · Wallet verbinden</button>
+      <button id="btnAgent" disabled>2 · Bot-Vollmacht signieren</button>
+      <button id="btnStart" disabled>3 · Autopilot starten</button>
+      <button id="btnStop" class="stop" style="display:none">Autopilot stoppen</button>
+    </div>
+    <div id="msg"></div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><h3>Status</h3><div class="big" id="stState">–</div></div>
+    <div class="card"><h3>Risiko-Level (News + Schock)</h3><div class="big" id="stRisk">–</div></div>
+    <div class="card"><h3>Equity</h3><div class="big" id="stEquity">–</div></div>
+    <div class="card"><h3>Modus</h3><div class="big" id="stMode">–</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <h3>Offene Positionen</h3>
+    <table><thead><tr><th>Coin</th><th>Größe</th><th>Entry</th><th>uPnL</th></tr></thead>
+    <tbody id="positions"><tr><td colspan="4" style="color:var(--dim)">keine</td></tr></tbody></table>
+  </div>
+
+  <div class="card">
+    <h3>Aktive Leader (automatisch rotiert <span id="nextRot"></span>)</h3>
+    <table><thead><tr><th>Wallet</th><th>Gewicht</th><th>Score</th><th>ROI 30d</th><th>PF</th><th>Max DD</th></tr></thead>
+    <tbody id="leaders"><tr><td colspan="6" style="color:var(--dim)">noch keine Analyse</td></tr></tbody></table>
+  </div>
+</div>
+
+<script>
+let wallet = null, agentReady = false, running = false;
+const $ = id => document.getElementById(id);
+const msg = t => $('msg').textContent = t;
+
+function badge(el, text, cls) { el.innerHTML = `<span class="badge ${cls}">${text}</span>`; }
+
+async function api(path, body) {
+  const r = await fetch(path, body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {});
+  if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+  return r.json();
+}
+
+$('btnConnect').onclick = async () => {
+  if (!window.ethereum) return msg('MetaMask nicht gefunden – bitte Extension installieren.');
+  try {
+    const [addr] = await ethereum.request({method:'eth_requestAccounts'});
+    await api('/api/wallet', {address: addr});
+    wallet = addr;
+    $('btnConnect').textContent = '✓ ' + addr.slice(0,6) + '…' + addr.slice(-4);
+    $('btnAgent').disabled = false; $('btnStart').disabled = false;
+    msg('Wallet verbunden. Für echtes Trading Schritt 2, für Dry-Run direkt Schritt 3.');
+  } catch (e) { msg('Verbindung abgelehnt: ' + e.message); }
+};
+
+$('btnAgent').onclick = async () => {
+  try {
+    msg('Erzeuge Agent-Wallet …');
+    const {typed_data, nonce} = await api('/api/agent/create', {address: wallet});
+    msg('Bitte in MetaMask signieren (erteilt dem Bot Trade-Vollmacht, KEINE Auszahlungsrechte) …');
+    const sig = await ethereum.request({method:'eth_signTypedData_v4', params:[wallet, JSON.stringify(typed_data)]});
+    await api('/api/agent/approve', {address: wallet, nonce, signature: sig});
+    agentReady = true;
+    $('btnAgent').textContent = '✓ Vollmacht erteilt';
+    msg('Agent freigeschaltet – der Bot kann jetzt für dich traden (Auszahlungen bleiben unmöglich).');
+  } catch (e) { msg('Approval fehlgeschlagen: ' + e.message); }
+};
+
+$('btnStart').onclick = async () => { await api('/api/autopilot/start', {}); msg('Autopilot gestartet.'); };
+$('btnStop').onclick  = async () => { await api('/api/autopilot/stop', {});  msg('Autopilot wird gestoppt.'); };
+
+const fmt = (n, d=2) => n == null ? '–' : Number(n).toLocaleString('de-DE', {maximumFractionDigits:d});
+
+async function refresh() {
+  try {
+    const s = await api('/api/status');
+    running = s.autopilot_running;
+    $('net').textContent = (s.config.network || '') + (s.config.dry_run ? ' · dry-run' : ' · LIVE') +
+      ` · max ${s.config.max_leverage}x · Tageslimit −${(s.config.max_daily_loss*100).toFixed(0)}%`;
+    badge($('stState'), running ? (s.state || 'running') : 'gestoppt', running ? 'b-green' : 'b-dim');
+    const rl = s.risk_level || 'NORMAL';
+    badge($('stRisk'), rl, rl === 'NORMAL' ? 'b-green' : rl === 'CAUTION' ? 'b-amber' : 'b-red');
+    $('stEquity').textContent = s.equity != null ? fmt(s.equity) + ' $' : '–';
+    badge($('stMode'), s.config.dry_run ? 'DRY-RUN' : 'LIVE', s.config.dry_run ? 'b-amber' : 'b-red');
+    $('btnStart').style.display = running ? 'none' : '';
+    $('btnStop').style.display = running ? '' : 'none';
+    if (s.agent_ready && !agentReady) { $('btnAgent').textContent = '✓ Vollmacht erteilt'; agentReady = true; }
+    $('nextRot').textContent = s.next_analysis_in_h != null ? `– nächste Analyse in ${s.next_analysis_in_h}h` : '';
+
+    $('positions').innerHTML = (s.positions && s.positions.length)
+      ? s.positions.map(p => `<tr><td>${p.coin}</td><td>${fmt(p.size,5)}</td><td>${fmt(p.entry)}</td>
+          <td class="${p.unrealized_pnl >= 0 ? 'pos':'neg'}">${fmt(p.unrealized_pnl)} $</td></tr>`).join('')
+      : '<tr><td colspan="4" style="color:var(--dim)">keine</td></tr>';
+
+    $('leaders').innerHTML = (s.leaders && s.leaders.length)
+      ? s.leaders.map(l => `<tr><td class="mono">${l.address.slice(0,8)}…${l.address.slice(-6)}</td>
+          <td>${(l.weight*100).toFixed(0)}%</td><td>${l.score}</td>
+          <td class="${l.roi_pct >= 0 ? 'pos':'neg'}">${fmt(l.roi_pct)}%</td>
+          <td>${l.profit_factor ?? '–'}</td><td>${fmt(l.max_drawdown_pct,1)}%</td></tr>`).join('')
+      : '<tr><td colspan="6" style="color:var(--dim)">noch keine Analyse</td></tr>';
+  } catch (e) { /* Server kurz weg - nächster Tick */ }
+}
+refresh(); setInterval(refresh, 5000);
+</script>
+</body>
+</html>

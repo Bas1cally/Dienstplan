@@ -32,9 +32,15 @@ class MarketGuard:
         self.client = client          # HyperliquidClient für 1m-Candles
         self.coin = coin              # Referenzmarkt für die Schock-Erkennung
         self.sources = build_sources(news_cfg) if news_cfg.enabled else []
+        self.llm = None
+        if news_cfg.enabled and getattr(news_cfg, "llm_enabled", False):
+            from .llm import LlmClassifier
+
+            self.llm = LlmClassifier(news_cfg.llm_model)
         self._scored: list = []
         self._last_news_poll = 0.0
         self._seen: set[str] = set()
+        self.last_level: RiskLevel = RiskLevel.NORMAL
 
     def level(self) -> RiskLevel:
         shock_level = self._check_shock()
@@ -43,6 +49,7 @@ class MarketGuard:
         if level > RiskLevel.NORMAL:
             log.warning("MarketGuard: %s (Schock=%s, News=%s)",
                         level.name, shock_level.name, news_level.name)
+        self.last_level = level
         return level
 
     # ---------- Preis-Schock ----------
@@ -78,6 +85,7 @@ class MarketGuard:
         return RiskLevel.NORMAL
 
     def _poll_news(self) -> None:
+        fresh = []
         for source in self.sources:
             try:
                 for item in source.fetch():
@@ -85,12 +93,25 @@ class MarketGuard:
                     if key in self._seen:
                         continue
                     self._seen.add(key)
-                    scored = score_item(item)
-                    if scored.score >= 2:
-                        log.info("News [%.1f] %s", scored.score, item.title[:120])
-                        self._scored.append(scored)
+                    fresh.append(item)
             except Exception:
                 log.exception("News-Quelle %s fehlgeschlagen", type(source).__name__)
+
+        # Stufe 1: deterministische Keyword-Bewertung (immer)
+        scored = [score_item(it) for it in fresh]
+
+        # Stufe 2: Claude bewertet alle neuen Schlagzeilen; das Maximum gewinnt.
+        # Fängt Risiken, die kein Keyword-Muster trifft (allgemeine Protection).
+        if self.llm and self.llm.available and fresh:
+            for idx, (risk, reason) in self.llm.classify(fresh).items():
+                if idx < len(scored) and risk > scored[idx].score:
+                    scored[idx].score = risk
+                    scored[idx].matched.append(f"claude:{reason[:80]}")
+
+        for s in scored:
+            if s.score >= 2:
+                log.info("News [%.1f] %s", s.score, s.item.title[:120])
+                self._scored.append(s)
         # Gedächtnis begrenzen
         if len(self._scored) > 200:
             self._scored = self._scored[-100:]

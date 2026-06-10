@@ -3,6 +3,23 @@
 Trendfolge-Bot für Hyperliquid Perpetuals mit striktem Risikomanagement,
 Backtesting und mehrstufigem Sicherheitskonzept.
 
+## Schnellstart: Autopilot mit Web-UI
+
+```bash
+pip install -r requirements.txt
+python server.py          # -> http://127.0.0.1:8000
+```
+
+Im Dashboard: **Wallet verbinden → Bot-Vollmacht signieren → Autopilot starten.**
+Alles Weitere läuft im Hintergrund: Trader-Analyse, Leader-Rotation,
+Copy-Trading, News-/Schock-Überwachung, Circuit Breaker.
+
+- Die Vollmacht ist ein Hyperliquid **Agent-Wallet** (per EIP-712 in MetaMask
+  signiert): Der Bot darf traden, aber **niemals auszahlen**. Der Haupt-Wallet-Key
+  verlässt nie den Browser; der Agent-Key liegt nur lokal in `.env` (chmod 600).
+- Headless ohne UI: `python autopilot.py`
+- Der Server bindet auf `127.0.0.1` - niemals ungeschützt ins Internet stellen.
+
 > **Risikohinweis:** Kein Trading-Bot ist garantiert profitabel. Leverage
 > verstärkt Verluste genauso wie Gewinne – bis hin zur Liquidation. Handle
 > nur mit Geld, dessen Totalverlust du verkraften kannst, und erst nach
@@ -150,7 +167,22 @@ Rebalance-Schwellwert verhindert, dass Fees das Konto auffressen.
 ```bash
 python tests/test_copytrade.py    # Unit-Tests der Copy-Logik
 python tests/test_larp_news.py    # Unit-Tests LARP-Filter + News/Schock
+python tests/test_autopilot.py    # Unit-Tests Leader-Rotation + KI-Merge
 ```
+
+## Autopilot: Vollautomatik mit Leader-Rotation
+
+`bot/autopilot.py` orchestriert alles in einem Daemon:
+
+1. **Analyse beim Start** und danach alle `autopilot.reanalyze_hours` (24h):
+   kompletter Funnel inkl. LARP-Filter
+2. **Automatische Rotation**: Leader unter `min_keep_score` fliegen raus,
+   die Plätze füllen die besten Neuen. Bestehende Leader bekommen einen
+   kleinen Bestandsschutz-Bonus (+5), damit Gleichstand nicht zu sinnlosem
+   Portfolio-Umbau führt. Leader, die aus dem Top-1% verschwinden, werden
+   nicht blind weiterkopiert.
+3. **Copy-Loop + MarketGuard** wie gehabt, plus `runtime/status.json` als
+   Live-Zustand für das Web-Frontend.
 
 ## Marktüberwachung: News-Analyse + Schock-Detektor
 
@@ -183,6 +215,17 @@ SEC-Klagen und Zinsentscheide hoch. Aussagen von Trump/Fed/SEC/Whitehouse
 bekommen einen 1,5×-Boost. Der aggregierte Score zerfällt mit konfigurierbarer
 Halbwertszeit, damit alte Schlagzeilen den Bot nicht ewig blockieren.
 
+### Claude-KI-Klassifizierung (allgemeine Protection, optional)
+
+Keywords decken bekannte Muster ab - aber "Fed schedules unscheduled sunday
+meeting" triggert kein Keyword und ist trotzdem hochriskant. Mit
+`news.llm_enabled: true` (+ `ANTHROPIC_API_KEY` in `.env`) bewertet **Claude
+jede neue Schlagzeile** zusätzlich auf einer 0-10-Risikoskala; der finale
+Score ist das **Maximum** beider Bewertungen - die wachsamere Stimme gewinnt.
+Fällt die API aus, läuft die Keyword-Engine unverändert weiter (kein Single
+Point of Failure). Modell konfigurierbar (`news.llm_model`), Schlagzeilen
+werden gebatcht (25/Request), um Kosten zu minimieren.
+
 ```bash
 python news_monitor.py            # News-Pipeline isoliert testen
 python news_monitor.py --watch    # Dauerbetrieb
@@ -204,6 +247,9 @@ RSS/CryptoPanic (Kontext, kostenlos)**.
 ```
 trading-bot/
 ├── config.yaml          # alle Parameter (Strategie, Risiko, Copy-Trading)
+├── server.py            # Web-UI: Wallet-Connect + Autopilot-Steuerung
+├── autopilot.py         # CLI: Autopilot headless
+├── static/index.html    # Dashboard (MetaMask, Status, Leader, Positionen)
 ├── backtest.py          # CLI: Backtest der Trendfolge-Strategie
 ├── run_bot.py           # CLI: Trendfolge-Bot (Live/Dry-Run)
 ├── analyze_traders.py   # CLI: Trader-Discovery + LARP-Filter + Scoring
@@ -211,7 +257,8 @@ trading-bot/
 ├── news_monitor.py      # CLI: News-Pipeline isoliert testen
 ├── tests/
 │   ├── test_copytrade.py
-│   └── test_larp_news.py
+│   ├── test_larp_news.py
+│   └── test_autopilot.py
 └── bot/
     ├── config.py        # Config + Credentials laden/validieren
     ├── indicators.py    # EMA, RSI (Wilder), ATR
@@ -226,9 +273,11 @@ trading-bot/
     │   ├── larp.py         # harte K.O.-Gates gegen Blender
     │   ├── tracker.py      # Snapshots der Leader-Positionen
     │   └── copier.py       # Ziel-Portfolio + Rebalancing mit Risiko-Caps
-    └── news/
-        ├── sources.py      # RSS, CryptoPanic, X/Twitter (optional)
-        ├── sentiment.py    # regelbasiertes Risiko-Scoring mit Zeit-Zerfall
-        ├── shock.py        # Preis-Schock-Detektor auf 1m-Candles
-        └── guard.py        # kombiniert beides -> NORMAL/CAUTION/RISK_OFF
+    ├── news/
+    │   ├── sources.py      # RSS, CryptoPanic, X/Twitter (optional)
+    │   ├── sentiment.py    # regelbasiertes Risiko-Scoring mit Zeit-Zerfall
+    │   ├── llm.py          # Claude-KI-Klassifizierung (optional)
+    │   ├── shock.py        # Preis-Schock-Detektor auf 1m-Candles
+    │   └── guard.py        # kombiniert alles -> NORMAL/CAUTION/RISK_OFF
+    └── autopilot.py        # Vollautomatik: Analyse, Rotation, Copy, Status
 ```

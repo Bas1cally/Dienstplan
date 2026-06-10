@@ -70,6 +70,8 @@ news:
   caution_score: 4        # ab diesem Score keine neuen Positionen
   risk_off_score: 8       # ab diesem Score alles glattstellen
   half_life_minutes: 30   # Score-Zerfall alter Schlagzeilen
+  llm_enabled: false      # Claude bewertet jede Schlagzeile zusätzlich (ANTHROPIC_API_KEY in .env)
+  llm_model: claude-opus-4-8   # günstiger/schneller: claude-haiku-4-5
 
 shock:                    # die schnelle Verteidigung - direkt auf 1m-Preisdaten
   enabled: true
@@ -77,3 +79,10 @@ shock:                    # die schnelle Verteidigung - direkt auf 1m-Preisdaten
   move_threshold: 0.025   # 2.5% Move in 5min -> RISK_OFF
   vol_spike_ratio: 4.0    # Kurzfrist-Vola 4x über Stunden-Vola -> RISK_OFF
   cooldown_minutes: 30
+
+# === Autopilot: Vollautomatik (server.py / autopilot.py) ===
+autopilot:
+  reanalyze_hours: 24     # Leaderboard-Analyse + Leader-Rotation alle X Stunden
+  min_keep_score: 35      # Leader unter diesem Score werden ausgetauscht
+  server_host: 127.0.0.1  # Web-UI nur lokal - NIE ungeschützt ins Internet!
+  server_port: 8000

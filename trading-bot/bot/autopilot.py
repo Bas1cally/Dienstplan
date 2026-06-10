@@ -1,0 +1,255 @@
+"""Autopilot: der vollautomatische Betriebsmodus.
+
+Kein manuelles analyze_traders.py + copy_bot.py mehr - der Autopilot macht alles:
+
+  1. Analysiert das Leaderboard beim Start und danach alle `reanalyze_hours`
+     (Funnel + LARP-Filter wie gehabt) und ROTIERT die Leader automatisch:
+     Leader, die unter den Mindest-Score fallen, fliegen raus; Plätze werden
+     mit den besten Neuen aufgefüllt. Bestehende Leader haben leichten
+     Bestandsschutz, damit nicht bei jedem Lauf das halbe Portfolio dreht.
+  2. Spiegelt die Leader-Positionen (Reconciliation, copier.py)
+  3. Überwacht News + Preis-Schocks (MarketGuard) mit CAUTION/RISK_OFF
+  4. Schreibt den Live-Zustand nach runtime/status.json (Frontend liest das)
+
+Threads: ein Worker-Loop; start()/stop() für die Steuerung über das Web-UI.
+"""
+
+import json
+import logging
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from hyperliquid.info import Info
+
+from .config import Config, load_credentials
+from .copytrade.analyzer import TraderAnalyzer, TraderMetrics
+from .copytrade.copier import CopyTrader
+from .copytrade.larp import LarpConfig, LarpFilter
+from .copytrade.leaderboard import fetch_candidates
+from .copytrade.tracker import LeaderTracker
+from .exchange import HyperliquidClient, api_url
+from .news.guard import MarketGuard
+
+log = logging.getLogger(__name__)
+
+RUNTIME = Path(__file__).resolve().parent.parent / "runtime"
+
+
+def rotate_leaders(
+    current: list[dict],
+    ranked: list[TraderMetrics],
+    max_leaders: int,
+    min_keep_score: float,
+    keep_bonus: float = 5.0,
+) -> list[dict]:
+    """Entscheidet die neue Leader-Liste nach einer Re-Analyse.
+
+    Bestandsschutz: aktuelle Leader bekommen `keep_bonus` Punkte auf ihren
+    frischen Score, bevor verglichen wird - das verhindert Churn, wenn zwei
+    Trader praktisch gleichauf liegen. Wer unter `min_keep_score` fällt,
+    fliegt trotzdem kompromisslos raus.
+    """
+    current_addrs = {l["address"] for l in current}
+    by_addr = {m.address: m for m in ranked}
+
+    pool = []
+    for m in ranked:
+        if m.score < min_keep_score and m.address in current_addrs:
+            log.info("Rotation: %s fällt raus (Score %.1f < %.1f)", m.address[:10], m.score, min_keep_score)
+            continue
+        eff = m.score + (keep_bonus if m.address in current_addrs else 0.0)
+        pool.append((eff, m))
+    # Aktuelle Leader, die in der neuen Analyse gar nicht mehr auftauchen
+    # (z.B. aus dem Top-1% gefallen), werden NICHT blind behalten - raus.
+    pool.sort(key=lambda t: t[0], reverse=True)
+    top = [m for _, m in pool[:max_leaders]]
+
+    total = sum(m.score for m in top) or 1.0
+    return [
+        {
+            "address": m.address,
+            "weight": round(m.score / total, 4),
+            "score": m.score,
+            "roi_pct": round(m.roi * 100, 2),
+            "profit_factor": round(min(m.profit_factor, 999), 2),
+            "max_drawdown_pct": round(m.max_drawdown * 100, 2),
+            "closed_trades": m.closed_trades,
+        }
+        for m in top
+    ]
+
+
+class Autopilot:
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._status: dict = {"state": "stopped"}
+        self._lock = threading.Lock()
+        self._last_analysis = 0.0
+        self.leaders: list[dict] = []
+        self.client: HyperliquidClient | None = None
+        self.copier: CopyTrader | None = None
+        self.guard: MarketGuard | None = None
+        self.account_address: str | None = None
+        self.error: str | None = None
+
+    # ---------- Lebenszyklus ----------
+
+    @property
+    def running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self, account_address: str | None = None) -> None:
+        if self.running:
+            return
+        if account_address:
+            self.account_address = account_address
+        self._stop.clear()
+        self.error = None
+        self._thread = threading.Thread(target=self._run, daemon=True, name="autopilot")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._set_status(state="stopping")
+
+    def status(self) -> dict:
+        with self._lock:
+            return dict(self._status)
+
+    # ---------- Hauptschleife ----------
+
+    def _run(self) -> None:
+        try:
+            self._setup()
+        except Exception as e:
+            log.exception("Autopilot-Setup fehlgeschlagen")
+            self.error = str(e)
+            self._set_status(state="error", error=str(e))
+            return
+
+        self._set_status(state="running")
+        while not self._stop.is_set():
+            try:
+                self._maybe_reanalyze()
+                if self.copier and self.leaders:
+                    self.copier.tick()
+                self._publish()
+            except Exception:
+                log.exception("Autopilot-Tick fehlgeschlagen")
+            self._stop.wait(self.cfg.copytrade.poll_seconds)
+        self._set_status(state="stopped")
+
+    def _setup(self) -> None:
+        key = addr = None
+        if not self.cfg.dry_run:
+            key, addr = load_credentials()
+        self.client = HyperliquidClient(
+            testnet=self.cfg.is_testnet, private_key=key,
+            account_address=addr or self.account_address,
+        )
+        self.guard = MarketGuard(self.cfg.news, self.cfg.shock, client=self.client, coin="BTC")
+        self._load_or_analyze_leaders()
+        leader_info = Info(api_url(testnet=False), skip_ws=True)
+        tracker = LeaderTracker(leader_info, [l["address"] for l in self.leaders])
+        weights = {l["address"]: float(l["weight"]) for l in self.leaders}
+        self.copier = CopyTrader(self.cfg, self.client, tracker, weights, guard=self.guard)
+
+    # ---------- Leader-Analyse & Rotation ----------
+
+    def _load_or_analyze_leaders(self) -> None:
+        path = Path(self.cfg.copytrade.leaders_file)
+        if path.exists():
+            self.leaders = json.loads(path.read_text())[: self.cfg.copytrade.max_leaders]
+            self._last_analysis = path.stat().st_mtime
+            log.info("Leaders aus %s geladen (%d)", path, len(self.leaders))
+        else:
+            self._reanalyze()
+
+    def _maybe_reanalyze(self) -> None:
+        hours = self.cfg.autopilot.reanalyze_hours
+        if time.time() - self._last_analysis >= hours * 3600:
+            self._reanalyze()
+
+    def _reanalyze(self) -> None:
+        log.info("Starte Leaderboard-Analyse (Funnel + LARP-Filter) ...")
+        an = self.cfg.copytrade.analysis
+        try:
+            candidates = fetch_candidates(
+                min_account_value=an.min_account_value, min_volume=an.min_volume,
+                top_n=an.top_n, top_percent=an.top_percent,
+            )
+            info = Info(api_url(testnet=False), skip_ws=True)
+            analyzer = TraderAnalyzer(info, days=an.days)
+            larp = LarpFilter(LarpConfig(**(an.larp or {})))
+            ranked = analyzer.rank([c.address for c in candidates], min_score=an.min_score, larp=larp)
+        except Exception:
+            log.exception("Analyse fehlgeschlagen - behalte bisherige Leader")
+            self._last_analysis = time.time()
+            return
+
+        new_leaders = rotate_leaders(
+            self.leaders, ranked, self.cfg.copytrade.max_leaders, self.cfg.autopilot.min_keep_score,
+        )
+        if not new_leaders:
+            log.warning("Analyse fand keine geeigneten Leader - behalte bisherige")
+        else:
+            old = {l["address"] for l in self.leaders}
+            new = {l["address"] for l in new_leaders}
+            if old != new:
+                log.info("Leader-Rotation: raus %s | rein %s",
+                         [a[:10] for a in old - new] or "-", [a[:10] for a in new - old] or "-")
+            self.leaders = new_leaders
+            Path(self.cfg.copytrade.leaders_file).write_text(json.dumps(new_leaders, indent=2))
+            if self.copier:
+                self.copier.weights = {l["address"]: float(l["weight"]) for l in new_leaders}
+                self.copier.tracker.addresses = [l["address"] for l in new_leaders]
+        self._last_analysis = time.time()
+
+    # ---------- Status für das Frontend ----------
+
+    def _publish(self) -> None:
+        equity = positions = None
+        try:
+            addr = self.client.account_address or self.account_address
+            if addr:
+                state = self.client.info.user_state(addr)
+                equity = float(state["marginSummary"]["accountValue"])
+                positions = [
+                    {
+                        "coin": p["position"]["coin"],
+                        "size": float(p["position"]["szi"]),
+                        "entry": float(p["position"]["entryPx"] or 0),
+                        "unrealized_pnl": float(p["position"]["unrealizedPnl"]),
+                    }
+                    for p in state.get("assetPositions", [])
+                    if float(p["position"]["szi"]) != 0
+                ]
+        except Exception:
+            log.debug("Account-Status nicht abrufbar", exc_info=True)
+
+        self._set_status(
+            state="halted" if (self.copier and self.copier.halted) else "running",
+            mode="dry_run" if self.cfg.dry_run else "live",
+            network="testnet" if self.cfg.is_testnet else "mainnet",
+            risk_level=self.guard.last_level.name if self.guard else "NORMAL",
+            equity=equity,
+            positions=positions or [],
+            leaders=self.leaders,
+            account=self.client.account_address or self.account_address,
+            next_analysis_in_h=round(
+                max(0.0, self.cfg.autopilot.reanalyze_hours - (time.time() - self._last_analysis) / 3600), 1
+            ),
+        )
+
+    def _set_status(self, **kwargs) -> None:
+        with self._lock:
+            self._status = {"updated": datetime.now(timezone.utc).isoformat(), **kwargs}
+            try:
+                RUNTIME.mkdir(exist_ok=True)
+                (RUNTIME / "status.json").write_text(json.dumps(self._status, indent=2))
+            except OSError:
+                pass
