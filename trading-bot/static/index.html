@@ -57,8 +57,10 @@
   <div class="grid">
     <div class="card"><h3>Status</h3><div class="big" id="stState">–</div></div>
     <div class="card"><h3>Risiko-Level (News + Schock)</h3><div class="big" id="stRisk">–</div></div>
-    <div class="card"><h3>Equity</h3><div class="big" id="stEquity">–</div></div>
-    <div class="card"><h3>Modus</h3><div class="big" id="stMode">–</div></div>
+    <div class="card"><h3>Equity</h3><div class="big" id="stEquity">–</div>
+      <div id="paperStats" style="font-size:12px;color:var(--dim);margin-top:4px"></div></div>
+    <div class="card"><h3>Modus</h3><div class="big" id="stMode">–</div>
+      <button id="btnReset" class="ghost" style="margin-top:8px;padding:5px 10px;font-size:12px;display:none">Paper-Konto zurücksetzen</button></div>
   </div>
 
   <div class="card" style="margin-bottom:14px">
@@ -70,6 +72,12 @@
     <h3>Offene Positionen</h3>
     <table><thead><tr><th>Coin</th><th>Größe</th><th>Entry</th><th>uPnL</th></tr></thead>
     <tbody id="positions"><tr><td colspan="4" style="color:var(--dim)">keine</td></tr></tbody></table>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <h3>Aktivität (Orders, Vetos, Rotationen)</h3>
+    <table><thead><tr><th>Zeit</th><th>Ereignis</th><th>Details</th></tr></thead>
+    <tbody id="journal"><tr><td colspan="3" style="color:var(--dim)">noch keine Aktivität</td></tr></tbody></table>
   </div>
 
   <div class="card">
@@ -119,6 +127,29 @@ $('btnAgent').onclick = async () => {
 
 $('btnStart').onclick = async () => { await api('/api/autopilot/start', {}); msg('Autopilot gestartet.'); };
 $('btnStop').onclick  = async () => { await api('/api/autopilot/stop', {});  msg('Autopilot wird gestoppt.'); };
+$('btnReset').onclick = async () => {
+  if (!confirm('Paper-Konto, Verlauf und Journal wirklich zurücksetzen?')) return;
+  try { await api('/api/paper/reset', {}); msg('Paper-Konto zurückgesetzt.'); drawChart(); }
+  catch (e) { msg('Reset: ' + e.message); }
+};
+
+const journalLabel = {
+  order: ['📈', 'Order'], veto: ['🚫', 'Veto'], rotation: ['🔄', 'Rotation'],
+  flatten: ['🛑', 'Glattstellung'], circuit_breaker: ['⛔', 'Circuit Breaker'],
+  order_failed: ['⚠️', 'Order fehlgeschlagen'],
+};
+
+function journalRow(e) {
+  const [icon, label] = journalLabel[e.kind] || ['·', e.kind];
+  const t = new Date(e.t * 1000).toLocaleTimeString('de-DE');
+  let detail = '';
+  if (e.kind === 'order') detail = `${e.side} ${e.coin} ${Math.abs(e.size)} @ ${fmt(e.price)} → Ziel ${fmt(e.target)} $ (${e.mode})`;
+  else if (e.kind === 'veto') detail = `${e.side} ${e.coin}: ${(e.reasons || []).join('; ')}`;
+  else if (e.kind === 'rotation') detail = `raus: ${(e.removed||[]).map(a=>a.slice(0,8)).join(', ') || '–'} | rein: ${(e.added||[]).map(a=>a.slice(0,8)).join(', ') || '–'}`;
+  else if (e.kind === 'circuit_breaker') detail = `Equity ${fmt(e.equity)} (Tagesstart ${fmt(e.day_start)})`;
+  else detail = e.reason || e.coin || '';
+  return `<tr><td class="mono">${t}</td><td>${icon} ${label}</td><td style="color:var(--dim)">${detail}</td></tr>`;
+}
 
 const fmt = (n, d=2) => n == null ? '–' : Number(n).toLocaleString('de-DE', {maximumFractionDigits:d});
 
@@ -132,7 +163,16 @@ async function refresh() {
     const rl = s.risk_level || 'NORMAL';
     badge($('stRisk'), rl, rl === 'NORMAL' ? 'b-green' : rl === 'CAUTION' ? 'b-amber' : 'b-red');
     $('stEquity').textContent = s.equity != null ? fmt(s.equity) + ' $' : '–';
-    badge($('stMode'), s.config.dry_run ? 'DRY-RUN' : 'LIVE', s.config.dry_run ? 'b-amber' : 'b-red');
+    $('paperStats').textContent = s.paper
+      ? `Paper: ${s.paper.trades} Trades · PnL ${fmt(s.paper.realized_pnl)} $ · Fees ${fmt(s.paper.fees_paid)} $` : '';
+    badge($('stMode'), s.config.dry_run ? 'PAPER' : 'LIVE', s.config.dry_run ? 'b-amber' : 'b-red');
+    $('btnReset').style.display = (s.config.dry_run && !running) ? '' : 'none';
+
+    try {
+      const j = await api('/api/journal?limit=15');
+      $('journal').innerHTML = j.length ? j.map(journalRow).join('')
+        : '<tr><td colspan="3" style="color:var(--dim)">noch keine Aktivität</td></tr>';
+    } catch (e) {}
     $('btnStart').style.display = running ? 'none' : '';
     $('btnStop').style.display = running ? '' : 'none';
     if (s.agent_ready && !agentReady) { $('btnAgent').textContent = '✓ Vollmacht erteilt'; agentReady = true; }

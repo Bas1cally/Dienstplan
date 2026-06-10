@@ -7,6 +7,7 @@ Backtesting und mehrstufigem Sicherheitskonzept.
 
 ```bash
 pip install -r requirements.txt
+python doctor.py          # Preflight: prüft Config, Tests, alle APIs
 python server.py          # -> http://127.0.0.1:8000
 ```
 
@@ -184,6 +185,42 @@ python tests/test_autopilot.py    # Unit-Tests Leader-Rotation + KI-Merge
 3. **Copy-Loop + MarketGuard** wie gehabt, plus `runtime/status.json` als
    Live-Zustand für das Web-Frontend.
 
+## Paper-Trading-Modus (Default)
+
+`dry_run: true` ist seit dem Paper-Broker (`bot/paper.py`) ein vollwertiger
+Simulationsmodus statt reinem Signal-Logging:
+
+- **Simulierte Fills** zum Mid-Preis inkl. Taker-Fee, Positions-Tracking mit
+  Durchschnitts-Entry, realisiertem und unrealisiertem PnL
+- **Persistenz:** `runtime/paper_state.json` übersteht Neustarts
+- **Alles läuft wie live:** Equity-Kurve, Circuit Breaker, Leader-Tracking
+  und Telegram-Alerts arbeiten auf dem simulierten Konto
+- **Reset:** Button im Dashboard oder `POST /api/paper/reset`
+  (löscht Paper-Konto, Equity-Verlauf und Journal)
+
+Damit ist der Paper-Test aussagekräftig: Was der Bot im Paper-Modus macht,
+würde er mit echtem Geld genauso machen - nur die Fills sind idealisiert
+(kein Slippage über den Mid-Preis hinaus, keine Teilausführungen).
+
+## Trade-Journal
+
+Jede Entscheidung landet in `runtime/trades.jsonl` und im Aktivitäts-Feed
+des Dashboards: ausgeführte Orders, **Validator-Vetos mit Begründung**,
+Leader-Rotationen, Risk-Off-Glattstellungen und Circuit-Breaker-Events.
+Nach dem Paper-Test lässt sich damit beantworten, ob die Filter PnL retten
+oder nur Trades kosten.
+
+## Preflight-Check
+
+```bash
+python doctor.py            # alle Checks
+python doctor.py --notify   # zusätzlich Telegram-Testnachricht
+```
+
+Prüft Pflicht (Dependencies, Config, Unit-Tests, Hyperliquid-API,
+Leaderboard) und Optionales (News-Feeds, Konvergenz-Quellen, Claude-Key,
+Telegram, Paper-Konto-Zustand). Exit-Code 0 = startklar.
+
 ## Zwei-Bot-Prinzip: der Trade-Validator (Bot 2)
 
 Jeder Einstieg braucht zwei unabhängige Ja-Stimmen:
@@ -323,6 +360,7 @@ RSS/CryptoPanic (Kontext, kostenlos)**.
 ```
 trading-bot/
 ├── config.yaml          # alle Parameter (Strategie, Risiko, Copy-Trading)
+├── doctor.py            # Preflight-Check vor dem Start
 ├── server.py            # Web-UI: Wallet-Connect + Autopilot-Steuerung
 ├── autopilot.py         # CLI: Autopilot headless
 ├── static/index.html    # Dashboard (MetaMask, Status, Leader, Positionen)
@@ -349,6 +387,8 @@ trading-bot/
     │   ├── larp.py         # harte K.O.-Gates gegen Blender
     │   ├── tracker.py      # Snapshots der Leader-Positionen
     │   └── copier.py       # Ziel-Portfolio + Rebalancing mit Risiko-Caps
+    ├── paper.py            # Paper-Broker: simuliertes Konto mit Persistenz
+    ├── journal.py          # Trade-Journal (Orders, Vetos, Rotationen)
     ├── validator.py        # Bot 2: prüft jeden Einstieg (EMA/RSI + Claude-Option)
     ├── convergence.py      # Top-Trader-Ratios Binance/OKX/Bybit als Verstärker
     ├── notify.py           # Telegram-Alerts

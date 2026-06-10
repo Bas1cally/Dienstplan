@@ -17,6 +17,8 @@ import logging
 from dataclasses import dataclass
 
 from ..config import CopytradeConfig, RiskConfig
+from ..journal import Journal
+from ..paper import PaperBroker
 from ..risk import RiskManager
 from .tracker import LeaderSnapshot
 
@@ -129,21 +131,29 @@ class CopyTrader:
         self.convergence = convergence      # ConvergenceEngine (optional)
         self.validator = validator          # TradeValidator (optional, Bot 2)
         self.last_snapshots: list[LeaderSnapshot] = []  # für Performance-Tracking
+        self.last_prices: dict[str, float] = {}
+        self.last_equity: float | None = None
         self.risk = RiskManager(cfg.risk)
+        self.journal = Journal()
         self.day_start_equity = 0.0
         self.day = ""
         self.halted = False
-        # Eigener Bestand im Dry-Run (Simulation)
-        self._paper_positions: dict[str, float] = {}
+        # Paper-Broker simuliert das Konto im Dry-Run (persistiert über Neustarts)
+        self.paper = PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate) if cfg.dry_run else None
 
     def tick(self) -> None:
         if self.halted:
             return
-        equity = self._equity()
+        prices = {c: float(p) for c, p in self.client.info.all_mids().items()}
+        self.last_prices = prices
+        equity = self._equity(prices)
+        self.last_equity = equity
         self._roll_day(equity)
         if self.risk.daily_loss_exceeded(self.day_start_equity, equity):
             log.error("CIRCUIT BREAKER: Tagesverlust-Limit erreicht. Schließe alles, pausiere.")
-            self._flatten()
+            self.journal.record("circuit_breaker", equity=round(equity, 2),
+                                day_start=round(self.day_start_equity, 2))
+            self._flatten(prices)
             self.halted = True
             return
 
@@ -155,7 +165,9 @@ class CopyTrader:
             level = self.guard.level()
             if level == RiskLevel.RISK_OFF:
                 log.warning("RISK_OFF: stelle Copy-Portfolio glatt")
-                self._flatten()
+                if self._current_positions():
+                    self.journal.record("flatten", reason="risk_off")
+                self._flatten(prices)
                 return
             caution = level == RiskLevel.CAUTION
 
@@ -163,7 +175,6 @@ class CopyTrader:
         if not snapshots:
             return
         self.last_snapshots = snapshots
-        prices = {c: float(p) for c, p in self.client.info.all_mids().items()}
         targets = compute_targets(snapshots, self.weights, equity, self.ct, self.cfg.risk,
                                   convergence=self.convergence)
         current = self._current_positions()
@@ -179,14 +190,19 @@ class CopyTrader:
                      side, o.coin, abs(o.delta_size), o.price,
                      o.current_notional, o.target_notional)
             if self.cfg.dry_run:
-                self._paper_positions[o.coin] = self._paper_positions.get(o.coin, 0.0) + o.delta_size
-                if abs(self._paper_positions[o.coin]) * o.price < 1:
-                    self._paper_positions.pop(o.coin, None)
+                self.paper.execute(o.coin, o.delta_size, o.price)
+                self.journal.record("order", coin=o.coin, side=side, size=round(o.delta_size, 6),
+                                    price=o.price, target=round(o.target_notional, 2),
+                                    mode="paper")
             else:
                 try:
                     self.client.market_open(o.coin, o.is_buy, abs(o.delta_size), self.cfg.risk.slippage)
+                    self.journal.record("order", coin=o.coin, side=side, size=round(o.delta_size, 6),
+                                        price=o.price, target=round(o.target_notional, 2),
+                                        mode="live")
                 except Exception:
                     log.exception("Order für %s fehlgeschlagen", o.coin)
+                    self.journal.record("order_failed", coin=o.coin, side=side)
 
     # ---------- Zwei-Bot-Prinzip: Validator prüft jeden Einstieg ----------
 
@@ -210,13 +226,18 @@ class CopyTrader:
                 out.append(o)
             else:
                 log.info("Validator blockt %s-Einstieg: %s", o.coin, verdict.summary())
+                if self.journal:
+                    self.journal.record("veto", coin=o.coin,
+                                        side="LONG" if o.target_notional > 0 else "SHORT",
+                                        target=round(o.target_notional, 2),
+                                        reasons=verdict.reasons[:4])
         return out
 
     # ---------- Hilfsfunktionen ----------
 
     def _current_positions(self) -> dict[str, float]:
         if self.cfg.dry_run:
-            return dict(self._paper_positions)
+            return self.paper.sizes()
         state = self.client.info.user_state(self.client.account_address)
         out = {}
         for p in state.get("assetPositions", []):
@@ -225,19 +246,20 @@ class CopyTrader:
                 out[pos["coin"]] = float(pos["szi"])
         return out
 
-    def _flatten(self) -> None:
+    def _flatten(self, prices: dict[str, float] | None = None) -> None:
+        if self.cfg.dry_run:
+            self.paper.flatten(prices or self.last_prices)
+            return
         for coin, size in self._current_positions().items():
             log.info("Schließe %s (size %.5f)", coin, size)
-            if not self.cfg.dry_run:
-                try:
-                    self.client.market_close(coin, self.cfg.risk.slippage)
-                except Exception:
-                    log.exception("Schließen von %s fehlgeschlagen", coin)
-        self._paper_positions.clear()
+            try:
+                self.client.market_close(coin, self.cfg.risk.slippage)
+            except Exception:
+                log.exception("Schließen von %s fehlgeschlagen", coin)
 
-    def _equity(self) -> float:
-        if self.cfg.dry_run and not self.client.account_address:
-            return self.cfg.backtest.initial_equity
+    def _equity(self, prices: dict[str, float] | None = None) -> float:
+        if self.cfg.dry_run:
+            return self.paper.equity(prices or self.last_prices)
         return self.client.equity()
 
     def _roll_day(self, equity: float) -> None:

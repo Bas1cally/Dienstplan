@@ -120,6 +120,7 @@ def make_copier(validator):
 
     ct = CopyTrader.__new__(CopyTrader)
     ct.validator = validator
+    ct.journal = None
     return ct
 
 

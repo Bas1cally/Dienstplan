@@ -31,6 +31,7 @@ from .copytrade.larp import LarpConfig, LarpFilter
 from .copytrade.leaderboard import fetch_candidates
 from .copytrade.tracker import LeaderTracker
 from .exchange import HyperliquidClient, api_url
+from .journal import Journal
 from .news.guard import MarketGuard
 from .notify import Notifier
 
@@ -98,6 +99,7 @@ class Autopilot:
         self.account_address: str | None = None
         self.error: str | None = None
         self.notifier = Notifier()
+        self.journal = Journal()
         self._prev_risk = "NORMAL"
         self._prev_halted = False
         self._last_history_write = 0.0
@@ -223,6 +225,7 @@ class Autopilot:
             if old != new:
                 log.info("Leader-Rotation: raus %s | rein %s",
                          [a[:10] for a in old - new] or "-", [a[:10] for a in new - old] or "-")
+                self.journal.record("rotation", removed=sorted(old - new), added=sorted(new - old))
                 self.notifier.send(
                     "🔄 <b>Leader-Rotation</b>\n"
                     + "\n".join(f"➖ {a[:10]}…" for a in old - new)
@@ -240,22 +243,33 @@ class Autopilot:
     # ---------- Status für das Frontend ----------
 
     def _publish(self) -> None:
-        equity = positions = None
+        equity = positions = paper_stats = None
         try:
-            addr = self.client.account_address or self.account_address
-            if addr:
-                state = self.client.info.user_state(addr)
-                equity = float(state["marginSummary"]["accountValue"])
-                positions = [
-                    {
-                        "coin": p["position"]["coin"],
-                        "size": float(p["position"]["szi"]),
-                        "entry": float(p["position"]["entryPx"] or 0),
-                        "unrealized_pnl": float(p["position"]["unrealizedPnl"]),
-                    }
-                    for p in state.get("assetPositions", [])
-                    if float(p["position"]["szi"]) != 0
-                ]
+            if self.cfg.dry_run and self.copier and self.copier.paper:
+                # Paper-Modus: simuliertes Konto ist die Wahrheit
+                broker = self.copier.paper
+                equity = self.copier.last_equity
+                positions = broker.position_rows(self.copier.last_prices)
+                paper_stats = {
+                    "trades": broker.trades,
+                    "realized_pnl": round(broker.realized_pnl, 2),
+                    "fees_paid": round(broker.fees_paid, 2),
+                }
+            else:
+                addr = self.client.account_address or self.account_address
+                if addr:
+                    state = self.client.info.user_state(addr)
+                    equity = float(state["marginSummary"]["accountValue"])
+                    positions = [
+                        {
+                            "coin": p["position"]["coin"],
+                            "size": float(p["position"]["szi"]),
+                            "entry": float(p["position"]["entryPx"] or 0),
+                            "unrealized_pnl": float(p["position"]["unrealizedPnl"]),
+                        }
+                        for p in state.get("assetPositions", [])
+                        if float(p["position"]["szi"]) != 0
+                    ]
         except Exception:
             log.debug("Account-Status nicht abrufbar", exc_info=True)
 
@@ -281,6 +295,7 @@ class Autopilot:
             risk_level=self.guard.last_level.name if self.guard else "NORMAL",
             equity=equity,
             positions=positions or [],
+            paper=paper_stats,
             leaders=leaders,
             account=self.client.account_address or self.account_address,
             next_analysis_in_h=round(

@@ -78,6 +78,28 @@ def status():
     return s
 
 
+@app.get("/api/journal")
+def journal(limit: int = 25):
+    """Letzte Bot-Entscheidungen (Orders, Vetos, Rotationen) fürs Dashboard."""
+    return autopilot.journal.tail(min(limit, 200))
+
+
+@app.post("/api/paper/reset")
+def paper_reset():
+    """Setzt das Paper-Konto zurück (nur im Dry-Run, nur bei gestopptem Bot)."""
+    if not cfg.dry_run:
+        raise HTTPException(400, "Nur im Dry-Run-Modus verfügbar")
+    if autopilot.running:
+        raise HTTPException(400, "Erst den Autopilot stoppen")
+    from bot.paper import PaperBroker
+
+    PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate).reset()
+    for name in ("history.jsonl", "trades.jsonl", "leader_perf.json"):
+        (Path(__file__).parent / "runtime" / name).unlink(missing_ok=True)
+    log.info("Paper-Konto und Verlaufsdaten zurückgesetzt")
+    return {"ok": True}
+
+
 @app.get("/api/history")
 def history(limit: int = 500):
     """Equity-Kurve für das Dashboard (letzte `limit` Minuten-Punkte)."""
