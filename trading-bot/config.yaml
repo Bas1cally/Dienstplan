@@ -1,0 +1,35 @@
+# === Hyperliquid Trading Bot Konfiguration ===
+
+# Netzwerk: erst auf dem Testnet beweisen, dann mainnet
+network: testnet          # testnet | mainnet
+
+# dry_run: true = Signale werden nur geloggt, keine Orders.
+# Erst auf false stellen, wenn Backtest UND Testnet-Lauf überzeugen.
+dry_run: true
+
+market:
+  coin: BTC               # Hyperliquid Perp-Symbol (BTC, ETH, SOL, ...)
+  interval: 1h            # Candle-Intervall: 1m 5m 15m 1h 4h 1d
+  lookback_candles: 300   # Historie für Indikatoren
+
+strategy:
+  ema_fast: 20
+  ema_slow: 50
+  rsi_period: 14
+  rsi_overbought: 70      # keine neuen Longs darüber
+  rsi_oversold: 30        # keine neuen Shorts darunter
+  atr_period: 14
+  allow_shorts: true
+
+risk:
+  risk_per_trade: 0.01    # max. 1% des Kapitals Risiko pro Trade
+  atr_stop_mult: 2.0      # Stop-Loss-Abstand = 2 x ATR
+  take_profit_r: 2.0      # Take-Profit bei 2R (2x Risiko)
+  max_leverage: 3         # hartes Leverage-Limit (Hyperliquid erlaubt mehr - nicht nutzen!)
+  max_daily_loss: 0.05    # Bot stoppt bei -5% Tagesverlust (Circuit Breaker)
+  slippage: 0.005         # max. Slippage bei Market Orders (0.5%)
+
+backtest:
+  fee_rate: 0.00045       # Hyperliquid Taker Fee (0.045%)
+  slippage: 0.0002        # angenommene Slippage pro Fill
+  initial_equity: 10000

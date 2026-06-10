@@ -1,0 +1,6 @@
+hyperliquid-python-sdk>=0.24.0
+pandas>=2.0
+numpy>=1.26
+PyYAML>=6.0
+python-dotenv>=1.0
+eth-account>=0.10
