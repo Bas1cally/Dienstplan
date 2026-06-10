@@ -83,6 +83,20 @@ def compute_targets(
     return targets
 
 
+def exempt_inventory(current: dict[str, float], exempt: dict[str, float]) -> dict[str, float]:
+    """Zieht fremden Bestand (z.B. Scalper-Position) vom Konto-Buch ab.
+
+    Ohne diese Ausnahme würde die Reconciliation jede Scalp-Position sofort
+    als Abweichung vom Leader-Ziel "wegrebalancen".
+    """
+    book = dict(current)
+    for coin, size in exempt.items():
+        book[coin] = book.get(coin, 0.0) - size
+        if abs(book[coin]) < 1e-12:
+            book.pop(coin, None)
+    return book
+
+
 def plan_rebalance(
     targets: dict[str, float],
     current: dict[str, float],     # coin -> signierte Größe in Coin
@@ -133,6 +147,7 @@ class CopyTrader:
         self.last_snapshots: list[LeaderSnapshot] = []  # für Performance-Tracking
         self.last_prices: dict[str, float] = {}
         self.last_equity: float | None = None
+        self.scalp_inventory: dict[str, float] = {}  # vom Scalper gehaltener Bestand
         self.risk = RiskManager(cfg.risk)
         self.journal = Journal()
         self.day_start_equity = 0.0
@@ -164,7 +179,7 @@ class CopyTrader:
 
             level = self.guard.level()
             if level == RiskLevel.RISK_OFF:
-                if self._current_positions():  # nur handeln/loggen, wenn es etwas glattzustellen gibt
+                if self._book():  # nur handeln/loggen, wenn es etwas glattzustellen gibt
                     log.warning("RISK_OFF: stelle Copy-Portfolio glatt")
                     self.journal.record("flatten", reason="risk_off")
                     self._flatten(prices)
@@ -177,8 +192,7 @@ class CopyTrader:
         self.last_snapshots = snapshots
         targets = compute_targets(snapshots, self.weights, equity, self.ct, self.cfg.risk,
                                   convergence=self.convergence)
-        current = self._current_positions()
-        orders = plan_rebalance(targets, current, prices, equity, self.ct)
+        orders = plan_rebalance(targets, self._book(), prices, equity, self.ct)
         if caution:
             # Im Vorsichtsmodus nur Orders ausführen, die das Exposure senken
             orders = [o for o in orders if abs(o.target_notional) < abs(o.current_notional)]
@@ -246,16 +260,24 @@ class CopyTrader:
                 out[pos["coin"]] = float(pos["szi"])
         return out
 
+    def _book(self) -> dict[str, float]:
+        """Konto-Bestand ohne den Scalper-Anteil - die Basis der Reconciliation."""
+        return exempt_inventory(self._current_positions(), self.scalp_inventory)
+
     def _flatten(self, prices: dict[str, float] | None = None) -> None:
-        if self.cfg.dry_run:
-            self.paper.flatten(prices or self.last_prices)
-            return
-        for coin, size in self._current_positions().items():
+        """Stellt das Copy-Buch glatt - Scalper-Bestand bleibt unberührt."""
+        prices = prices or self.last_prices
+        for coin, size in self._book().items():
+            price = prices.get(coin)
             log.info("Schließe %s (size %.5f)", coin, size)
-            try:
-                self.client.market_close(coin, self.cfg.risk.slippage)
-            except Exception:
-                log.exception("Schließen von %s fehlgeschlagen", coin)
+            if self.cfg.dry_run:
+                if price:
+                    self.paper.execute(coin, -size, price)
+            else:
+                try:
+                    self.client.market_open(coin, size < 0, abs(size), self.cfg.risk.slippage)
+                except Exception:
+                    log.exception("Schließen von %s fehlgeschlagen", coin)
 
     def _equity(self, prices: dict[str, float] | None = None) -> float:
         if self.cfg.dry_run:

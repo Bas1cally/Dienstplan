@@ -101,6 +101,20 @@ class ValidationConfig:
 
 
 @dataclass
+class ScalpConfig:
+    enabled: bool = False            # opt-in: erst nach überzeugendem Paper-Lauf!
+    coin: str = "BTC"                # nur der liquideste Markt (Slippage)
+    risk_per_scalp: float = 0.005    # max. 0.5% Equity Risiko pro Scalp
+    stabilize_minutes: int = 3       # Mindestabstand zum Schock-Event
+    confirm_candles: int = 3         # so viele 1m-Candles ohne neues Extrem
+    entry_window_minutes: int = 25   # danach ist das Event verfallen
+    stop_buffer: float = 0.002       # Stop knapp hinter dem Move-Extrem
+    retrace_target: float = 0.382    # TP bei 38.2% Retrace des Spikes
+    max_holding_minutes: int = 30    # Zeit-Stop: ein Scalp wird nie eine Position
+    max_notional_frac: float = 0.15  # max. 15% Equity Notional pro Scalp
+
+
+@dataclass
 class InvestigatorConfig:
     watchlist: list = None  # type: ignore[assignment]  # Wallets (Whales/MMs) beobachten
     poll_seconds: int = 60
@@ -162,6 +176,7 @@ class Config:
     convergence: ConvergenceConfig
     validation: ValidationConfig
     investigator: InvestigatorConfig
+    scalp: ScalpConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -188,6 +203,7 @@ def load_config(path: Path | None = None) -> Config:
         convergence=ConvergenceConfig(**raw.get("convergence", {})),
         validation=ValidationConfig(**raw.get("validation", {})),
         investigator=InvestigatorConfig(**raw.get("investigator", {})),
+        scalp=ScalpConfig(**raw.get("scalp", {})),
     )
     _validate(cfg)
     return cfg

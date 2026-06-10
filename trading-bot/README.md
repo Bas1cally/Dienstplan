@@ -242,6 +242,28 @@ Prüft Pflicht (Dependencies, Config, Unit-Tests, Hyperliquid-API,
 Leaderboard) und Optionales (News-Feeds, Konvergenz-Quellen, Claude-Key,
 Telegram, Paper-Konto-Zustand). Exit-Code 0 = startklar.
 
+## VolScalper: Volatilitäts-Schocks als Scalp-Chance (experimentell, opt-in)
+
+Der Schock-Detektor erkennt Liquidations-Kaskaden ohnehin - der VolScalper
+(`bot/scalper.py`) nutzt sie offensiv: Während der Copy-Bot im Cooldown
+sicher draußen ist, handelt er die **Gegenbewegung** nach dem Überschießen.
+
+```
+Schock (-3% in 5min) → Stabilisierung abwarten (3min + 3 Candles ohne
+neues Tief) → Long mit Stop knapp unterm Crash-Tief → TP bei 38.2%
+Retrace ODER Zeit-Stop nach 30min. Maximal EIN Scalp pro Event.
+```
+
+Harte Grenzen: 0,5 % Equity Risiko, max. 15 % Notional, nur BTC (Liquidität).
+Der Copier nimmt den Scalp-Bestand explizit von seiner Reconciliation aus
+(`exempt_inventory`) - sonst würde er die Position sofort "wegrebalancen".
+
+> **Default AUS** (`scalp.enabled: false`). Das ist die schwierigste Strategie
+> im Bot: ~0,1 % Fees+Slippage pro Round-Trip fressen dünne Edges, und
+> manchmal fällt das Messer weiter. Erst aktivieren, wenn der Paper-Lauf der
+> übrigen Module überzeugt - und dann den Scalp-PnL im Journal
+> (`scalp_open`/`scalp_close`) separat auswerten.
+
 ## Investigator: Wallets durchleuchten, Market Makern auf die Finger schauen
 
 Analytics-Seiten wie hl.eco sind Frontends über dieselben öffentlichen

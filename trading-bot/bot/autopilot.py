@@ -106,6 +106,7 @@ class Autopilot:
         self._last_history_write = 0.0
         self._leader_perf: dict = self._load_perf()
         self.watcher: WalletWatcher | None = None
+        self.scalper = None
         self._last_watch_poll = 0.0
 
     # ---------- Lebenszyklus ----------
@@ -155,6 +156,9 @@ class Autopilot:
                 self._maybe_reanalyze()
                 if self.copier and self.leaders:
                     self.copier.tick()
+                if self.scalper:
+                    self.scalper.tick()
+                    self.copier.scalp_inventory = self.scalper.inventory()
                 self._watch_wallets()
                 self._publish()
             except Exception:
@@ -188,6 +192,18 @@ class Autopilot:
             self.watcher = WalletWatcher(leader_info, self.cfg.investigator.watchlist,
                                          self.cfg.investigator.min_notional_change)
             log.info("Investigator: beobachte %d Wallets", len(self.cfg.investigator.watchlist))
+        self.scalper = None
+        if self.cfg.scalp.enabled:
+            from .scalper import VolScalper
+
+            self.scalper = VolScalper(
+                self.cfg.scalp, self.client, self.guard.shock,
+                paper=self.copier.paper, journal=self.journal, notifier=self.notifier,
+                equity_fn=lambda: self.copier.last_equity or self.cfg.backtest.initial_equity,
+            )
+            self.scalper.full_risk = self.cfg.risk
+            log.info("VolScalper aktiv (%s, Risiko %.1f%%/Scalp)",
+                     self.cfg.scalp.coin, self.cfg.scalp.risk_per_scalp * 100)
 
     # ---------- Leader-Analyse & Rotation ----------
 
