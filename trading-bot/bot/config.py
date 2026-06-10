@@ -86,6 +86,7 @@ class AutopilotConfig:
     min_keep_score: float = 35       # Leader unter diesem Score werden rotiert
     daily_digest: bool = True        # Tagesbericht per Telegram/Log
     watchdog_hours: float = 24       # Alarm + Diagnose, wenn so lange keine Order kam
+    shadow_variants: bool = True     # A/B-Tuning: Varianten parallel im Schatten testen
     server_host: str = "127.0.0.1"
     server_port: int = 8000
 

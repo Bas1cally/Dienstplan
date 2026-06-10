@@ -242,6 +242,29 @@ Prüft Pflicht (Dependencies, Config, Unit-Tests, Hyperliquid-API,
 Leaderboard) und Optionales (News-Feeds, Konvergenz-Quellen, Claude-Key,
 Telegram, Paper-Konto-Zustand). Exit-Code 0 = startklar.
 
+## Shadow-Varianten: Tuning per A/B-Test im Livebetrieb
+
+Eine Schraube drehen und Tage warten vergleicht immer gegen einen ANDEREN
+Marktzeitraum - so tuned man nicht. Shadow-Varianten (`bot/shadow.py`,
+`autopilot.shadow_variants: true`) laufen **parallel auf exakt denselben
+Live-Daten**, jede mit eigenem persistentem Paper-Konto:
+
+| Variante | Filter |
+|---|---|
+| Haupt-Buch (baseline) | aktuelle Config inkl. Validator |
+| `ohne_validator` | jede geplante Order wird ausgeführt |
+| `validator_locker` | Einstiege schon ab Technik-Score ≥ 1 |
+
+Gleiche Leader, gleiche Konvergenz, gleiche Preise, gleiche RISK_OFF-Events -
+der einzige Unterschied ist der Einstiegs-Filter. Dashboard und `report.py`
+zeigen das Delta zum Haupt-Buch; ab 10 Trades und ±1 % Abstand formuliert
+der Report die Konsequenz ("validation.min_score 2 → 1" bzw. "Filter
+behalten"). Reduzierungen werden auch in Varianten nie geblockt.
+
+Dazu: `./start.sh` (bzw. `./start.sh headless`) hält den Bot mit
+Auto-Restart und Backoff am Leben - "läuft wie von alleine" auch nach
+einem Absturz oder Reboot-Skript.
+
 ## Auswertung & Frühwarnung: nie wieder "+1$ nach 4 Wochen"
 
 Ein flacher Paper-Lauf hat fast immer eine stille Ursache: zu wenige Trades,

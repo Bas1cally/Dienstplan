@@ -1,0 +1,116 @@
+"""Shadow-Varianten: alternative Konfigurationen parallel im Schatten testen.
+
+Das Problem beim Tunen: Eine Schraube drehen und Tage warten ist langsam, und
+man vergleicht immer gegen einen ANDEREN Marktzeitraum. Shadow-Varianten
+lösen das - sie laufen simultan auf exakt denselben Live-Daten:
+
+  Haupt-Buch (baseline)   = aktuelle Config inkl. Validator
+  shadow: ohne_validator  = jede geplante Order wird ausgeführt
+  shadow: validator_locker= Einstiege schon ab Technik-Score >= 1
+
+Jede Variante rekonsolidiert ihr EIGENES Paper-Konto gegen dieselben
+Ziel-Portfolios (gleiche Leader, gleiche Konvergenz, gleiche Preise) - der
+einzige Unterschied ist der Einstiegs-Filter. Nach ein paar Tagen zeigt
+report.py / das Dashboard, welche Variante vorn liegt: A/B-Test im
+Livebetrieb statt Bauchgefühl.
+
+Hinweis zur Näherung: 'validator_locker' nutzt den Technik-Score des echten
+Validators (gecacht, keine Extra-API-Calls) und ignoriert dessen finale
+min_score-Schwelle - harte RSI-Vetos können dadurch durchrutschen. Für den
+Konfigurations-Vergleich ist das gewollt grob.
+"""
+
+import json
+import logging
+import time
+from pathlib import Path
+
+from .copytrade.copier import plan_rebalance
+from .paper import PaperBroker
+
+log = logging.getLogger(__name__)
+
+RUNTIME = Path(__file__).resolve().parent.parent / "runtime"
+
+
+class ShadowVariant:
+    def __init__(self, name: str, broker: PaperBroker, order_filter):
+        self.name = name
+        self.broker = broker
+        self.order_filter = order_filter  # (order) -> bool, nur für Exposure-Erhöhungen
+
+
+class ShadowFleet:
+    def __init__(self, ct, initial_equity: float, fee_rate: float,
+                 validator=None, runtime: Path | None = None):
+        self.ct = ct
+        runtime = runtime or RUNTIME
+        self.variants: list[ShadowVariant] = [
+            ShadowVariant(
+                "ohne_validator",
+                PaperBroker(initial_equity, fee_rate, path=runtime / "shadow_ohne_validator.json"),
+                lambda o: True,
+            ),
+        ]
+        if validator is not None:
+            self.variants.append(ShadowVariant(
+                "validator_locker",
+                PaperBroker(initial_equity, fee_rate, path=runtime / "shadow_validator_locker.json"),
+                lambda o: validator.check(o.coin, is_long=o.target_notional > 0).score >= 1,
+            ))
+
+    def tick(self, targets: dict[str, float], prices: dict[str, float]) -> None:
+        """Rekonsolidiert jede Variante gegen die aktuellen Ziel-Portfolios."""
+        for v in self.variants:
+            try:
+                equity = v.broker.equity(prices)
+                orders = plan_rebalance(targets, v.broker.sizes(), prices, equity, self.ct)
+                for o in orders:
+                    increases = abs(o.target_notional) > abs(o.current_notional)
+                    if increases and not v.order_filter(o):
+                        continue
+                    v.broker.execute(o.coin, o.delta_size, o.price)
+            except Exception:
+                log.exception("Shadow-Variante %s fehlgeschlagen", v.name)
+
+    def flatten(self, prices: dict[str, float]) -> None:
+        """RISK_OFF/Halt gilt für alle Varianten gleichermaßen (fairer Vergleich)."""
+        for v in self.variants:
+            v.broker.flatten(prices)
+
+    def stats(self, prices: dict[str, float]) -> dict[str, dict]:
+        out = {}
+        for v in self.variants:
+            out[v.name] = {
+                "equity": round(v.broker.equity(prices), 2),
+                "trades": v.broker.trades,
+                "realized_pnl": round(v.broker.realized_pnl, 2),
+            }
+        return out
+
+    def persist_stats(self, prices: dict[str, float]) -> None:
+        try:
+            RUNTIME.mkdir(exist_ok=True)
+            (RUNTIME / "shadows.json").write_text(
+                json.dumps({"t": int(time.time()), "variants": self.stats(prices)}, indent=2))
+        except OSError:
+            pass
+
+
+def shadow_recommendations(baseline_equity: float, shadows: dict[str, dict],
+                           min_trades: int = 10, min_edge_pct: float = 1.0) -> list[str]:
+    """Vergleicht Varianten gegen das Haupt-Buch und formuliert Konsequenzen."""
+    recs = []
+    for name, s in shadows.items():
+        if s["trades"] < min_trades or not baseline_equity:
+            continue
+        edge = (s["equity"] / baseline_equity - 1) * 100
+        if edge >= min_edge_pct:
+            action = ("validation.enabled: false erwägen" if name == "ohne_validator"
+                      else "validation.min_score 2 -> 1 setzen")
+            recs.append(f"Shadow '{name}' liegt {edge:+.1f}% vor dem Haupt-Buch "
+                        f"({s['trades']} Trades): {action}.")
+        elif edge <= -min_edge_pct:
+            recs.append(f"Shadow '{name}' liegt {edge:+.1f}% HINTER dem Haupt-Buch: "
+                        f"aktuelle Filter behalten.")
+    return recs

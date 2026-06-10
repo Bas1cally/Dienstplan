@@ -235,6 +235,15 @@ class Autopilot:
         self.copier = CopyTrader(self.cfg, self.client, tracker, weights,
                                  guard=self.guard, convergence=convergence,
                                  validator=validator, signals=signals)
+        if self.cfg.dry_run and self.cfg.autopilot.shadow_variants:
+            from .shadow import ShadowFleet
+
+            self.copier.shadows = ShadowFleet(
+                self.cfg.copytrade, self.cfg.backtest.initial_equity,
+                self.cfg.backtest.fee_rate, validator=validator,
+            )
+            log.info("Shadow-Varianten aktiv: %s",
+                     [v.name for v in self.copier.shadows.variants])
         if self.cfg.investigator.watchlist:
             self.watcher = WalletWatcher(leader_info, self.cfg.investigator.watchlist,
                                          self.cfg.investigator.min_notional_change)
@@ -368,6 +377,8 @@ class Autopilot:
             equity=equity,
             positions=positions or [],
             paper=paper_stats,
+            shadows=(self.copier.shadows.stats(self.copier.last_prices)
+                     if self.copier and self.copier.shadows and self.copier.last_prices else None),
             leaders=leaders,
             account=self.client.account_address or self.account_address,
             next_analysis_in_h=round(

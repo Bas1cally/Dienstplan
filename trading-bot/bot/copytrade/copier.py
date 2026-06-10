@@ -145,6 +145,7 @@ class CopyTrader:
         self.convergence = convergence      # ConvergenceEngine (optional)
         self.validator = validator          # TradeValidator (optional, Bot 2)
         self.signals = signals              # SignalBridge (optional, Prop-Modus)
+        self.shadows = None                 # ShadowFleet (optional, Paper-Modus)
         self.start_equity: float | None = None  # für den Max-Drawdown-Halt
         self.last_snapshots: list[LeaderSnapshot] = []  # für Performance-Tracking
         self.last_prices: dict[str, float] = {}
@@ -196,6 +197,8 @@ class CopyTrader:
                     log.warning("RISK_OFF: stelle Copy-Portfolio glatt")
                     self.journal.record("flatten", reason="risk_off")
                     self._flatten(prices)
+                    if self.shadows:
+                        self.shadows.flatten(prices)
                 return
             caution = level == RiskLevel.CAUTION
 
@@ -205,6 +208,11 @@ class CopyTrader:
         self.last_snapshots = snapshots
         targets = compute_targets(snapshots, self.weights, equity, self.ct, self.cfg.risk,
                                   convergence=self.convergence)
+        # Shadow-Varianten laufen auf denselben Targets/Preisen mit (A/B-Tuning)
+        if self.shadows:
+            self.shadows.tick(targets, prices)
+            self.shadows.persist_stats(prices)
+
         orders = plan_rebalance(targets, self._book(), prices, equity, self.ct)
         if caution:
             # Im Vorsichtsmodus nur Orders ausführen, die das Exposure senken

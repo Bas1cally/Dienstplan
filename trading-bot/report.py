@@ -96,8 +96,24 @@ def main() -> None:
                   f"{veto_stats['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h gebracht "
                   f"(Trefferquote {veto_stats['win_share']:.0%})")
 
+    # Shadow-Varianten: welche Config hätte mehr gemacht?
+    shadow_recs = []
+    shadows_file = RUNTIME / "shadows.json"
+    if shadows_file.exists() and paper:
+        from bot.shadow import shadow_recommendations
+
+        shadows = json.loads(shadows_file.read_text()).get("variants", {})
+        baseline = s.get("equity_end") or (10_000 + s.get("realized_pnl", 0))
+        if shadows:
+            print("\n  Shadow-Varianten (gleiche Daten, andere Filter):")
+            for name, v in shadows.items():
+                edge = (v["equity"] / baseline - 1) * 100 if baseline else 0
+                print(f"    {name:20s} {v['equity']:>10,.2f} $  ({edge:+.2f}% vs. Haupt-Buch, "
+                      f"{v['trades']} Trades)")
+            shadow_recs = shadow_recommendations(baseline, shadows)
+
     print("\n=== Empfehlungen ===\n")
-    for r in recommendations(s, veto_stats):
+    for r in recommendations(s, veto_stats) + shadow_recs:
         print(f"  • {r}")
     print()
 

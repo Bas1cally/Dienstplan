@@ -75,6 +75,12 @@
   </div>
 
   <div class="card" style="margin-bottom:14px">
+    <h3>Tuning-Varianten (Shadow-A/B auf denselben Daten)</h3>
+    <table><thead><tr><th>Variante</th><th>Equity</th><th>Δ vs. Haupt-Buch</th><th>Trades</th></tr></thead>
+    <tbody id="shadows"><tr><td colspan="4" style="color:var(--dim)">–</td></tr></tbody></table>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
     <h3>Aktivität (Orders, Vetos, Rotationen)</h3>
     <table><thead><tr><th>Zeit</th><th>Ereignis</th><th>Details</th></tr></thead>
     <tbody id="journal"><tr><td colspan="3" style="color:var(--dim)">noch keine Aktivität</td></tr></tbody></table>
@@ -174,6 +180,15 @@ async function refresh() {
       ? `Paper: ${s.paper.trades} Trades · PnL ${fmt(s.paper.realized_pnl)} $ · Fees ${fmt(s.paper.fees_paid)} $` : '';
     badge($('stMode'), s.config.dry_run ? 'PAPER' : 'LIVE', s.config.dry_run ? 'b-amber' : 'b-red');
     $('btnReset').style.display = (s.config.dry_run && !running) ? '' : 'none';
+
+    if (s.shadows && s.equity) {
+      $('shadows').innerHTML = Object.entries(s.shadows).map(([name, v]) => {
+        const d = (v.equity / s.equity - 1) * 100;
+        return `<tr><td>${name}</td><td>${fmt(v.equity)} $</td>
+          <td class="${d >= 0 ? 'pos' : 'neg'}">${d >= 0 ? '+' : ''}${d.toFixed(2)}%</td>
+          <td>${v.trades}</td></tr>`;
+      }).join('');
+    }
 
     try {
       const j = await api('/api/journal?limit=15');
