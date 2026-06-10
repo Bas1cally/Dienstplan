@@ -94,8 +94,15 @@ const msg = t => $('msg').textContent = t;
 
 function badge(el, text, cls) { el.innerHTML = `<span class="badge ${cls}">${text}</span>`; }
 
-async function api(path, body) {
-  const r = await fetch(path, body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {});
+async function api(path, body, retry = true) {
+  const headers = {'Content-Type': 'application/json'};
+  const token = localStorage.getItem('dashToken');
+  if (token) headers['X-Auth-Token'] = token;
+  const r = await fetch(path, body ? {method:'POST', headers, body:JSON.stringify(body)} : {headers});
+  if (r.status === 401 && retry) {
+    const t = prompt('Dashboard-Token (DASHBOARD_TOKEN aus .env):');
+    if (t) { localStorage.setItem('dashToken', t.trim()); return api(path, body, false); }
+  }
   if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
   return r.json();
 }

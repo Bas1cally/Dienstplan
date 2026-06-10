@@ -18,6 +18,7 @@ ins Internet stellen - er hält den Agent-Key und steuert den Bot.
 
 import json
 import logging
+import os
 import re
 import secrets
 import time
@@ -25,8 +26,8 @@ from pathlib import Path
 
 import requests
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from bot.autopilot import Autopilot
@@ -42,6 +43,23 @@ autopilot = Autopilot(cfg)
 app = FastAPI(title="Hyperliquid Trading Bot")
 STATIC = Path(__file__).parent / "static"
 ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
+# Optionaler Zugriffsschutz: DASHBOARD_TOKEN in .env setzen, wenn das UI
+# über Tailscale/SSH-Tunnel von unterwegs erreichbar sein soll. Ohne Token
+# bleibt alles wie gehabt (nur sinnvoll auf 127.0.0.1).
+from dotenv import load_dotenv
+
+load_dotenv(ROOT / ".env")
+DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "")
+
+
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    if DASHBOARD_TOKEN and request.url.path.startswith("/api"):
+        supplied = request.headers.get("x-auth-token", "")
+        if not secrets.compare_digest(supplied, DASHBOARD_TOKEN):
+            return JSONResponse({"detail": "Token fehlt oder falsch"}, status_code=401)
+    return await call_next(request)
 
 # Schwebende Agent-Approvals: nonce -> (agent_key, action)
 _pending: dict[int, tuple[str, dict]] = {}

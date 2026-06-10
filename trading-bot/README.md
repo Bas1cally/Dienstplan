@@ -21,6 +21,27 @@ Copy-Trading, News-/Schock-Überwachung, Circuit Breaker.
 - Headless ohne UI: `python autopilot.py`
 - Der Server bindet auf `127.0.0.1` - niemals ungeschützt ins Internet stellen.
 
+### Fernzugriff: Dashboard von unterwegs (nur für dich)
+
+**Warum nicht GitHub Pages?** Pages hostet nur statische Dateien und ist
+immer öffentlich (Zugriffsbeschränkung gibt es nur mit GitHub Enterprise).
+Unser Dashboard braucht aber das lokale Backend, das den Agent-Key hält -
+das gehört nie auf einen öffentlichen Host. Die saubere Lösung:
+
+1. **Token setzen** (Pflicht bei Fernzugriff): in `.env`
+   `DASHBOARD_TOKEN=$(openssl rand -hex 24)` - das UI fragt den Token einmal
+   ab und merkt ihn sich; alle API-Calls sind sonst 401.
+2. **Privaten Zugangsweg wählen** (Empfehlung: Tailscale):
+
+   | Weg | Setup | Eigenschaften |
+   |---|---|---|
+   | **Tailscale** | App auf Rechner + Handy, gleiches Konto | privates Mesh-VPN, Dashboard unter `http://<rechnername>:8000`, nichts öffentlich exponiert |
+   | **SSH-Tunnel** | `ssh -L 8000:127.0.0.1:8000 user@rechner` | klassisch, kein Zusatzdienst, Verbindung nur bei aktivem Tunnel |
+   | Cloudflare Tunnel + Access | `cloudflared` + E-Mail-Gate | öffentliche URL mit Login davor - nur wenn Tailscale/SSH nicht gehen |
+
+   In allen Fällen bleibt `server_host: 127.0.0.1` - der Tunnel/das VPN
+   verbindet sich lokal, der Server selbst ist nie direkt im Internet.
+
 > **Risikohinweis:** Kein Trading-Bot ist garantiert profitabel. Leverage
 > verstärkt Verluste genauso wie Gewinne – bis hin zur Liquidation. Handle
 > nur mit Geld, dessen Totalverlust du verkraften kannst, und erst nach
