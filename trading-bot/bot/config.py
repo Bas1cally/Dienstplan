@@ -84,6 +84,8 @@ class NewsConfig:
 class AutopilotConfig:
     reanalyze_hours: float = 24      # wie oft das Leaderboard neu analysiert wird
     min_keep_score: float = 35       # Leader unter diesem Score werden rotiert
+    daily_digest: bool = True        # Tagesbericht per Telegram/Log
+    watchdog_hours: float = 24       # Alarm + Diagnose, wenn so lange keine Order kam
     server_host: str = "127.0.0.1"
     server_port: int = 8000
 

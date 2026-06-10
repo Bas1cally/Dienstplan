@@ -41,6 +41,36 @@ log = logging.getLogger(__name__)
 RUNTIME = Path(__file__).resolve().parent.parent / "runtime"
 
 
+def diagnose_inactivity(entries: list[dict], since_t: float, copier=None) -> str:
+    """Erklärt, WARUM keine Orders kommen - die Watchdog-Diagnose."""
+    recent = [e for e in entries if e.get("t", 0) >= since_t]
+    vetoes = [e for e in recent if e.get("kind") == "veto"]
+    parts = []
+    if vetoes:
+        from collections import Counter
+
+        reasons = Counter()
+        for v in vetoes:
+            joined = " ".join(v.get("reasons", []))
+            key = "RSI" if "RSI" in joined else "Trend" if "Trend" in joined else \
+                "Claude" if "Claude" in joined else "Daten" if "wenig" in joined or "verfügbar" in joined else "sonstige"
+            reasons[key] += 1
+        parts.append(f"{len(vetoes)} Vetos ({', '.join(f'{k}: {n}' for k, n in reasons.most_common(3))}) "
+                     "-> Validator blockt; report.py zeigt, ob zu Recht")
+    leader_positions = 0
+    if copier and copier.last_snapshots:
+        leader_positions = sum(len(s.positions) for s in copier.last_snapshots)
+    if not vetoes and leader_positions == 0:
+        parts.append("Leader halten keine Positionen -> es gibt nichts zu kopieren; "
+                     "Rotation abwarten oder analysis.top_percent erhöhen")
+    elif not vetoes and leader_positions > 0:
+        parts.append(f"Leader halten {leader_positions} Positionen, aber Buch ist im Ziel "
+                     "(keine Abweichung über rebalance_threshold) - kein Fehler")
+    if copier and copier.halted:
+        parts.append("ACHTUNG: Bot ist HALTED (Circuit Breaker/Max-DD) - Neustart nötig")
+    return " | ".join(parts) if parts else "keine eindeutige Ursache - Logs prüfen"
+
+
 def rotate_leaders(
     current: list[dict],
     ranked: list[TraderMetrics],
@@ -108,6 +138,10 @@ class Autopilot:
         self.watcher: WalletWatcher | None = None
         self.scalper = None
         self._last_watch_poll = 0.0
+        self._digest_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        self._digest_equity: float | None = None
+        self._watchdog_warned = False
+        self._start_time = time.time()
 
     # ---------- Lebenszyklus ----------
 
@@ -160,6 +194,8 @@ class Autopilot:
                     self.scalper.tick()
                     self.copier.scalp_inventory = self.scalper.inventory()
                 self._watch_wallets()
+                self._maybe_digest()
+                self._maybe_watchdog()
                 self._publish()
             except Exception:
                 log.exception("Autopilot-Tick fehlgeschlagen")
@@ -350,6 +386,56 @@ class Autopilot:
             self.journal.record("watchlist", address=ev.address, coin=ev.coin, event=ev.kind,
                                 old=round(ev.old_notional, 0), new=round(ev.new_notional, 0))
             self.notifier.send(f"🔍 <b>Watchlist</b>\n{ev.text()}")
+
+    # ---------- Tages-Digest & Inaktivitäts-Watchdog ----------
+
+    def _maybe_digest(self) -> None:
+        """Einmal täglich: kompakter Lagebericht - damit '+1$ nach 4 Wochen'
+        spätestens am Tag 2 auffällt, nicht am Tag 28."""
+        if not self.cfg.autopilot.daily_digest:
+            return
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        equity = self.copier.last_equity if self.copier else None
+        if today == self._digest_date:
+            if self._digest_equity is None and equity:
+                self._digest_equity = equity
+            return
+        self._digest_date = today
+        day_t = int(time.time()) - 86_400
+        entries = [e for e in self.journal.tail(2000) if e.get("t", 0) >= day_t]
+        orders = sum(1 for e in entries if e["kind"] == "order")
+        vetoes = sum(1 for e in entries if e["kind"] == "veto")
+        scalp_pnl = sum(float(e.get("pnl", 0)) for e in entries if e["kind"] == "scalp_close")
+        delta = ""
+        if equity and self._digest_equity:
+            pct = (equity / self._digest_equity - 1) * 100
+            delta = f"\nEquity: {equity:,.2f} ({pct:+.2f}% 24h)"
+        msg = (f"📊 <b>Tagesbericht</b>{delta}\n"
+               f"Orders: {orders} | Vetos: {vetoes}"
+               + (f" | Scalp-PnL: {scalp_pnl:+,.2f}" if scalp_pnl else "")
+               + f"\nRisiko: {self.guard.last_level.name if self.guard else 'NORMAL'}"
+               + "\nAuswertung: python report.py")
+        log.info("Tagesbericht: %d Orders, %d Vetos", orders, vetoes)
+        self.notifier.send(msg)
+        self._digest_equity = equity
+
+    def _maybe_watchdog(self) -> None:
+        """Meldet sich von selbst, wenn der Bot auffällig lange nichts handelt."""
+        hours = self.cfg.autopilot.watchdog_hours
+        if hours <= 0:
+            return
+        entries = self.journal.tail(500)
+        last_order = next((e["t"] for e in entries if e["kind"] in ("order", "scalp_open")), None)
+        ref = last_order or self._start_time
+        if last_order and self._watchdog_warned:
+            if time.time() - last_order < hours * 3600:
+                self._watchdog_warned = False  # wieder aktiv -> Alarm scharf stellen
+        if time.time() - ref < hours * 3600 or self._watchdog_warned:
+            return
+        self._watchdog_warned = True
+        diagnosis = diagnose_inactivity(entries, since_t=ref, copier=self.copier)
+        log.warning("Watchdog: keine Order seit %.0fh - %s", hours, diagnosis)
+        self.notifier.send(f"⏰ <b>Watchdog</b>: keine Order seit {hours:.0f}h.\n{diagnosis}")
 
     # ---------- Equity-Historie & Leader-Performance ----------
 

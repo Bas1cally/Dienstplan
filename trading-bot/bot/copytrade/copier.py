@@ -257,9 +257,11 @@ class CopyTrader:
             else:
                 log.info("Validator blockt %s-Einstieg: %s", o.coin, verdict.summary())
                 if self.journal:
+                    # price mitschreiben: Basis für die Veto-Outcome-Analyse im Report
                     self.journal.record("veto", coin=o.coin,
                                         side="LONG" if o.target_notional > 0 else "SHORT",
                                         target=round(o.target_notional, 2),
+                                        price=o.price,
                                         reasons=verdict.reasons[:4])
         return out
 

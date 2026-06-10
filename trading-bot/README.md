@@ -242,6 +242,35 @@ Prüft Pflicht (Dependencies, Config, Unit-Tests, Hyperliquid-API,
 Leaderboard) und Optionales (News-Feeds, Konvergenz-Quellen, Claude-Key,
 Telegram, Paper-Konto-Zustand). Exit-Code 0 = startklar.
 
+## Auswertung & Frühwarnung: nie wieder "+1$ nach 4 Wochen"
+
+Ein flacher Paper-Lauf hat fast immer eine stille Ursache: zu wenige Trades,
+zu strenge Filter oder inaktive Leader - und niemand merkt es wochenlang.
+Drei Werkzeuge schließen diese Lücke:
+
+**1. Report mit Auto-Empfehlungen** (`python report.py`)
+
+Verdichtet Journal + Equity-Historie + Paper-State zu einer Diagnose mit
+konkreten Stellschrauben. Herzstück ist die **Veto-Outcome-Analyse**: Jedes
+Validator-Veto speichert den Preis; der Report bewertet später, was die
+geblockten Trades nach X Stunden gebracht *hätten* (`--horizon 24`):
+
+- Geblockte Trades wären profitabel gewesen → "min_score 2 → 1 lockern"
+- Geblockte Trades wären Verluste gewesen → "Filter rettet PnL, so lassen"
+- Keine Orders → "top_percent/max_leaders erhöhen" (mehr Signalquellen)
+- Fees > 40 % vom Brutto → "rebalance_threshold erhöhen"
+- Flat trotz Aktivität → Leader-Rotation schärfen - explizit **nicht**
+  einfach Leverage erhöhen (das skaliert eine flache Strategie nur in
+  beide Richtungen)
+
+**2. Täglicher Digest** (Telegram/Log): Equity-Delta 24h, Orders, Vetos,
+Scalp-PnL, Risiko-Level - der Flat-Lauf fällt am Tag 2 auf, nicht am Tag 28.
+
+**3. Inaktivitäts-Watchdog**: Kommt `watchdog_hours` (24h) lang keine Order,
+meldet sich der Bot von selbst MIT Diagnose: Vetos nach Ursache gruppiert,
+Leader flach, Buch im Ziel oder Bot HALTED - inklusive dem passenden
+nächsten Schritt.
+
 ## Prop-Accounts (z.B. Breakout by Kraken): Signal-Modus
 
 **Ehrliche Einordnung zuerst:** Breakout ist eine geschlossene Plattform -
