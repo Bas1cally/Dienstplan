@@ -72,6 +72,12 @@ class RiskManager:
         drawdown = (day_start_equity - equity) / day_start_equity
         return drawdown >= self.cfg.max_daily_loss
 
+    def total_drawdown_exceeded(self, start_equity: float, equity: float) -> bool:
+        """Max-Drawdown-Halt (Prop-Firmen-Regel): Verlust vom Startkapital."""
+        if start_equity <= 0:
+            return False
+        return (start_equity - equity) / start_equity >= self.cfg.max_total_drawdown
+
     @staticmethod
     def stop_hit(is_long: bool, price: float, stop_loss: float, take_profit: float) -> str | None:
         """Prüft, ob ein Preis Stop-Loss oder Take-Profit auslöst."""

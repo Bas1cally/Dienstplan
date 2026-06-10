@@ -135,7 +135,7 @@ def plan_rebalance(
 
 class CopyTrader:
     def __init__(self, cfg, client, tracker, weights: dict[str, float], guard=None,
-                 convergence=None, validator=None):
+                 convergence=None, validator=None, signals=None):
         self.cfg = cfg                      # vollständige Config
         self.ct: CopytradeConfig = cfg.copytrade
         self.client = client
@@ -144,6 +144,8 @@ class CopyTrader:
         self.guard = guard                  # MarketGuard (optional)
         self.convergence = convergence      # ConvergenceEngine (optional)
         self.validator = validator          # TradeValidator (optional, Bot 2)
+        self.signals = signals              # SignalBridge (optional, Prop-Modus)
+        self.start_equity: float | None = None  # für den Max-Drawdown-Halt
         self.last_snapshots: list[LeaderSnapshot] = []  # für Performance-Tracking
         self.last_prices: dict[str, float] = {}
         self.last_equity: float | None = None
@@ -164,6 +166,17 @@ class CopyTrader:
         equity = self._equity(prices)
         self.last_equity = equity
         self._roll_day(equity)
+        if self.start_equity is None:
+            self.start_equity = equity
+        if self.risk.total_drawdown_exceeded(self.start_equity, equity):
+            log.error("MAX-DRAWDOWN-HALT: %.1f%% vom Startkapital verloren. "
+                      "Schließe alles, Bot pausiert bis Neustart.",
+                      self.cfg.risk.max_total_drawdown * 100)
+            self.journal.record("max_drawdown_halt", equity=round(equity, 2),
+                                start=round(self.start_equity, 2))
+            self._flatten(prices)
+            self.halted = True
+            return
         if self.risk.daily_loss_exceeded(self.day_start_equity, equity):
             log.error("CIRCUIT BREAKER: Tagesverlust-Limit erreicht. Schließe alles, pausiere.")
             self.journal.record("circuit_breaker", equity=round(equity, 2),
@@ -208,6 +221,9 @@ class CopyTrader:
                 self.journal.record("order", coin=o.coin, side=side, size=round(o.delta_size, 6),
                                     price=o.price, target=round(o.target_notional, 2),
                                     mode="paper")
+                if self.signals:
+                    self.signals.emit("copy", o.coin, side, o.delta_size, o.price,
+                                      reason=f"Ziel {o.target_notional:,.0f} USD")
             else:
                 try:
                     self.client.market_open(o.coin, o.is_buy, abs(o.delta_size), self.cfg.risk.slippage)
@@ -273,6 +289,9 @@ class CopyTrader:
             if self.cfg.dry_run:
                 if price:
                     self.paper.execute(coin, -size, price)
+                    if self.signals:
+                        self.signals.emit("flatten", coin, "SELL" if size > 0 else "BUY",
+                                          size, price, reason="Glattstellung (Risk-Off/Halt)")
             else:
                 try:
                     self.client.market_open(coin, size < 0, abs(size), self.cfg.risk.slippage)

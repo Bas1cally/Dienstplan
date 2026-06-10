@@ -37,6 +37,7 @@ class RiskConfig:
     max_leverage: int
     max_daily_loss: float
     slippage: float
+    max_total_drawdown: float = 0.10   # Gesamt-Drawdown-Halt (Prop-Firmen-Regel)
 
 
 @dataclass
@@ -99,6 +100,13 @@ class ValidationConfig:
     cache_seconds: int = 120
     llm_enabled: bool = False        # Claude-Zweitmeinung (ANTHROPIC_API_KEY)
     llm_model: str = "claude-opus-4-8"
+
+
+@dataclass
+class ExecutionConfig:
+    # hyperliquid = Orders direkt (live/testnet) | signals = nur Order-Tickets
+    # emittieren (Prop-Accounts ohne API, z.B. Breakout by Kraken)
+    mode: str = "hyperliquid"
 
 
 @dataclass
@@ -178,6 +186,7 @@ class Config:
     validation: ValidationConfig
     investigator: InvestigatorConfig
     scalp: ScalpConfig
+    execution: ExecutionConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -205,6 +214,7 @@ def load_config(path: Path | None = None) -> Config:
         validation=ValidationConfig(**raw.get("validation", {})),
         investigator=InvestigatorConfig(**raw.get("investigator", {})),
         scalp=ScalpConfig(**raw.get("scalp", {})),
+        execution=ExecutionConfig(**raw.get("execution", {})),
     )
     _validate(cfg)
     return cfg
@@ -218,6 +228,13 @@ def _validate(cfg: Config) -> None:
         raise ValueError("max_leverage muss zwischen 1 und 10 liegen")
     if cfg.strategy.ema_fast >= cfg.strategy.ema_slow:
         raise ValueError("ema_fast muss kleiner als ema_slow sein")
+    if cfg.execution.mode not in ("hyperliquid", "signals"):
+        raise ValueError("execution.mode muss 'hyperliquid' oder 'signals' sein")
+    if cfg.execution.mode == "signals" and not cfg.dry_run:
+        raise ValueError("execution.mode 'signals' erfordert dry_run: true - "
+                         "Ausführung passiert extern, der Bot trackt nur im Paper-Modus")
+    if not 0 < cfg.risk.max_total_drawdown <= 0.5:
+        raise ValueError("max_total_drawdown muss zwischen 0 und 50% liegen")
     ct = cfg.copytrade
     if not 0 < ct.copy_ratio <= 1:
         raise ValueError("copy_ratio muss zwischen 0 und 1 liegen")

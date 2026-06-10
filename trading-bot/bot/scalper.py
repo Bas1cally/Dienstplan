@@ -39,7 +39,7 @@ class ScalpPosition:
 
 class VolScalper:
     def __init__(self, cfg, client, shock, paper=None, journal=None,
-                 notifier=None, equity_fn=None, clock=time.time):
+                 notifier=None, equity_fn=None, clock=time.time, signals=None):
         self.cfg = cfg                  # ScalpConfig
         self.full_risk = None           # wird vom Autopilot gesetzt (RiskConfig)
         self.client = client
@@ -47,6 +47,7 @@ class VolScalper:
         self.paper = paper              # PaperBroker im Dry-Run, sonst None
         self.journal = journal
         self.notifier = notifier
+        self.signals = signals
         self.equity_fn = equity_fn or (lambda: 0.0)
         self._clock = clock
         self.position: ScalpPosition | None = None
@@ -135,6 +136,10 @@ class VolScalper:
         if self.notifier:
             self.notifier.send(f"⚡ <b>Scalp {side} {coin}</b> @ {price:,.2f}\n"
                                f"Stop {stop:,.2f} | TP {take_profit:,.2f}")
+        if self.signals:
+            self.signals.emit("scalp", coin, "BUY" if direction > 0 else "SELL",
+                              size, price, stop=stop, take_profit=take_profit,
+                              reason="Vol-Schock Mean-Reversion")
 
     # ---------- Verwaltung ----------
 
@@ -161,6 +166,9 @@ class VolScalper:
         if self.notifier:
             icon = "✅" if pnl >= 0 else "❌"
             self.notifier.send(f"{icon} Scalp {pos.coin} zu ({reason}): {pnl:+,.2f} USD")
+        if self.signals:
+            self.signals.emit("scalp", pos.coin, "SELL" if pos.size > 0 else "BUY",
+                              pos.size, price, reason=f"Scalp-Exit ({reason})")
         self.position = None
 
     def _execute(self, coin: str, delta_size: float, price: float) -> None:

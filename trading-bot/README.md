@@ -242,6 +242,31 @@ Prüft Pflicht (Dependencies, Config, Unit-Tests, Hyperliquid-API,
 Leaderboard) und Optionales (News-Feeds, Konvergenz-Quellen, Claude-Key,
 Telegram, Paper-Konto-Zustand). Exit-Code 0 = startklar.
 
+## Prop-Accounts (z.B. Breakout by Kraken): Signal-Modus
+
+**Ehrliche Einordnung zuerst:** Breakout ist eine geschlossene Plattform -
+eine öffentliche Trading-API ist nicht bekannt, direkter Bot-Zugriff also
+nicht möglich. Wichtiger noch: **Prop-Firmen verbieten in ihren ToS häufig
+Copy-Trading fremder Quellen und Vollautomation** - das vor dem ersten Trade
+prüfen, sonst ist der Funded Account weg.
+
+Der gangbare Weg ist der **Signal-Modus** (`execution.mode: signals`):
+
+1. Der Bot sammelt und analysiert alles wie gehabt (Leader, LARP, Validator,
+   Konvergenz, News/Schock) und führt im Paper-Modus mit - du siehst also
+   jederzeit, wie die Strategie wirklich performt.
+2. Jede Entscheidung wird zusätzlich als **fertiges Order-Ticket** emittiert:
+   Telegram (ausführfertig formatiert: Coin, Seite, Größe, Stop, TP),
+   `runtime/signals.jsonl` und optional als POST an `SIGNAL_WEBHOOK_URL`.
+3. Du führst die Tickets auf Breakout aus - die Ausführung bleibt bewusst
+   manuell (Compliance), das Denken übernimmt der Bot.
+
+Dazu passend gibt es jetzt einen **Max-Drawdown-Halt**
+(`risk.max_total_drawdown`, default 10 %) zusätzlich zum Tages-Circuit-Breaker
+(-5 %) - das Paar entspricht den typischen Prop-Regeln (daily/max drawdown).
+Beide stellen alles glatt und pausieren den Bot bis zum Neustart.
+Der Signal-Modus erfordert `dry_run: true` (Validierung erzwingt das).
+
 ## Multi-Asset: alle Hyperliquid-Märkte (Krypto + Aktien, Gold, Silber, Öl)
 
 Hyperliquid listet über Builder-DEXs (HIP-3) längst mehr als Krypto: Aktien

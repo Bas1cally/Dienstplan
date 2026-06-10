@@ -189,8 +189,16 @@ class Autopilot:
             from .validator import TradeValidator
 
             validator = TradeValidator(self.cfg.validation, self.client)
+        signals = None
+        if self.cfg.execution.mode == "signals":
+            from .signals import SignalBridge
+
+            signals = SignalBridge(notifier=self.notifier)
+            log.info("Signal-Modus aktiv: Orders werden als Tickets emittiert "
+                     "(Prop-Account), Tracking läuft im Paper-Modus")
         self.copier = CopyTrader(self.cfg, self.client, tracker, weights,
-                                 guard=self.guard, convergence=convergence, validator=validator)
+                                 guard=self.guard, convergence=convergence,
+                                 validator=validator, signals=signals)
         if self.cfg.investigator.watchlist:
             self.watcher = WalletWatcher(leader_info, self.cfg.investigator.watchlist,
                                          self.cfg.investigator.min_notional_change)
@@ -203,6 +211,7 @@ class Autopilot:
                 self.cfg.scalp, self.client, self.guard.shock,
                 paper=self.copier.paper, journal=self.journal, notifier=self.notifier,
                 equity_fn=lambda: self.copier.last_equity or self.cfg.backtest.initial_equity,
+                signals=signals,
             )
             self.scalper.full_risk = self.cfg.risk
             log.info("VolScalper aktiv (%s, Risiko %.1f%%/Scalp)",

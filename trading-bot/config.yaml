@@ -33,7 +33,17 @@ risk:
   take_profit_r: 2.0      # Take-Profit bei 2R (2x Risiko)
   max_leverage: 4         # hartes Leverage-Limit (Validierung deckelt bei 10)
   max_daily_loss: 0.05    # Bot stoppt bei -5% Tagesverlust (Circuit Breaker)
+  max_total_drawdown: 0.10 # Max-Drawdown-Halt vom Startkapital (Prop-Firmen-Regel)
   slippage: 0.005         # max. Slippage bei Market Orders (0.5%)
+
+# === Ausführung ===
+# hyperliquid = Orders direkt auf Hyperliquid (live/testnet)
+# signals     = Bot analysiert + trackt im Paper-Modus, jede Order wird als
+#               Ticket emittiert (Telegram + runtime/signals.jsonl + optional
+#               SIGNAL_WEBHOOK_URL) - für Prop-Accounts ohne API wie Breakout.
+#               ACHTUNG: Prop-ToS prüfen (Copy-Trading/Automation oft verboten)!
+execution:
+  mode: hyperliquid
 
 backtest:
   fee_rate: 0.00045       # Hyperliquid Taker Fee (0.045%)
