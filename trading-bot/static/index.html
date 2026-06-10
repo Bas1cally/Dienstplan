@@ -62,6 +62,11 @@
   </div>
 
   <div class="card" style="margin-bottom:14px">
+    <h3>Equity-Verlauf</h3>
+    <canvas id="chart" height="90" style="width:100%"></canvas>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
     <h3>Offene Positionen</h3>
     <table><thead><tr><th>Coin</th><th>Größe</th><th>Entry</th><th>uPnL</th></tr></thead>
     <tbody id="positions"><tr><td colspan="4" style="color:var(--dim)">keine</td></tr></tbody></table>
@@ -69,8 +74,8 @@
 
   <div class="card">
     <h3>Aktive Leader (automatisch rotiert <span id="nextRot"></span>)</h3>
-    <table><thead><tr><th>Wallet</th><th>Gewicht</th><th>Score</th><th>ROI 30d</th><th>PF</th><th>Max DD</th></tr></thead>
-    <tbody id="leaders"><tr><td colspan="6" style="color:var(--dim)">noch keine Analyse</td></tr></tbody></table>
+    <table><thead><tr><th>Wallet</th><th>Gewicht</th><th>Score</th><th>ROI 30d</th><th>PF</th><th>Max DD</th><th>seit Kopie</th></tr></thead>
+    <tbody id="leaders"><tr><td colspan="7" style="color:var(--dim)">noch keine Analyse</td></tr></tbody></table>
   </div>
 </div>
 
@@ -142,11 +147,37 @@ async function refresh() {
       ? s.leaders.map(l => `<tr><td class="mono">${l.address.slice(0,8)}…${l.address.slice(-6)}</td>
           <td>${(l.weight*100).toFixed(0)}%</td><td>${l.score}</td>
           <td class="${l.roi_pct >= 0 ? 'pos':'neg'}">${fmt(l.roi_pct)}%</td>
-          <td>${l.profit_factor ?? '–'}</td><td>${fmt(l.max_drawdown_pct,1)}%</td></tr>`).join('')
-      : '<tr><td colspan="6" style="color:var(--dim)">noch keine Analyse</td></tr>';
+          <td>${l.profit_factor ?? '–'}</td><td>${fmt(l.max_drawdown_pct,1)}%</td>
+          <td class="${(l.roi_since_copy_pct ?? 0) >= 0 ? 'pos':'neg'}">${
+            l.roi_since_copy_pct != null ? fmt(l.roi_since_copy_pct) + '%' : '–'}</td></tr>`).join('')
+      : '<tr><td colspan="7" style="color:var(--dim)">noch keine Analyse</td></tr>';
   } catch (e) { /* Server kurz weg - nächster Tick */ }
 }
-refresh(); setInterval(refresh, 5000);
+
+async function drawChart() {
+  try {
+    const pts = await api('/api/history');
+    const cv = $('chart'), ctx = cv.getContext('2d');
+    cv.width = cv.clientWidth; const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+    if (pts.length < 2) {
+      ctx.fillStyle = '#8a94ab'; ctx.font = '12px sans-serif';
+      ctx.fillText('Noch zu wenig Daten – Kurve baut sich im Betrieb auf.', 8, H/2);
+      return;
+    }
+    const eq = pts.map(p => p.equity);
+    const min = Math.min(...eq), max = Math.max(...eq), span = (max - min) || 1;
+    const x = i => i / (pts.length - 1) * (W - 4) + 2;
+    const y = v => H - 6 - (v - min) / span * (H - 14);
+    const up = eq[eq.length-1] >= eq[0];
+    ctx.strokeStyle = up ? '#2dd4a7' : '#f06a6a'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(x(i), y(p.equity)) : ctx.moveTo(x(i), y(p.equity))); ctx.stroke();
+    ctx.fillStyle = '#8a94ab'; ctx.font = '11px ui-monospace,monospace';
+    ctx.fillText(fmt(max), 6, 12); ctx.fillText(fmt(min), 6, H - 2);
+  } catch (e) {}
+}
+refresh(); drawChart();
+setInterval(refresh, 5000); setInterval(drawChart, 30000);
 </script>
 </body>
 </html>

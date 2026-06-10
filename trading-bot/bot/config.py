@@ -87,6 +87,21 @@ class AutopilotConfig:
 
 
 @dataclass
+class ConvergenceConfig:
+    enabled: bool = True
+    sources: list = None  # type: ignore[assignment]  # binance | okx | bybit
+    period: str = "1h"
+    agree_boost: float = 1.25        # max. Verstärkung bei externer Übereinstimmung
+    disagree_scale: float = 0.4      # Dämpfung bei klarem Widerspruch
+    neutral_band: float = 0.1        # |externe Stimme| darunter = kein Einfluss
+    cache_seconds: int = 300
+
+    def __post_init__(self):
+        if self.sources is None:
+            self.sources = ["binance", "okx", "bybit"]
+
+
+@dataclass
 class ShockConfig:
     enabled: bool = True
     window_minutes: int = 5
@@ -119,6 +134,7 @@ class Config:
     news: NewsConfig
     shock: ShockConfig
     autopilot: AutopilotConfig
+    convergence: ConvergenceConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -142,6 +158,7 @@ def load_config(path: Path | None = None) -> Config:
         news=NewsConfig(**raw.get("news", {})),
         shock=ShockConfig(**raw.get("shock", {})),
         autopilot=AutopilotConfig(**raw.get("autopilot", {})),
+        convergence=ConvergenceConfig(**raw.get("convergence", {})),
     )
     _validate(cfg)
     return cfg

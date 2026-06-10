@@ -24,6 +24,7 @@ from pathlib import Path
 from hyperliquid.info import Info
 
 from .config import Config, load_credentials
+from .convergence import ConvergenceEngine
 from .copytrade.analyzer import TraderAnalyzer, TraderMetrics
 from .copytrade.copier import CopyTrader
 from .copytrade.larp import LarpConfig, LarpFilter
@@ -31,6 +32,7 @@ from .copytrade.leaderboard import fetch_candidates
 from .copytrade.tracker import LeaderTracker
 from .exchange import HyperliquidClient, api_url
 from .news.guard import MarketGuard
+from .notify import Notifier
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +97,11 @@ class Autopilot:
         self.guard: MarketGuard | None = None
         self.account_address: str | None = None
         self.error: str | None = None
+        self.notifier = Notifier()
+        self._prev_risk = "NORMAL"
+        self._prev_halted = False
+        self._last_history_write = 0.0
+        self._leader_perf: dict = self._load_perf()
 
     # ---------- Lebenszyklus ----------
 
@@ -132,6 +139,12 @@ class Autopilot:
             return
 
         self._set_status(state="running")
+        self.notifier.send(
+            f"🚀 <b>Autopilot gestartet</b>\n"
+            f"Modus: {'DRY-RUN' if self.cfg.dry_run else 'LIVE'} auf "
+            f"{'Testnet' if self.cfg.is_testnet else 'Mainnet'}\n"
+            f"Leader: {len(self.leaders)} | max {self.cfg.risk.max_leverage}x"
+        )
         while not self._stop.is_set():
             try:
                 self._maybe_reanalyze()
@@ -142,6 +155,7 @@ class Autopilot:
                 log.exception("Autopilot-Tick fehlgeschlagen")
             self._stop.wait(self.cfg.copytrade.poll_seconds)
         self._set_status(state="stopped")
+        self.notifier.send("⏹ Autopilot gestoppt.")
 
     def _setup(self) -> None:
         key = addr = None
@@ -156,7 +170,9 @@ class Autopilot:
         leader_info = Info(api_url(testnet=False), skip_ws=True)
         tracker = LeaderTracker(leader_info, [l["address"] for l in self.leaders])
         weights = {l["address"]: float(l["weight"]) for l in self.leaders}
-        self.copier = CopyTrader(self.cfg, self.client, tracker, weights, guard=self.guard)
+        convergence = ConvergenceEngine(self.cfg.convergence) if self.cfg.convergence.enabled else None
+        self.copier = CopyTrader(self.cfg, self.client, tracker, weights,
+                                 guard=self.guard, convergence=convergence)
 
     # ---------- Leader-Analyse & Rotation ----------
 
@@ -202,6 +218,13 @@ class Autopilot:
             if old != new:
                 log.info("Leader-Rotation: raus %s | rein %s",
                          [a[:10] for a in old - new] or "-", [a[:10] for a in new - old] or "-")
+                self.notifier.send(
+                    "🔄 <b>Leader-Rotation</b>\n"
+                    + "\n".join(f"➖ {a[:10]}…" for a in old - new)
+                    + ("\n" if old - new and new - old else "")
+                    + "\n".join(f"➕ {a[:10]}… (Score {next(l['score'] for l in new_leaders if l['address'] == a)})"
+                                for a in new - old)
+                )
             self.leaders = new_leaders
             Path(self.cfg.copytrade.leaders_file).write_text(json.dumps(new_leaders, indent=2))
             if self.copier:
@@ -231,6 +254,21 @@ class Autopilot:
         except Exception:
             log.debug("Account-Status nicht abrufbar", exc_info=True)
 
+        # Alerts bei Zustandswechseln (Risiko-Level, Circuit Breaker)
+        risk = self.guard.last_level.name if self.guard else "NORMAL"
+        if risk != self._prev_risk:
+            icon = {"NORMAL": "🟢", "CAUTION": "🟡", "RISK_OFF": "🔴"}.get(risk, "")
+            self.notifier.send(f"{icon} Risiko-Level: <b>{self._prev_risk} → {risk}</b>")
+            self._prev_risk = risk
+        halted = bool(self.copier and self.copier.halted)
+        if halted and not self._prev_halted:
+            self.notifier.send("⛔ <b>CIRCUIT BREAKER</b> – Tagesverlust-Limit erreicht, "
+                               "alle Positionen geschlossen, Bot pausiert bis Neustart.")
+        self._prev_halted = halted
+
+        self._record_history(equity)
+        leaders = self._with_performance(self.leaders)
+
         self._set_status(
             state="halted" if (self.copier and self.copier.halted) else "running",
             mode="dry_run" if self.cfg.dry_run else "live",
@@ -238,12 +276,69 @@ class Autopilot:
             risk_level=self.guard.last_level.name if self.guard else "NORMAL",
             equity=equity,
             positions=positions or [],
-            leaders=self.leaders,
+            leaders=leaders,
             account=self.client.account_address or self.account_address,
             next_analysis_in_h=round(
                 max(0.0, self.cfg.autopilot.reanalyze_hours - (time.time() - self._last_analysis) / 3600), 1
             ),
         )
+
+    # ---------- Equity-Historie & Leader-Performance ----------
+
+    def _record_history(self, equity: float | None) -> None:
+        """Hängt alle 60s einen Equity-Punkt an runtime/history.jsonl (Frontend-Chart)."""
+        if equity is None or time.time() - self._last_history_write < 60:
+            return
+        self._last_history_write = time.time()
+        try:
+            RUNTIME.mkdir(exist_ok=True)
+            path = RUNTIME / "history.jsonl"
+            with open(path, "a") as f:
+                f.write(json.dumps({"t": int(time.time()), "equity": round(equity, 2)}) + "\n")
+            # Datei begrenzen: bei >20k Punkten auf die letzten 10k kürzen
+            if path.stat().st_size > 2_000_000:
+                lines = path.read_text().splitlines()[-10_000:]
+                path.write_text("\n".join(lines) + "\n")
+        except OSError:
+            pass
+
+    def _with_performance(self, leaders: list[dict]) -> list[dict]:
+        """Reichert die Leader-Liste um die gemessene ROI seit Kopie-Beginn an.
+
+        Achtung Messgrenze: Equity-basiert - Ein-/Auszahlungen des Leaders
+        verfälschen den Wert. Trotzdem das ehrlichste Live-Maß dafür, ob ein
+        Leader seit Aufnahme tatsächlich liefert.
+        """
+        snaps = {s.address: s.equity for s in (self.copier.last_snapshots if self.copier else [])}
+        out = []
+        changed = False
+        for l in leaders:
+            l = dict(l)
+            eq = snaps.get(l["address"])
+            perf = self._leader_perf.get(l["address"])
+            if eq and eq > 0:
+                if not perf:
+                    self._leader_perf[l["address"]] = {"start_equity": eq, "start": int(time.time())}
+                    changed = True
+                else:
+                    l["roi_since_copy_pct"] = round((eq / perf["start_equity"] - 1) * 100, 2)
+            out.append(l)
+        if changed:
+            self._save_perf()
+        return out
+
+    def _load_perf(self) -> dict:
+        try:
+            return json.loads((RUNTIME / "leader_perf.json").read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def _save_perf(self) -> None:
+        try:
+            RUNTIME.mkdir(exist_ok=True)
+            (RUNTIME / "leader_perf.json").write_text(json.dumps(self._leader_perf, indent=2))
+        except OSError:
+            pass
 
     def _set_status(self, **kwargs) -> None:
         with self._lock:

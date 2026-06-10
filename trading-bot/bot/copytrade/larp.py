@@ -25,7 +25,8 @@ class LarpConfig:
     max_single_trade_share: float = 0.40 # größter Trade max. 40% des Brutto-Gewinns
     min_profitable_week_share: float = 0.60
     max_drawdown: float = 0.25           # 25% relativ zum Konto = überhebelt
-    min_median_holding_minutes: float = 30.0  # Scalper aussortieren
+    min_median_holding_minutes: float = 30.0   # Scalper aussortieren
+    max_median_holding_minutes: float = 0.0    # >0: Day-Trading-Profil - Swing-Trader raus
 
 
 @dataclass
@@ -66,6 +67,11 @@ class LarpFilter:
             reasons.append(
                 f"Scalper: mediane Haltedauer {m.median_holding_minutes:.0f}min "
                 f"(< {c.min_median_holding_minutes:.0f}min) - Copy-Lag frisst den Edge"
+            )
+        if c.max_median_holding_minutes > 0 and m.median_holding_minutes > c.max_median_holding_minutes:
+            reasons.append(
+                f"Swing-Trader: mediane Haltedauer {m.median_holding_minutes / 60:.1f}h "
+                f"(> {c.max_median_holding_minutes / 60:.0f}h) - passt nicht zum Day-Trading-Profil"
             )
 
         return LarpVerdict(passed=not reasons, reasons=reasons)

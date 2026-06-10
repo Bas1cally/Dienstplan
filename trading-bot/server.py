@@ -78,6 +78,22 @@ def status():
     return s
 
 
+@app.get("/api/history")
+def history(limit: int = 500):
+    """Equity-Kurve für das Dashboard (letzte `limit` Minuten-Punkte)."""
+    path = Path(__file__).parent / "runtime" / "history.jsonl"
+    if not path.exists():
+        return []
+    lines = path.read_text().splitlines()[-limit:]
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
 @app.post("/api/wallet")
 def set_wallet(body: WalletBody):
     if not ADDR_RE.match(body.address):

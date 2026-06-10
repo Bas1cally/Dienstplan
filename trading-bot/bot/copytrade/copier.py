@@ -42,6 +42,7 @@ def compute_targets(
     equity: float,
     cfg: CopytradeConfig,
     risk: RiskConfig,
+    convergence=None,
 ) -> dict[str, float]:
     """Ziel-Notional (signiert, USD) je Coin für UNSER Konto."""
     targets: dict[str, float] = {}
@@ -52,6 +53,16 @@ def compute_targets(
         for coin in snap.positions:
             exposure = snap.exposure(coin)  # z.B. +0.8 = 80% der Leader-Equity long
             targets[coin] = targets.get(coin, 0.0) + exposure * w * cfg.copy_ratio * equity
+
+    # Multi-Exchange-Konvergenz: Boost bei Übereinstimmung, Dämpfung bei Widerspruch.
+    # VOR den Caps, damit Coin-Limit und Leverage-Deckel auch den Boost begrenzen.
+    if convergence is not None:
+        for coin, notional in list(targets.items()):
+            v = convergence.vote(coin, 1.0 if notional > 0 else -1.0)
+            if v.factor != 1.0:
+                log.info("Konvergenz %s: Faktor %.2f (extern %+.2f, %d Quellen)",
+                         coin, v.factor, v.external or 0.0, v.sources)
+                targets[coin] = notional * v.factor
 
     # Cap je Coin
     max_coin = cfg.max_alloc_per_coin * equity
@@ -107,13 +118,15 @@ def plan_rebalance(
 
 
 class CopyTrader:
-    def __init__(self, cfg, client, tracker, weights: dict[str, float], guard=None):
+    def __init__(self, cfg, client, tracker, weights: dict[str, float], guard=None, convergence=None):
         self.cfg = cfg                      # vollständige Config
         self.ct: CopytradeConfig = cfg.copytrade
         self.client = client
         self.tracker = tracker
         self.weights = weights
         self.guard = guard                  # MarketGuard (optional)
+        self.convergence = convergence      # ConvergenceEngine (optional)
+        self.last_snapshots: list[LeaderSnapshot] = []  # für Performance-Tracking
         self.risk = RiskManager(cfg.risk)
         self.day_start_equity = 0.0
         self.day = ""
@@ -147,8 +160,10 @@ class CopyTrader:
         snapshots = self.tracker.snapshot_all()
         if not snapshots:
             return
+        self.last_snapshots = snapshots
         prices = {c: float(p) for c, p in self.client.info.all_mids().items()}
-        targets = compute_targets(snapshots, self.weights, equity, self.ct, self.cfg.risk)
+        targets = compute_targets(snapshots, self.weights, equity, self.ct, self.cfg.risk,
+                                  convergence=self.convergence)
         current = self._current_positions()
         orders = plan_rebalance(targets, current, prices, equity, self.ct)
         if caution:

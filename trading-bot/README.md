@@ -184,6 +184,50 @@ python tests/test_autopilot.py    # Unit-Tests Leader-Rotation + KI-Merge
 3. **Copy-Loop + MarketGuard** wie gehabt, plus `runtime/status.json` als
    Live-Zustand für das Web-Frontend.
 
+## Multi-Exchange-Konvergenz (Binance, OKX, Bybit)
+
+**Realitätscheck:** Das alte Binance-Leaderboard mit einzelnen Trader-Positionen
+wurde von Binance abgeschaltet - einzelne Fremd-Wallets lassen sich dort nicht
+mehr verfolgen oder LARP-filtern. Der LARP-Filter funktioniert nur auf
+Hyperliquid, wo jede Wallet on-chain transparent ist. Was es offiziell gibt:
+**aggregierte Top-Trader-Positionierung** (Long/Short-Ratios) von Binance
+(Top-Trader Position Ratio), OKX (Rubik) und Bybit (Account Ratio).
+
+Genau das nutzt `bot/convergence.py`: Die LARP-gefilterten Hyperliquid-Leader
+bleiben die einzige Trade-Quelle; die externen Ratios sind ein **Verstärker**:
+
+| Externe Top-Trader vs. unsere Leader | Positionsgröße |
+|---|---|
+| Übereinstimmung (z.B. beide long) | bis **1.25×** (skaliert mit Stärke) |
+| Neutral / keine Daten | 1.0× (kein Einfluss) |
+| Klarer Widerspruch | **0.4×** gedämpft |
+
+Konvergenz eröffnet **nie** eigene Positionen, und alle Caps (Coin-Limit,
+Gesamt-Leverage) greifen auch nach dem Boost. Konfiguration: `convergence`-Block.
+
+## Day-Trading-Profil
+
+`config.yaml` ist auf Day-Trading kalibriert - **maximale Rewards bedeutet
+maximales Risiko**, deshalb bleiben die Schutzmechanismen unangetastet:
+
+- **Leader-Auswahl:** mediane Haltedauer 30 Min - 12 h (LARP-Gates
+  `min/max_median_holding_minutes`) - Scalper raus (Copy-Lag), Swing-Trader
+  raus (kein Day-Trading), Analysefenster 21 Tage
+- **Tempo:** Polling 10 s, Leader-Rotation alle 6 h statt 24 h
+- **Aggressivität:** `copy_ratio 0.6`, `max_leverage 4` (statt 0.5 / 3×)
+- **Unverändert:** Circuit Breaker −5 %/Tag, Coin-Cap 25 %, RISK_OFF-Glattstellung
+
+## Telegram-Alerts, Equity-Kurve, Leader-Tracking
+
+- **Telegram** (`bot/notify.py`): `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in
+  `.env` → Alerts bei Start/Stop, Risiko-Level-Wechsel, Leader-Rotation und
+  Circuit Breaker. Ohne Variablen still deaktiviert.
+- **Equity-Kurve:** der Autopilot schreibt minütlich nach
+  `runtime/history.jsonl`; das Dashboard rendert den Verlauf als Chart.
+- **Leader-Performance:** Spalte „seit Kopie" im Dashboard zeigt die gemessene
+  ROI jedes Leaders ab dem Moment der Aufnahme (equity-basiert; Ein-/Aus-
+  zahlungen des Leaders können den Wert verfälschen).
+
 ## Marktüberwachung: News-Analyse + Schock-Detektor
 
 Beide Bots fragen pro Tick den `MarketGuard` ab, der zwei Verteidigungslinien
@@ -273,6 +317,8 @@ trading-bot/
     │   ├── larp.py         # harte K.O.-Gates gegen Blender
     │   ├── tracker.py      # Snapshots der Leader-Positionen
     │   └── copier.py       # Ziel-Portfolio + Rebalancing mit Risiko-Caps
+    ├── convergence.py      # Top-Trader-Ratios Binance/OKX/Bybit als Verstärker
+    ├── notify.py           # Telegram-Alerts
     ├── news/
     │   ├── sources.py      # RSS, CryptoPanic, X/Twitter (optional)
     │   ├── sentiment.py    # regelbasiertes Risiko-Scoring mit Zeit-Zerfall

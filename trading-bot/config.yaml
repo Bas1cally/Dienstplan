@@ -21,11 +21,14 @@ strategy:
   atr_period: 14
   allow_shorts: true
 
+# Day-Trading-Profil: aggressiver als die konservativen Ur-Defaults (3x / 0.5).
+# Ehrlicher Hinweis: mehr Leverage = mehr Reward UND mehr Risiko - der
+# Circuit Breaker bei -5%/Tag ist die Grenze, die das überlebbar hält.
 risk:
-  risk_per_trade: 0.01    # max. 1% des Kapitals Risiko pro Trade
+  risk_per_trade: 0.01    # max. 1% des Kapitals Risiko pro Trade (Trendfolge-Bot)
   atr_stop_mult: 2.0      # Stop-Loss-Abstand = 2 x ATR
   take_profit_r: 2.0      # Take-Profit bei 2R (2x Risiko)
-  max_leverage: 3         # hartes Leverage-Limit (Hyperliquid erlaubt mehr - nicht nutzen!)
+  max_leverage: 4         # hartes Leverage-Limit (Validierung deckelt bei 10)
   max_daily_loss: 0.05    # Bot stoppt bei -5% Tagesverlust (Circuit Breaker)
   slippage: 0.005         # max. Slippage bei Market Orders (0.5%)
 
@@ -37,13 +40,13 @@ backtest:
 copytrade:
   leaders_file: leaders.json   # Ergebnis von analyze_traders.py (manuell editierbar)
   max_leaders: 3               # auf wie viele Top-Trader das Kapital verteilt wird
-  copy_ratio: 0.5              # 0.5 = halb so aggressiv allokieren wie der Leader
+  copy_ratio: 0.6              # Day-Trading-Profil: etwas aggressiver allokieren
   max_alloc_per_coin: 0.25     # max. 25% der Equity in einem Coin
   rebalance_threshold: 0.02    # erst handeln ab 2% Equity Abweichung (gegen Fee-Churn)
   min_notional: 10             # Hyperliquid-Mindestordergröße
-  poll_seconds: 15             # Abfrage-Intervall der Leader-Wallets
+  poll_seconds: 10             # Day-Trading: schneller pollen (weniger Copy-Lag)
   analysis:
-    days: 30                   # Analysefenster der Fill-Historie
+    days: 21                   # kürzeres Fenster - Day-Trader-Form ist schnelllebig
     min_account_value: 10000   # Mindest-Kontogröße der Kandidaten
     min_volume: 500000         # Mindest-Monatsvolumen (statistische Aussagekraft)
     top_percent: 1.0           # nur das Top-1% (nach Monats-ROI) geht in die Tiefenanalyse
@@ -56,6 +59,7 @@ copytrade:
       min_profitable_week_share: 0.60
       max_drawdown: 0.25             # überhebelte Konten aussortieren
       min_median_holding_minutes: 30 # Scalper: Copy-Lag frisst deren Edge
+      max_median_holding_minutes: 720 # Day-Trading: Swing-Trader (>12h Hold) raus
 
 # === Marktüberwachung: News + Preis-Schocks ===
 # Schaltet beide Bots in CAUTION (nichts Neues) oder RISK_OFF (alles schließen).
@@ -82,7 +86,22 @@ shock:                    # die schnelle Verteidigung - direkt auf 1m-Preisdaten
 
 # === Autopilot: Vollautomatik (server.py / autopilot.py) ===
 autopilot:
-  reanalyze_hours: 24     # Leaderboard-Analyse + Leader-Rotation alle X Stunden
+  reanalyze_hours: 6      # Day-Trading: Leader-Rotation alle 6h statt 24h
   min_keep_score: 35      # Leader unter diesem Score werden ausgetauscht
   server_host: 127.0.0.1  # Web-UI nur lokal - NIE ungeschützt ins Internet!
   server_port: 8000
+
+# === Multi-Exchange-Konvergenz ===
+# Positionierung der Top-Trader auf Binance/OKX/Bybit als Verstärker:
+# Übereinstimmung mit unseren HL-Leadern -> Position bis 1.25x größer,
+# klarer Widerspruch -> auf 0.4x gedämpft. Nie ein eigener Trade-Auslöser.
+# (Das alte Binance-Leaderboard mit Einzel-Wallets wurde von Binance
+#  abgeschaltet - aggregierte Top-Trader-Ratios sind das offizielle API.)
+convergence:
+  enabled: true
+  sources: [binance, okx, bybit]
+  period: 1h
+  agree_boost: 1.25
+  disagree_scale: 0.4
+  neutral_band: 0.1       # |externe Stimme| darunter = neutral, kein Einfluss
+  cache_seconds: 300
