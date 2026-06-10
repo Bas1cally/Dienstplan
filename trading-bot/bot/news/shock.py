@@ -30,13 +30,14 @@ class ShockState:
 
 
 class ShockDetector:
-    def __init__(self, cfg):
+    def __init__(self, cfg, clock=time.time):
         self.cfg = cfg
+        self._clock = clock  # injizierbar für Simulation/Backtest
         self._cooldown_until = 0.0
 
     def check(self, candles_1m: pd.DataFrame, now: float | None = None) -> ShockState:
         """Erwartet 1m-Candles (mind. 65 Stück) mit Spalte close."""
-        now = now if now is not None else time.time()
+        now = now if now is not None else self._clock()
         if not self.cfg.enabled:
             return ShockState(False)
         if now < self._cooldown_until:

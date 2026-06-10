@@ -7,3 +7,4 @@ copy_bot.log
 trading-bot/leaders.json
 autopilot.log
 trading-bot/runtime/
+trading-bot/runtime/sim/

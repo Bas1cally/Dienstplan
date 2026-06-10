@@ -164,10 +164,10 @@ class CopyTrader:
 
             level = self.guard.level()
             if level == RiskLevel.RISK_OFF:
-                log.warning("RISK_OFF: stelle Copy-Portfolio glatt")
-                if self._current_positions():
+                if self._current_positions():  # nur handeln/loggen, wenn es etwas glattzustellen gibt
+                    log.warning("RISK_OFF: stelle Copy-Portfolio glatt")
                     self.journal.record("flatten", reason="risk_off")
-                self._flatten(prices)
+                    self._flatten(prices)
                 return
             caution = level == RiskLevel.CAUTION
 

@@ -46,7 +46,8 @@ class MarketGuard:
         shock_level = self._check_shock()
         news_level = self._check_news()
         level = max(shock_level, news_level)
-        if level > RiskLevel.NORMAL:
+        if level > RiskLevel.NORMAL and level != self.last_level:
+            # nur Zustandswechsel loggen, nicht jede Runde im Cooldown
             log.warning("MarketGuard: %s (Schock=%s, News=%s)",
                         level.name, shock_level.name, news_level.name)
         self.last_level = level
@@ -64,7 +65,8 @@ class MarketGuard:
             return RiskLevel.CAUTION
         state = self.shock.check(candles)
         if state.triggered:
-            log.warning("Schock-Detektor: %s", state.reason)
+            if state.reason != "cooldown aktiv":  # nur den Auslöser loggen, nicht jede Runde
+                log.warning("Schock-Detektor: %s", state.reason)
             return RiskLevel.RISK_OFF
         return RiskLevel.NORMAL
 
