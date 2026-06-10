@@ -242,6 +242,27 @@ Prüft Pflicht (Dependencies, Config, Unit-Tests, Hyperliquid-API,
 Leaderboard) und Optionales (News-Feeds, Konvergenz-Quellen, Claude-Key,
 Telegram, Paper-Konto-Zustand). Exit-Code 0 = startklar.
 
+## Multi-Asset: alle Hyperliquid-Märkte (Krypto + Aktien, Gold, Silber, Öl)
+
+Hyperliquid listet über Builder-DEXs (HIP-3) längst mehr als Krypto: Aktien
+wie TSLA/NVDA, Gold, Silber, Öl - alles als Perps mit Leverage. Mit
+`market.dexs: auto` (Default) arbeitet der Bot über **alle** Perp-DEXs:
+
+- **Leader-Tracking über alle DEXs:** Hält ein Top-Trader TSLA long und Gold
+  short, spiegelt der Copier das mit - Equity und Exposure werden über die
+  DEXs hinweg korrekt summiert (Builder-DEXs haben separates Collateral).
+- **Datenebene vs. Ausführungsebene:** Marktdaten (Candles, Mids) kommen
+  IMMER vom Mainnet mit allen DEXs - auch im Testnet-Modus sieht der
+  Validator damit echte Preise. Orders gehen auf das konfigurierte Netz
+  (Builder-DEXs existieren nur auf Mainnet; im Testnet wird nur der
+  Haupt-DEX ausgeführt, der Paper-Modus kann alles simulieren).
+- **Saubere Grenzen:** Die Binance/OKX/Bybit-Konvergenz gilt nur für
+  Krypto-Coins - Builder-Assets (erkennbar am `dex:`-Präfix) werden neutral
+  behandelt statt sinnlose API-Calls zu feuern. Validator, Paper-Broker,
+  Journal und Risiko-Caps sind asset-agnostisch und greifen überall gleich.
+
+`python doctor.py` zeigt, welche DEXs und Märkte entdeckt wurden.
+
 ## VolScalper: Volatilitäts-Schocks als Scalp-Chance (experimentell, opt-in)
 
 Der Schock-Detektor erkennt Liquidations-Kaskaden ohnehin - der VolScalper

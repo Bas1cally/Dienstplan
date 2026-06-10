@@ -140,7 +140,7 @@ class VolScalper:
 
     def _manage(self) -> None:
         pos = self.position
-        price = float(self.client.info.all_mids()[pos.coin])
+        price = float(self.client.all_mids()[pos.coin])
         is_long = pos.size > 0
         reason = None
         if (is_long and price <= pos.stop) or (not is_long and price >= pos.stop):

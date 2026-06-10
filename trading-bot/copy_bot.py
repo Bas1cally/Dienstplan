@@ -54,11 +54,12 @@ def main() -> None:
     key = addr = None
     if not cfg.dry_run:
         key, addr = load_credentials()
-    client = HyperliquidClient(testnet=cfg.is_testnet, private_key=key, account_address=addr)
+    client = HyperliquidClient(testnet=cfg.is_testnet, private_key=key, account_address=addr,
+                               dexs=cfg.market.dexs)
 
     # Leader-Positionen kommen immer vom Mainnet - dort traden die Profis.
     leader_info = Info(api_url(testnet=False), skip_ws=True)
-    tracker = LeaderTracker(leader_info, list(weights))
+    tracker = LeaderTracker(leader_info, list(weights), dexs=client.dexs)
 
     guard = None
     if cfg.news.enabled or cfg.shock.enabled:

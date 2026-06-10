@@ -174,11 +174,14 @@ class Autopilot:
         self.client = HyperliquidClient(
             testnet=self.cfg.is_testnet, private_key=key,
             account_address=addr or self.account_address,
+            dexs=self.cfg.market.dexs,
         )
         self.guard = MarketGuard(self.cfg.news, self.cfg.shock, client=self.client, coin="BTC")
         self._load_or_analyze_leaders()
         leader_info = Info(api_url(testnet=False), skip_ws=True)
-        tracker = LeaderTracker(leader_info, [l["address"] for l in self.leaders])
+        # Leader-Positionen über ALLE DEXs verfolgen - sie handeln auch TSLA/Gold/Öl
+        tracker = LeaderTracker(leader_info, [l["address"] for l in self.leaders],
+                                dexs=self.client.dexs)
         weights = {l["address"]: float(l["weight"]) for l in self.leaders}
         convergence = ConvergenceEngine(self.cfg.convergence) if self.cfg.convergence.enabled else None
         validator = None
@@ -282,7 +285,7 @@ class Autopilot:
             else:
                 addr = self.client.account_address or self.account_address
                 if addr:
-                    state = self.client.info.user_state(addr)
+                    state = self.client.merged_user_state(addr)
                     equity = float(state["marginSummary"]["accountValue"])
                     positions = [
                         {

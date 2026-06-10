@@ -130,6 +130,22 @@ def main() -> None:
 
     check("Mainnet-Daten (Leader + Validator)", hl_mainnet)
 
+    def multidex():
+        from bot.config import load_config
+        from bot.exchange import HyperliquidClient
+
+        cfg = load_config()
+        if cfg.market.dexs == "main":
+            raise SkipCheck("market.dexs: main (nur Krypto)")
+        client = HyperliquidClient(testnet=False, dexs=cfg.market.dexs)
+        n_dexs = len(client.dexs)
+        n_assets = len(client.market.coin_to_asset)
+        builder = [c for c in client.market.coin_to_asset if ":" in c][:6]
+        sample = f", z.B. {', '.join(builder)}" if builder else ""
+        return f"{n_dexs} DEXs, {n_assets} Märkte{sample}"
+
+    check("Multi-DEX (Aktien/Gold/Öl)", multidex, mandatory=False)
+
     def leaderboard():
         from bot.copytrade.leaderboard import LEADERBOARD_URL
 

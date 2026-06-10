@@ -101,6 +101,10 @@ class ConvergenceEngine:
         """Konvergenz-Faktor für unsere Position (our_sign: +1 long, -1 short)."""
         if not self.cfg.enabled or not self.sources or our_sign == 0:
             return ConvergenceVote(1.0, None, 0)
+        if ":" in coin:
+            # Builder-DEX-Assets (Aktien, Gold, Öl) haben keine Binance/OKX/
+            # Bybit-Perp-Ratios - neutral statt sinnlose API-Calls
+            return ConvergenceVote(1.0, None, 0)
         avg, n = self._external(coin)
         if n == 0 or abs(avg) < self.cfg.neutral_band:
             return ConvergenceVote(1.0, avg if n else None, n)

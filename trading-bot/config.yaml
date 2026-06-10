@@ -11,6 +11,9 @@ market:
   coin: BTC               # Hyperliquid Perp-Symbol (BTC, ETH, SOL, ...)
   interval: 1h            # Candle-Intervall: 1m 5m 15m 1h 4h 1d
   lookback_candles: 300   # Historie für Indikatoren
+  dexs: auto              # auto = ALLE Perp-DEXs: Krypto + Builder-DEXs mit
+                          # Aktien (TSLA, NVDA, ...), Gold, Silber, Öl - alles
+                          # mit Leverage. Alternativ Liste oder "main".
 
 strategy:
   ema_fast: 20

@@ -159,7 +159,7 @@ class CopyTrader:
     def tick(self) -> None:
         if self.halted:
             return
-        prices = {c: float(p) for c, p in self.client.info.all_mids().items()}
+        prices = {c: float(p) for c, p in self.client.all_mids().items()}
         self.last_prices = prices
         equity = self._equity(prices)
         self.last_equity = equity
@@ -252,7 +252,7 @@ class CopyTrader:
     def _current_positions(self) -> dict[str, float]:
         if self.cfg.dry_run:
             return self.paper.sizes()
-        state = self.client.info.user_state(self.client.account_address)
+        state = self.client.merged_user_state(self.client.account_address)
         out = {}
         for p in state.get("assetPositions", []):
             pos = p["position"]

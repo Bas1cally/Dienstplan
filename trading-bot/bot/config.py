@@ -15,6 +15,7 @@ class MarketConfig:
     coin: str
     interval: str
     lookback_candles: int
+    dexs: str = "auto"   # "auto" = alle Perp-DEXs (Krypto + Aktien/Gold/Öl) | Liste | "main"
 
 
 @dataclass
