@@ -3,3 +3,5 @@ archiv/
 .env
 bot.log
 *.pyc
+copy_bot.log
+trading-bot/leaders.json

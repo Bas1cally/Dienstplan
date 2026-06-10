@@ -33,3 +33,18 @@ backtest:
   fee_rate: 0.00045       # Hyperliquid Taker Fee (0.045%)
   slippage: 0.0002        # angenommene Slippage pro Fill
   initial_equity: 10000
+
+copytrade:
+  leaders_file: leaders.json   # Ergebnis von analyze_traders.py (manuell editierbar)
+  max_leaders: 3               # auf wie viele Top-Trader das Kapital verteilt wird
+  copy_ratio: 0.5              # 0.5 = halb so aggressiv allokieren wie der Leader
+  max_alloc_per_coin: 0.25     # max. 25% der Equity in einem Coin
+  rebalance_threshold: 0.02    # erst handeln ab 2% Equity Abweichung (gegen Fee-Churn)
+  min_notional: 10             # Hyperliquid-Mindestordergröße
+  poll_seconds: 15             # Abfrage-Intervall der Leader-Wallets
+  analysis:
+    days: 30                   # Analysefenster der Fill-Historie
+    min_account_value: 10000   # Mindest-Kontogröße der Kandidaten
+    min_volume: 500000         # Mindest-Monatsvolumen (statistische Aussagekraft)
+    top_n: 30                  # wie viele Leaderboard-Kandidaten tief analysiert werden
+    min_score: 40              # Mindest-Score, um als Leader infrage zu kommen

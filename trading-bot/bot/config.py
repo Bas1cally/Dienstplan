@@ -46,6 +46,27 @@ class BacktestConfig:
 
 
 @dataclass
+class AnalysisConfig:
+    days: int = 30
+    min_account_value: float = 10000
+    min_volume: float = 500000
+    top_n: int = 30
+    min_score: float = 40
+
+
+@dataclass
+class CopytradeConfig:
+    leaders_file: str = "leaders.json"
+    max_leaders: int = 3
+    copy_ratio: float = 0.5
+    max_alloc_per_coin: float = 0.25
+    rebalance_threshold: float = 0.02
+    min_notional: float = 10
+    poll_seconds: int = 15
+    analysis: AnalysisConfig = None  # type: ignore[assignment]
+
+
+@dataclass
 class Config:
     network: str
     dry_run: bool
@@ -53,6 +74,7 @@ class Config:
     strategy: StrategyConfig
     risk: RiskConfig
     backtest: BacktestConfig
+    copytrade: CopytradeConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -63,6 +85,8 @@ def load_config(path: Path | None = None) -> Config:
     path = path or ROOT / "config.yaml"
     with open(path) as f:
         raw = yaml.safe_load(f)
+    ct_raw = dict(raw.get("copytrade", {}))
+    analysis = AnalysisConfig(**ct_raw.pop("analysis", {}))
     cfg = Config(
         network=raw.get("network", "testnet"),
         dry_run=bool(raw.get("dry_run", True)),
@@ -70,6 +94,7 @@ def load_config(path: Path | None = None) -> Config:
         strategy=StrategyConfig(**raw["strategy"]),
         risk=RiskConfig(**raw["risk"]),
         backtest=BacktestConfig(**raw["backtest"]),
+        copytrade=CopytradeConfig(analysis=analysis, **ct_raw),
     )
     _validate(cfg)
     return cfg
@@ -83,6 +108,11 @@ def _validate(cfg: Config) -> None:
         raise ValueError("max_leverage muss zwischen 1 und 10 liegen")
     if cfg.strategy.ema_fast >= cfg.strategy.ema_slow:
         raise ValueError("ema_fast muss kleiner als ema_slow sein")
+    ct = cfg.copytrade
+    if not 0 < ct.copy_ratio <= 1:
+        raise ValueError("copy_ratio muss zwischen 0 und 1 liegen")
+    if not 0 < ct.max_alloc_per_coin <= 0.5:
+        raise ValueError("max_alloc_per_coin muss zwischen 0 und 50% liegen")
 
 
 def load_credentials() -> tuple[str, str]:
