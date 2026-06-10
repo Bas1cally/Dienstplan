@@ -43,7 +43,68 @@ class TraderMetrics:
     # Aktivität
     coins: list[str] = field(default_factory=list)
     trades_per_day: float = 0.0
+    # LARP-relevante Tiefenmetriken (aus rekonstruierten Round-Trips)
+    round_trips: int = 0
+    median_holding_minutes: float = 0.0
+    max_trade_share: float = 1.0    # Anteil des größten Trades am Brutto-Gewinn
+    profitable_week_share: float = 0.0
     score: float = 0.0
+
+
+@dataclass
+class RoundTrip:
+    """Ein vollständiger Trade: Position von 0 auf 0 zurück."""
+    coin: str
+    open_time: int
+    close_time: int
+    net_pnl: float
+
+    @property
+    def holding_minutes(self) -> float:
+        return (self.close_time - self.open_time) / 60_000
+
+
+def reconstruct_trades(fills: list[dict]) -> list[RoundTrip]:
+    """Rekonstruiert Round-Trips aus der Fill-Historie.
+
+    Läuft die signierte Positionsgröße je Coin mit: Übergang 0 -> !=0 öffnet
+    einen Trade, Rückkehr auf ~0 schließt ihn. Teilschließungen sammeln sich
+    im selben Round-Trip. Positionen, die vor dem Fenster geöffnet wurden
+    (Start mitten im Trade), werden verworfen - lieber weniger, aber saubere
+    Datenpunkte.
+    """
+    trades: list[RoundTrip] = []
+    pos: dict[str, float] = {}
+    open_time: dict[str, int] = {}
+    pnl: dict[str, float] = defaultdict(float)
+    dirty: set[str] = set()  # Coin startete mitten in einer Alt-Position
+
+    for f in sorted(fills, key=lambda f: f["time"]):
+        coin = f["coin"]
+        t = int(f["time"])
+        delta = float(f["sz"]) * (1 if f.get("side") == "B" else -1)
+        if coin not in pos:  # erster Fill: Laufposition aus startPosition seeden
+            pos[coin] = float(f.get("startPosition", 0))
+            if pos[coin] != 0:
+                dirty.add(coin)
+        prev = pos[coin]
+        new = prev + delta
+        if abs(new) < 1e-9 * max(abs(delta), 1.0):
+            new = 0.0
+        pos[coin] = new
+
+        if prev == 0 and new != 0:
+            open_time[coin] = t
+            pnl[coin] = 0.0
+        pnl[coin] += float(f.get("closedPnl", 0)) - float(f.get("fee", 0))
+
+        if prev != 0 and new == 0:
+            if coin in dirty:  # Alt-Position abgeschlossen: verwerfen, ab jetzt sauber
+                dirty.discard(coin)
+            elif coin in open_time:
+                trades.append(RoundTrip(coin, open_time.pop(coin), t, pnl[coin]))
+            pnl[coin] = 0.0
+    return trades
 
 
 def analyze_fills(address: str, fills: list[dict], account_value: float, days: int) -> TraderMetrics:
@@ -93,6 +154,25 @@ def analyze_fills(address: str, fills: list[dict], account_value: float, days: i
     if daily_pnl:
         m.profitable_day_share = sum(1 for v in daily_pnl.values() if v > 0) / len(daily_pnl)
 
+    # Tiefenmetriken aus Round-Trips
+    trips = reconstruct_trades(fills)
+    m.round_trips = len(trips)
+    if trips:
+        holdings = sorted(t.holding_minutes for t in trips)
+        m.median_holding_minutes = holdings[len(holdings) // 2]
+        winners = [t.net_pnl for t in trips if t.net_pnl > 0]
+        if winners:
+            m.max_trade_share = max(winners) / sum(winners)
+
+    # Wochen-Konsistenz: Anteil profitabler Kalenderwochen (nur aktive Wochen)
+    weekly: dict[str, float] = defaultdict(float)
+    for day, v in daily_pnl.items():
+        from datetime import datetime
+        iso = datetime.strptime(day, "%Y-%m-%d").isocalendar()
+        weekly[f"{iso[0]}-W{iso[1]:02d}"] += v
+    if weekly:
+        m.profitable_week_share = sum(1 for v in weekly.values() if v > 0) / len(weekly)
+
     m.score = _score(m)
     return m
 
@@ -140,14 +220,20 @@ class TraderAnalyzer:
         account_value = float(state["marginSummary"]["accountValue"])
         return analyze_fills(address, fills, account_value, self.days)
 
-    def rank(self, addresses: list[str], min_score: float) -> list[TraderMetrics]:
+    def rank(self, addresses: list[str], min_score: float, larp=None) -> list[TraderMetrics]:
+        """Bewertet Wallets; `larp` (LarpFilter) sortiert Blender vorab hart aus."""
         results = []
         for addr in addresses:
             try:
                 m = self.analyze(addr)
-                log.info("Analysiert %s: score=%.1f roi=%.1f%% pf=%.2f trades=%d dd=%.1f%%",
+                log.info("Analysiert %s: score=%.1f roi=%.1f%% pf=%.2f trips=%d dd=%.1f%% hold=%.0fmin",
                          addr[:10], m.score, m.roi * 100, m.profit_factor,
-                         m.closed_trades, m.max_drawdown * 100)
+                         m.round_trips, m.max_drawdown * 100, m.median_holding_minutes)
+                if larp:
+                    verdict = larp.check(m)
+                    if not verdict.passed:
+                        log.info("  LARP-Filter K.O. für %s: %s", addr[:10], "; ".join(verdict.reasons))
+                        continue
                 if m.score >= min_score:
                     results.append(m)
             except Exception:

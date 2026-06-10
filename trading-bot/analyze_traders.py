@@ -18,6 +18,7 @@ from hyperliquid.info import Info
 
 from bot.config import load_config
 from bot.copytrade.analyzer import TraderAnalyzer
+from bot.copytrade.larp import LarpConfig, LarpFilter
 from bot.copytrade.leaderboard import fetch_candidates
 from bot.exchange import api_url
 
@@ -49,14 +50,16 @@ def main() -> None:
             min_account_value=an_cfg.min_account_value,
             min_volume=an_cfg.min_volume,
             top_n=an_cfg.top_n,
+            top_percent=an_cfg.top_percent,
         )
         addresses = [c.address for c in candidates]
         if not addresses:
             log.error("Keine Kandidaten gefunden - Filter zu streng oder Leaderboard nicht erreichbar.")
             return
 
+    larp = LarpFilter(LarpConfig(**(an_cfg.larp or {})))
     analyzer = TraderAnalyzer(info, days=days)
-    ranked = analyzer.rank(addresses, min_score=min_score)
+    ranked = analyzer.rank(addresses, min_score=min_score, larp=larp)
 
     if not ranked:
         log.warning("Kein Trader hat den Mindest-Score von %.0f erreicht.", min_score)

@@ -51,7 +51,38 @@ class AnalysisConfig:
     min_account_value: float = 10000
     min_volume: float = 500000
     top_n: int = 30
+    top_percent: float = 1.0     # nur das Top-x% (nach Monats-ROI) tiefenanalysieren
     min_score: float = 40
+    larp: dict = None  # type: ignore[assignment]  # Overrides für LarpConfig
+
+
+@dataclass
+class NewsConfig:
+    enabled: bool = True
+    poll_seconds: int = 60
+    rss_feeds: list = None  # type: ignore[assignment]
+    cryptopanic: bool = False    # CRYPTOPANIC_TOKEN in .env
+    twitter: bool = False        # TWITTER_BEARER_TOKEN in .env (X API, kostenpflichtig)
+    twitter_query: str = '(from:WhiteHouse OR from:federalreserve OR bitcoin OR crypto) (crash OR tariff OR ban OR war OR hack) -is:retweet'
+    caution_score: float = 4.0
+    risk_off_score: float = 8.0
+    half_life_minutes: float = 30.0
+
+    def __post_init__(self):
+        if self.rss_feeds is None:
+            self.rss_feeds = [
+                "https://www.coindesk.com/arc/outboundfeeds/rss/",
+                "https://cointelegraph.com/rss",
+            ]
+
+
+@dataclass
+class ShockConfig:
+    enabled: bool = True
+    window_minutes: int = 5
+    move_threshold: float = 0.025   # 2.5% Bewegung im Fenster -> RISK_OFF
+    vol_spike_ratio: float = 4.0    # Kurzfrist-Vola vs. Stunden-Vola
+    cooldown_minutes: int = 30
 
 
 @dataclass
@@ -75,6 +106,8 @@ class Config:
     risk: RiskConfig
     backtest: BacktestConfig
     copytrade: CopytradeConfig
+    news: NewsConfig
+    shock: ShockConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -95,6 +128,8 @@ def load_config(path: Path | None = None) -> Config:
         risk=RiskConfig(**raw["risk"]),
         backtest=BacktestConfig(**raw["backtest"]),
         copytrade=CopytradeConfig(analysis=analysis, **ct_raw),
+        news=NewsConfig(**raw.get("news", {})),
+        shock=ShockConfig(**raw.get("shock", {})),
     )
     _validate(cfg)
     return cfg

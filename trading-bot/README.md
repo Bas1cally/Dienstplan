@@ -89,6 +89,36 @@ Zusätzlich skaliert die Stichprobengröße den Score: Ein Lucky Punch mit 7
 Trades kann einen konsistenten Trader mit 60 Trades nie schlagen. Das
 Ergebnis landet in `leaders.json` (prüfen und ggf. editieren!).
 
+#### Top-1%-Funnel und LARP-Filter
+
+Bevor überhaupt gescort wird, läuft ein mehrstufiger Funnel:
+
+```
+gesamtes Leaderboard (Tausende Wallets)
+  -> Basisfilter: Mindest-Konto, Mindest-Volumen, Monat UND Woche profitabel
+  -> Top 1% nach Monats-ROI (config: analysis.top_percent)
+  -> Tiefenanalyse der Fill-Historie (max. top_n Wallets)
+  -> LARP-Filter: harte K.O.-Gates
+  -> Score-Ranking -> Top 3 nach leaders.json
+```
+
+Der **LARP-Filter** (`bot/copytrade/larp.py`) sortiert Blender aus, die auf
+Leaderboards typischerweise oben stehen, aber keinen reproduzierbaren Edge
+haben. Jedes Gate ist ein hartes K.O. mit Begründung im Log:
+
+| Gate | Default | erkennt |
+|---|---|---|
+| `min_round_trips` | 30 | zu wenig Trades, Zufall nicht ausschließbar |
+| `min_active_days` | 10 | Eintagsfliegen |
+| `max_single_trade_share` | 40 % | Lucky Punch: ein Trade trägt den PnL |
+| `min_profitable_week_share` | 60 % | eine gute Woche, drei schlechte |
+| `max_drawdown` | 25 % | Überhebelung (irgendwann kommt die Null) |
+| `min_median_holding_minutes` | 30 | Scalper - unser Copy-Lag frisst deren Edge |
+
+Dafür rekonstruiert der Analyzer aus den Fills komplette **Round-Trips**
+(Position 0 → offen → 0) inklusive Haltedauer; Positionen, die schon vor dem
+Analysefenster offen waren, werden verworfen statt falsch gezählt.
+
 ### 2. Kopieren (Reconciliation statt Event-Kopie)
 
 ```bash
@@ -119,7 +149,55 @@ Rebalance-Schwellwert verhindert, dass Fees das Konto auffressen.
 
 ```bash
 python tests/test_copytrade.py    # Unit-Tests der Copy-Logik
+python tests/test_larp_news.py    # Unit-Tests LARP-Filter + News/Schock
 ```
+
+## Marktüberwachung: News-Analyse + Schock-Detektor
+
+Beide Bots fragen pro Tick den `MarketGuard` ab, der zwei Verteidigungslinien
+kombiniert:
+
+| Level | Bedeutung | Trendfolge-Bot | Copy-Bot |
+|---|---|---|---|
+| `NORMAL` | alles ruhig | handelt normal | handelt normal |
+| `CAUTION` | News-Lage angespannt | keine neuen Einstiege | nur Exposure reduzieren |
+| `RISK_OFF` | Schock/kritische News | Position sofort schließen | Portfolio glattstellen |
+
+### Schock-Detektor (die schnelle Linie)
+
+**Wichtig zu verstehen:** Wenn Trump etwas postet und der Markt crasht, sieht
+man das in den Preisdaten *schneller* als in jeder bezahlbaren News-API - die
+HFT-Firmen haben die News längst gehandelt. Der Detektor (`bot/news/shock.py`)
+überwacht deshalb die 1-Minuten-Candles direkt:
+
+- **Absoluter Move:** ±2,5 % in 5 Minuten → `RISK_OFF` mit 30 Min. Cooldown
+- **Vola-Spike:** Kurzfrist-Volatilität 4× über der Stunden-Basis → `RISK_OFF`
+
+Das reagiert in Sekunden, unabhängig davon, *wer* den Crash ausgelöst hat.
+
+### News-Sentiment (die Kontext-Linie)
+
+`bot/news/sentiment.py` bewertet Schlagzeilen regelbasiert (0-10): Kriegs-,
+Hack-, Insolvenz- und Depeg-Meldungen scoren kritisch; Zölle, Verbote,
+SEC-Klagen und Zinsentscheide hoch. Aussagen von Trump/Fed/SEC/Whitehouse
+bekommen einen 1,5×-Boost. Der aggregierte Score zerfällt mit konfigurierbarer
+Halbwertszeit, damit alte Schlagzeilen den Bot nicht ewig blockieren.
+
+```bash
+python news_monitor.py            # News-Pipeline isoliert testen
+python news_monitor.py --watch    # Dauerbetrieb
+```
+
+### Zur Twitter/X-Frage
+
+Die X-API ist als Schock-Frühwarnsystem leider die schlechteste Option:
+Der Echtzeit-**Filtered Stream existiert erst im Pro-Tier (~5.000 USD/Monat)**;
+der Basic-Tier (~200 USD/Monat) erlaubt nur Polling der Search-API - damit ist
+man genauso langsam wie mit kostenlosen RSS-Feeds. Dazu postet Trump primär
+auf Truth Social, nicht auf X. Der Adapter ist trotzdem eingebaut
+(`news.twitter: true` + `TWITTER_BEARER_TOKEN` in `.env`), falls du den
+Zugang ohnehin hast. Empfohlene Quellen-Kombi: **Schock-Detektor (Sekunden) +
+RSS/CryptoPanic (Kontext, kostenlos)**.
 
 ## Architektur
 
@@ -128,10 +206,12 @@ trading-bot/
 ├── config.yaml          # alle Parameter (Strategie, Risiko, Copy-Trading)
 ├── backtest.py          # CLI: Backtest der Trendfolge-Strategie
 ├── run_bot.py           # CLI: Trendfolge-Bot (Live/Dry-Run)
-├── analyze_traders.py   # CLI: Trader-Discovery + Scoring -> leaders.json
+├── analyze_traders.py   # CLI: Trader-Discovery + LARP-Filter + Scoring
 ├── copy_bot.py          # CLI: Copy-Trading-Bot (Live/Dry-Run)
+├── news_monitor.py      # CLI: News-Pipeline isoliert testen
 ├── tests/
-│   └── test_copytrade.py
+│   ├── test_copytrade.py
+│   └── test_larp_news.py
 └── bot/
     ├── config.py        # Config + Credentials laden/validieren
     ├── indicators.py    # EMA, RSI (Wilder), ATR
@@ -140,9 +220,15 @@ trading-bot/
     ├── backtester.py    # Event-basierter Backtest mit Fees/Slippage
     ├── exchange.py      # Hyperliquid-SDK-Wrapper (Candles, Orders, Account)
     ├── trader.py        # Trendfolge-Live-Loop
-    └── copytrade/
-        ├── leaderboard.py  # Kandidaten vom öffentlichen Leaderboard
-        ├── analyzer.py     # Fill-Historie -> Metriken + Score
-        ├── tracker.py      # Snapshots der Leader-Positionen
-        └── copier.py       # Ziel-Portfolio + Rebalancing mit Risiko-Caps
+    ├── copytrade/
+    │   ├── leaderboard.py  # Top-1%-Funnel über das öffentliche Leaderboard
+    │   ├── analyzer.py     # Fill-Historie -> Round-Trips, Metriken, Score
+    │   ├── larp.py         # harte K.O.-Gates gegen Blender
+    │   ├── tracker.py      # Snapshots der Leader-Positionen
+    │   └── copier.py       # Ziel-Portfolio + Rebalancing mit Risiko-Caps
+    └── news/
+        ├── sources.py      # RSS, CryptoPanic, X/Twitter (optional)
+        ├── sentiment.py    # regelbasiertes Risiko-Scoring mit Zeit-Zerfall
+        ├── shock.py        # Preis-Schock-Detektor auf 1m-Candles
+        └── guard.py        # kombiniert beides -> NORMAL/CAUTION/RISK_OFF
 ```

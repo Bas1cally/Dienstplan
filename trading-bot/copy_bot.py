@@ -59,7 +59,14 @@ def main() -> None:
     # Leader-Positionen kommen immer vom Mainnet - dort traden die Profis.
     leader_info = Info(api_url(testnet=False), skip_ws=True)
     tracker = LeaderTracker(leader_info, list(weights))
-    copier = CopyTrader(cfg, client, tracker, weights)
+
+    guard = None
+    if cfg.news.enabled or cfg.shock.enabled:
+        from bot.news.guard import MarketGuard
+
+        guard = MarketGuard(cfg.news, cfg.shock, client=client, coin="BTC")
+
+    copier = CopyTrader(cfg, client, tracker, weights, guard=guard)
 
     mode = "DRY-RUN" if cfg.dry_run else "LIVE"
     log.info("Copy-Bot gestartet (%s, eigene Orders auf %s)", mode,

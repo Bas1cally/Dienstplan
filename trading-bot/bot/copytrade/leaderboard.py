@@ -28,14 +28,20 @@ def fetch_candidates(
     min_account_value: float,
     min_volume: float,
     top_n: int,
+    top_percent: float = 1.0,
     timeout: int = 30,
 ) -> list[Candidate]:
-    """Holt das Leaderboard und filtert plausible Copy-Kandidaten.
+    """Holt das Leaderboard und destilliert das Top-Perzentil als Kandidaten.
 
-    Filter-Rationale:
-    - min_account_value: zu kleine Konten sind oft Lucky Punches / Wegwerf-Wallets
-    - min_volume: ohne Volumen keine statistische Aussagekraft
-    - Sortierung nach Monats-ROI statt absolutem PnL, damit nicht nur Wale oben stehen
+    Funnel:
+      1. Basisfilter: Mindest-Kontogröße (gegen Wegwerf-Wallets), Mindest-Volumen
+         (statistische Aussagekraft), Monat UND Woche profitabel (gegen Trader,
+         die gerade implodieren)
+      2. Perzentil-Schnitt: nur das Top-`top_percent`% nach Monats-ROI
+      3. Deckel `top_n` für die teure Tiefenanalyse (Fill-Historie je Wallet)
+
+    ROI statt absolutem PnL, damit nicht nur Wale oben stehen. Der eigentliche
+    LARP-Check passiert danach in der Tiefenanalyse (larp.py).
     """
     log.info("Lade Leaderboard von %s ...", LEADERBOARD_URL)
     resp = requests.get(LEADERBOARD_URL, timeout=timeout)
@@ -47,13 +53,17 @@ def fetch_candidates(
     for row in rows:
         perf = dict(row.get("windowPerformances", []))
         month = perf.get("month")
+        week = perf.get("week")
         if not month:
             continue
         acct = float(row.get("accountValue", 0))
         vlm = float(month.get("vlm", 0))
         pnl = float(month.get("pnl", 0))
         roi = float(month.get("roi", 0))
-        if acct < min_account_value or vlm < min_volume or pnl <= 0:
+        week_pnl = float(week.get("pnl", 0)) if week else 0.0
+        if acct < min_account_value or vlm < min_volume:
+            continue
+        if pnl <= 0 or week_pnl <= 0:
             continue
         candidates.append(
             Candidate(
@@ -66,5 +76,8 @@ def fetch_candidates(
         )
 
     candidates.sort(key=lambda c: c.month_roi, reverse=True)
-    log.info("%d Kandidaten nach Filterung, nehme Top %d", len(candidates), top_n)
-    return candidates[:top_n]
+    cut = max(1, int(len(candidates) * top_percent / 100))
+    top = candidates[:cut][:top_n]
+    log.info("%d Kandidaten nach Basisfiltern -> Top %.1f%% = %d -> Tiefenanalyse für %d",
+             len(candidates), top_percent, cut, len(top))
+    return top

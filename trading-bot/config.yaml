@@ -46,5 +46,34 @@ copytrade:
     days: 30                   # Analysefenster der Fill-Historie
     min_account_value: 10000   # Mindest-Kontogröße der Kandidaten
     min_volume: 500000         # Mindest-Monatsvolumen (statistische Aussagekraft)
-    top_n: 30                  # wie viele Leaderboard-Kandidaten tief analysiert werden
+    top_percent: 1.0           # nur das Top-1% (nach Monats-ROI) geht in die Tiefenanalyse
+    top_n: 30                  # harter Deckel für die Tiefenanalyse (API-Calls je Wallet)
     min_score: 40              # Mindest-Score, um als Leader infrage zu kommen
+    larp:                      # harte K.O.-Gates gegen Blender (bot/copytrade/larp.py)
+      min_round_trips: 30            # weniger Trades = Zufall nicht ausschließbar
+      min_active_days: 10
+      max_single_trade_share: 0.40   # Lucky-Punch-Erkennung
+      min_profitable_week_share: 0.60
+      max_drawdown: 0.25             # überhebelte Konten aussortieren
+      min_median_holding_minutes: 30 # Scalper: Copy-Lag frisst deren Edge
+
+# === Marktüberwachung: News + Preis-Schocks ===
+# Schaltet beide Bots in CAUTION (nichts Neues) oder RISK_OFF (alles schließen).
+news:
+  enabled: true
+  poll_seconds: 60
+  rss_feeds:
+    - https://www.coindesk.com/arc/outboundfeeds/rss/
+    - https://cointelegraph.com/rss
+  cryptopanic: false      # kostenloser Token: CRYPTOPANIC_TOKEN in .env
+  twitter: false          # TWITTER_BEARER_TOKEN in .env; Achtung: teuer + nur Polling
+  caution_score: 4        # ab diesem Score keine neuen Positionen
+  risk_off_score: 8       # ab diesem Score alles glattstellen
+  half_life_minutes: 30   # Score-Zerfall alter Schlagzeilen
+
+shock:                    # die schnelle Verteidigung - direkt auf 1m-Preisdaten
+  enabled: true
+  window_minutes: 5
+  move_threshold: 0.025   # 2.5% Move in 5min -> RISK_OFF
+  vol_spike_ratio: 4.0    # Kurzfrist-Vola 4x über Stunden-Vola -> RISK_OFF
+  cooldown_minutes: 30

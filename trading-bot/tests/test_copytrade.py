@@ -18,7 +18,9 @@ CT = CopytradeConfig(analysis=AnalysisConfig())
 
 
 def fill(t, coin="BTC", closed=0.0, fee=1.0):
-    return {"time": t, "coin": coin, "closedPnl": str(closed), "fee": str(fee)}
+    side = "A" if closed else "B"  # schließende Fills verkaufen, öffnende kaufen
+    return {"time": t, "coin": coin, "closedPnl": str(closed), "fee": str(fee),
+            "side": side, "sz": "1.0", "startPosition": "0"}
 
 
 # ---------- Analyzer ----------

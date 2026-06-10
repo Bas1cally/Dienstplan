@@ -107,12 +107,13 @@ def plan_rebalance(
 
 
 class CopyTrader:
-    def __init__(self, cfg, client, tracker, weights: dict[str, float]):
+    def __init__(self, cfg, client, tracker, weights: dict[str, float], guard=None):
         self.cfg = cfg                      # vollständige Config
         self.ct: CopytradeConfig = cfg.copytrade
         self.client = client
         self.tracker = tracker
         self.weights = weights
+        self.guard = guard                  # MarketGuard (optional)
         self.risk = RiskManager(cfg.risk)
         self.day_start_equity = 0.0
         self.day = ""
@@ -131,6 +132,18 @@ class CopyTrader:
             self.halted = True
             return
 
+        # News-/Schock-Lage: RISK_OFF = alles glattstellen, CAUTION = nur reduzieren
+        caution = False
+        if self.guard:
+            from ..news.guard import RiskLevel
+
+            level = self.guard.level()
+            if level == RiskLevel.RISK_OFF:
+                log.warning("RISK_OFF: stelle Copy-Portfolio glatt")
+                self._flatten()
+                return
+            caution = level == RiskLevel.CAUTION
+
         snapshots = self.tracker.snapshot_all()
         if not snapshots:
             return
@@ -138,6 +151,9 @@ class CopyTrader:
         targets = compute_targets(snapshots, self.weights, equity, self.ct, self.cfg.risk)
         current = self._current_positions()
         orders = plan_rebalance(targets, current, prices, equity, self.ct)
+        if caution:
+            # Im Vorsichtsmodus nur Orders ausführen, die das Exposure senken
+            orders = [o for o in orders if abs(o.target_notional) < abs(o.current_notional)]
 
         for o in orders:
             side = "BUY" if o.is_buy else "SELL"

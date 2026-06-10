@@ -40,7 +40,14 @@ def main() -> None:
         key, addr = load_credentials()
 
     client = HyperliquidClient(testnet=cfg.is_testnet, private_key=key, account_address=addr)
-    Trader(cfg, client).run_forever()
+
+    guard = None
+    if cfg.news.enabled or cfg.shock.enabled:
+        from bot.news.guard import MarketGuard
+
+        guard = MarketGuard(cfg.news, cfg.shock, client=client, coin=cfg.market.coin)
+
+    Trader(cfg, client, guard=guard).run_forever()
 
 
 if __name__ == "__main__":

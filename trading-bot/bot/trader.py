@@ -21,9 +21,10 @@ POLL_SECONDS = 30
 
 
 class Trader:
-    def __init__(self, cfg: Config, client: HyperliquidClient):
+    def __init__(self, cfg: Config, client: HyperliquidClient, guard=None):
         self.cfg = cfg
         self.client = client
+        self.guard = guard  # MarketGuard (optional): News- + Schock-Überwachung
         self.strategy = TrendStrategy(cfg.strategy)
         self.risk = RiskManager(cfg.risk)
         self.coin = cfg.market.coin
@@ -65,6 +66,18 @@ class Trader:
 
         self._check_stops()
 
+        # News-/Schock-Lage prüfen: RISK_OFF = raus aus dem Markt, CAUTION = nichts Neues
+        risk_level = 0
+        if self.guard:
+            from .news.guard import RiskLevel
+
+            risk_level = self.guard.level()
+            if risk_level == RiskLevel.RISK_OFF:
+                if self.plan or self._position():
+                    log.warning("RISK_OFF: schließe Position sofort")
+                    self._close_position("risk_off")
+                return
+
         df = self.client.candles(self.coin, self.cfg.market.interval, self.cfg.market.lookback_candles)
         if df.empty or int(df.iloc[-1]["time"]) == self.last_candle_time:
             return  # noch keine neue abgeschlossene Candle
@@ -75,11 +88,11 @@ class Trader:
                  datetime.fromtimestamp(self.last_candle_time / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"),
                  analysis.close, analysis.ema_fast, analysis.ema_slow, analysis.rsi, analysis.signal.value)
 
-        self._act(analysis, equity)
+        self._act(analysis, equity, caution=risk_level >= 1)
 
     # ---------- Order-Logik ----------
 
-    def _act(self, analysis, equity: float) -> None:
+    def _act(self, analysis, equity: float, caution: bool = False) -> None:
         pos = self._position()
         if analysis.signal == Signal.HOLD:
             return
@@ -94,6 +107,9 @@ class Trader:
                 pos = None
 
         if pos is None and analysis.signal in (Signal.LONG, Signal.SHORT):
+            if caution:
+                log.info("CAUTION (News-Lage): Einstiegssignal %s wird übersprungen", analysis.signal.value)
+                return
             is_long = analysis.signal == Signal.LONG
             plan = self.risk.plan_position(equity, analysis.close, analysis.atr, is_long)
             if not plan:
