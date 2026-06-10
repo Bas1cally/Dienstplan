@@ -1,2 +1,9 @@
 __pycache__/
 archiv/
+.env
+bot.log
+*.pyc
+copy_bot.log
+trading-bot/leaders.json
+autopilot.log
+trading-bot/runtime/

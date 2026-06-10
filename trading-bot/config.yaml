@@ -1,0 +1,123 @@
+# === Hyperliquid Trading Bot Konfiguration ===
+
+# Netzwerk: erst auf dem Testnet beweisen, dann mainnet
+network: testnet          # testnet | mainnet
+
+# dry_run: true = Signale werden nur geloggt, keine Orders.
+# Erst auf false stellen, wenn Backtest UND Testnet-Lauf überzeugen.
+dry_run: true
+
+market:
+  coin: BTC               # Hyperliquid Perp-Symbol (BTC, ETH, SOL, ...)
+  interval: 1h            # Candle-Intervall: 1m 5m 15m 1h 4h 1d
+  lookback_candles: 300   # Historie für Indikatoren
+
+strategy:
+  ema_fast: 20
+  ema_slow: 50
+  rsi_period: 14
+  rsi_overbought: 70      # keine neuen Longs darüber
+  rsi_oversold: 30        # keine neuen Shorts darunter
+  atr_period: 14
+  allow_shorts: true
+
+# Day-Trading-Profil: aggressiver als die konservativen Ur-Defaults (3x / 0.5).
+# Ehrlicher Hinweis: mehr Leverage = mehr Reward UND mehr Risiko - der
+# Circuit Breaker bei -5%/Tag ist die Grenze, die das überlebbar hält.
+risk:
+  risk_per_trade: 0.01    # max. 1% des Kapitals Risiko pro Trade (Trendfolge-Bot)
+  atr_stop_mult: 2.0      # Stop-Loss-Abstand = 2 x ATR
+  take_profit_r: 2.0      # Take-Profit bei 2R (2x Risiko)
+  max_leverage: 4         # hartes Leverage-Limit (Validierung deckelt bei 10)
+  max_daily_loss: 0.05    # Bot stoppt bei -5% Tagesverlust (Circuit Breaker)
+  slippage: 0.005         # max. Slippage bei Market Orders (0.5%)
+
+backtest:
+  fee_rate: 0.00045       # Hyperliquid Taker Fee (0.045%)
+  slippage: 0.0002        # angenommene Slippage pro Fill
+  initial_equity: 10000
+
+copytrade:
+  leaders_file: leaders.json   # Ergebnis von analyze_traders.py (manuell editierbar)
+  max_leaders: 3               # auf wie viele Top-Trader das Kapital verteilt wird
+  copy_ratio: 0.6              # Day-Trading-Profil: etwas aggressiver allokieren
+  max_alloc_per_coin: 0.25     # max. 25% der Equity in einem Coin
+  rebalance_threshold: 0.02    # erst handeln ab 2% Equity Abweichung (gegen Fee-Churn)
+  min_notional: 10             # Hyperliquid-Mindestordergröße
+  poll_seconds: 10             # Day-Trading: schneller pollen (weniger Copy-Lag)
+  analysis:
+    days: 21                   # kürzeres Fenster - Day-Trader-Form ist schnelllebig
+    min_account_value: 10000   # Mindest-Kontogröße der Kandidaten
+    min_volume: 500000         # Mindest-Monatsvolumen (statistische Aussagekraft)
+    top_percent: 1.0           # nur das Top-1% (nach Monats-ROI) geht in die Tiefenanalyse
+    top_n: 30                  # harter Deckel für die Tiefenanalyse (API-Calls je Wallet)
+    min_score: 40              # Mindest-Score, um als Leader infrage zu kommen
+    larp:                      # harte K.O.-Gates gegen Blender (bot/copytrade/larp.py)
+      min_round_trips: 30            # weniger Trades = Zufall nicht ausschließbar
+      min_active_days: 10
+      max_single_trade_share: 0.40   # Lucky-Punch-Erkennung
+      min_profitable_week_share: 0.60
+      max_drawdown: 0.25             # überhebelte Konten aussortieren
+      min_median_holding_minutes: 30 # Scalper: Copy-Lag frisst deren Edge
+      max_median_holding_minutes: 720 # Day-Trading: Swing-Trader (>12h Hold) raus
+
+# === Marktüberwachung: News + Preis-Schocks ===
+# Schaltet beide Bots in CAUTION (nichts Neues) oder RISK_OFF (alles schließen).
+news:
+  enabled: true
+  poll_seconds: 60
+  rss_feeds:
+    - https://www.coindesk.com/arc/outboundfeeds/rss/
+    - https://cointelegraph.com/rss
+  cryptopanic: false      # kostenloser Token: CRYPTOPANIC_TOKEN in .env
+  twitter: false          # TWITTER_BEARER_TOKEN in .env; Achtung: teuer + nur Polling
+  caution_score: 4        # ab diesem Score keine neuen Positionen
+  risk_off_score: 8       # ab diesem Score alles glattstellen
+  half_life_minutes: 30   # Score-Zerfall alter Schlagzeilen
+  llm_enabled: false      # Claude bewertet jede Schlagzeile zusätzlich (ANTHROPIC_API_KEY in .env)
+  llm_model: claude-opus-4-8   # günstiger/schneller: claude-haiku-4-5
+
+shock:                    # die schnelle Verteidigung - direkt auf 1m-Preisdaten
+  enabled: true
+  window_minutes: 5
+  move_threshold: 0.025   # 2.5% Move in 5min -> RISK_OFF
+  vol_spike_ratio: 4.0    # Kurzfrist-Vola 4x über Stunden-Vola -> RISK_OFF
+  cooldown_minutes: 30
+
+# === Autopilot: Vollautomatik (server.py / autopilot.py) ===
+autopilot:
+  reanalyze_hours: 6      # Day-Trading: Leader-Rotation alle 6h statt 24h
+  min_keep_score: 35      # Leader unter diesem Score werden ausgetauscht
+  server_host: 127.0.0.1  # Web-UI nur lokal - NIE ungeschützt ins Internet!
+  server_port: 8000
+
+# === Zwei-Bot-Prinzip: Trade-Validator (Bot 2) ===
+# Bot 1 (Copy-Engine) schlägt vor, Bot 2 prüft gegen die Markttechnik
+# (EMA-Trend 15m+1h, Momentum, RSI-Extreme). Nur wenn BEIDE Ja sagen, wird
+# Exposure aufgebaut. Reduzieren/Schließen läuft IMMER durch (Risikoabbau
+# braucht keine Genehmigung). Validator-Ausfall = konservativ ablehnen.
+validation:
+  enabled: true
+  interval: 15m            # Trading-Timeframe
+  confirm_interval: 1h     # Bestätigungs-Timeframe
+  rsi_max_long: 75         # hartes Veto: kein Long darüber
+  rsi_min_short: 25        # hartes Veto: kein Short darunter
+  min_score: 2             # 2 von 3 Technik-Checks müssen bestehen
+  cache_seconds: 120
+  llm_enabled: false       # Claude als dritte Stimme (ANTHROPIC_API_KEY in .env)
+  llm_model: claude-opus-4-8
+
+# === Multi-Exchange-Konvergenz ===
+# Positionierung der Top-Trader auf Binance/OKX/Bybit als Verstärker:
+# Übereinstimmung mit unseren HL-Leadern -> Position bis 1.25x größer,
+# klarer Widerspruch -> auf 0.4x gedämpft. Nie ein eigener Trade-Auslöser.
+# (Das alte Binance-Leaderboard mit Einzel-Wallets wurde von Binance
+#  abgeschaltet - aggregierte Top-Trader-Ratios sind das offizielle API.)
+convergence:
+  enabled: true
+  sources: [binance, okx, bybit]
+  period: 1h
+  agree_boost: 1.25
+  disagree_scale: 0.4
+  neutral_band: 0.1       # |externe Stimme| darunter = neutral, kein Einfluss
+  cache_seconds: 300
