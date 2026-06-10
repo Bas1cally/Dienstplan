@@ -91,6 +91,16 @@ autopilot:
   server_host: 127.0.0.1  # Web-UI nur lokal - NIE ungeschützt ins Internet!
   server_port: 8000
 
+# === Investigator: Wallets durchleuchten & beobachten ===
+# Dossier zu jeder Adresse: python investigate.py 0x...   |   Markt-Puls
+# (Funding/OI, gecrowdete Coins): python investigate.py --pulse
+# Watchlist: Whales/mutmaßliche MMs - Positionswechsel landen im Journal
+# und als Telegram-Alert.
+investigator:
+  watchlist: []                # z.B. [ "0xabc...", "0xdef..." ]
+  poll_seconds: 60
+  min_notional_change: 25000   # Alerts erst ab dieser Positionsänderung (USD)
+
 # === Zwei-Bot-Prinzip: Trade-Validator (Bot 2) ===
 # Bot 1 (Copy-Engine) schlägt vor, Bot 2 prüft gegen die Markttechnik
 # (EMA-Trend 15m+1h, Momentum, RSI-Extreme). Nur wenn BEIDE Ja sagen, wird

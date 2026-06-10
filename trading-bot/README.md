@@ -242,6 +242,41 @@ Prüft Pflicht (Dependencies, Config, Unit-Tests, Hyperliquid-API,
 Leaderboard) und Optionales (News-Feeds, Konvergenz-Quellen, Claude-Key,
 Telegram, Paper-Konto-Zustand). Exit-Code 0 = startklar.
 
+## Investigator: Wallets durchleuchten, Market Makern auf die Finger schauen
+
+Analytics-Seiten wie hl.eco sind Frontends über dieselben öffentlichen
+Hyperliquid-Daten, die der Bot ohnehin nutzt (eine offizielle API haben sie
+nicht). Der Investigator (`bot/investigator.py`) baut die Werkzeuge nativ nach:
+
+```bash
+python investigate.py 0xWALLET    # Dossier: Positionen + Leverage, Equity,
+                                  # Round-Trips, Haltedauer, Drawdown,
+                                  # LARP-Verdict ("käme als Leader infrage?")
+python investigate.py --pulse     # Markt-Puls: Funding & Open Interest aller
+                                  # Coins, gecrowdete Richtungen markiert
+```
+
+- **Watchlist** (`investigator.watchlist` in config.yaml): beliebige Wallets
+  (Whales, mutmaßliche MMs) werden im Autopilot mitbeobachtet - jede
+  Positionsänderung über `min_notional_change` landet im Journal und als
+  Telegram-Alert (open/close/flip/increase/decrease). Der erste Snapshot
+  alertet nie.
+- **Markt-Puls-Lesart:** Positives Funding = Longs zahlen = die Taker-Crowd
+  ist long und die Gegenseite (meist Market Maker) kassiert. Extremwerte
+  (>±50 % p.a.) markiert der Puls als "gecrowdet" - gegen solche Richtungen
+  einzusteigen ist statistisch teuer.
+
+## Generalprobe (End-to-End-Simulation)
+
+```bash
+python simulate.py
+```
+
+Spielt 720 Minuten gegen einen synthetischen Markt durch (Einstiege,
+Flash-Crash -12 %, Erholung) und prüft das Zusammenspiel des gesamten Stacks:
+Schock-Erkennung, RISK_OFF-Glattstellung, Cooldown, Wiedereinstieg,
+Paper-Persistenz, Journal-Lückenlosigkeit. Läuft komplett offline.
+
 ## Zwei-Bot-Prinzip: der Trade-Validator (Bot 2)
 
 Jeder Einstieg braucht zwei unabhängige Ja-Stimmen:

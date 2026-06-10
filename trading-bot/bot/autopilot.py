@@ -31,6 +31,7 @@ from .copytrade.larp import LarpConfig, LarpFilter
 from .copytrade.leaderboard import fetch_candidates
 from .copytrade.tracker import LeaderTracker
 from .exchange import HyperliquidClient, api_url
+from .investigator import WalletWatcher
 from .journal import Journal
 from .news.guard import MarketGuard
 from .notify import Notifier
@@ -104,6 +105,8 @@ class Autopilot:
         self._prev_halted = False
         self._last_history_write = 0.0
         self._leader_perf: dict = self._load_perf()
+        self.watcher: WalletWatcher | None = None
+        self._last_watch_poll = 0.0
 
     # ---------- Lebenszyklus ----------
 
@@ -152,6 +155,7 @@ class Autopilot:
                 self._maybe_reanalyze()
                 if self.copier and self.leaders:
                     self.copier.tick()
+                self._watch_wallets()
                 self._publish()
             except Exception:
                 log.exception("Autopilot-Tick fehlgeschlagen")
@@ -180,6 +184,10 @@ class Autopilot:
             validator = TradeValidator(self.cfg.validation, self.client)
         self.copier = CopyTrader(self.cfg, self.client, tracker, weights,
                                  guard=self.guard, convergence=convergence, validator=validator)
+        if self.cfg.investigator.watchlist:
+            self.watcher = WalletWatcher(leader_info, self.cfg.investigator.watchlist,
+                                         self.cfg.investigator.min_notional_change)
+            log.info("Investigator: beobachte %d Wallets", len(self.cfg.investigator.watchlist))
 
     # ---------- Leader-Analyse & Rotation ----------
 
@@ -302,6 +310,18 @@ class Autopilot:
                 max(0.0, self.cfg.autopilot.reanalyze_hours - (time.time() - self._last_analysis) / 3600), 1
             ),
         )
+
+    # ---------- Investigator: Watchlist-Wallets beobachten ----------
+
+    def _watch_wallets(self) -> None:
+        if not self.watcher or time.time() - self._last_watch_poll < self.cfg.investigator.poll_seconds:
+            return
+        self._last_watch_poll = time.time()
+        for ev in self.watcher.poll():
+            log.info("Investigator: %s", ev.text())
+            self.journal.record("watchlist", address=ev.address, coin=ev.coin, event=ev.kind,
+                                old=round(ev.old_notional, 0), new=round(ev.new_notional, 0))
+            self.notifier.send(f"🔍 <b>Watchlist</b>\n{ev.text()}")
 
     # ---------- Equity-Historie & Leader-Performance ----------
 

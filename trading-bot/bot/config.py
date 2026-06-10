@@ -101,6 +101,17 @@ class ValidationConfig:
 
 
 @dataclass
+class InvestigatorConfig:
+    watchlist: list = None  # type: ignore[assignment]  # Wallets (Whales/MMs) beobachten
+    poll_seconds: int = 60
+    min_notional_change: float = 25_000   # Alerts erst ab dieser Positionsänderung
+
+    def __post_init__(self):
+        if self.watchlist is None:
+            self.watchlist = []
+
+
+@dataclass
 class ConvergenceConfig:
     enabled: bool = True
     sources: list = None  # type: ignore[assignment]  # binance | okx | bybit
@@ -150,6 +161,7 @@ class Config:
     autopilot: AutopilotConfig
     convergence: ConvergenceConfig
     validation: ValidationConfig
+    investigator: InvestigatorConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -175,6 +187,7 @@ def load_config(path: Path | None = None) -> Config:
         autopilot=AutopilotConfig(**raw.get("autopilot", {})),
         convergence=ConvergenceConfig(**raw.get("convergence", {})),
         validation=ValidationConfig(**raw.get("validation", {})),
+        investigator=InvestigatorConfig(**raw.get("investigator", {})),
     )
     _validate(cfg)
     return cfg
