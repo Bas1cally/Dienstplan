@@ -19,9 +19,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 # ANPASSEN: Nutzer und Pfad zum trading-bot-Ordner
+# (bei venv: ExecStart auf .venv/bin/python3 zeigen lassen - siehe VPS-SETUP.md)
 User=trader
 WorkingDirectory=/home/trader/Dienstplan/trading-bot
-ExecStart=/usr/bin/python3 server.py
+ExecStart=/home/trader/Dienstplan/trading-bot/.venv/bin/python3 server.py
 Restart=always
 RestartSec=10
 # Logs zusätzlich ins journalctl
