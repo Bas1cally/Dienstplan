@@ -69,6 +69,11 @@ class WalletBody(BaseModel):
     address: str
 
 
+class AgentCreateBody(BaseModel):
+    address: str
+    chain_id: str = "0xa4b1"  # aktive Chain der Wallet (eth_chainId), Default Arbitrum One
+
+
 class ApproveBody(BaseModel):
     address: str
     nonce: int
@@ -144,14 +149,20 @@ def set_wallet(body: WalletBody):
 
 
 @app.post("/api/agent/create")
-def agent_create(body: WalletBody):
+def agent_create(body: AgentCreateBody):
     """Erzeugt ein Agent-Wallet und liefert die zu signierende EIP-712-Struktur.
 
-    Struktur exakt wie hyperliquid.utils.signing.sign_agent - nur signiert
-    hier MetaMask im Browser statt eines lokalen Private Keys.
+    Struktur wie hyperliquid.utils.signing.sign_agent - mit einem Unterschied:
+    Die signatureChainId ist die AKTIVE Chain der Nutzer-Wallet (MetaMask
+    verweigert Signaturen für fremde Chain-IDs); Hyperliquid akzeptiert
+    laut SDK jede Signatur-Chain, solange Aktion und Signatur übereinstimmen.
     """
     if not ADDR_RE.match(body.address):
         raise HTTPException(400, "Ungültige Adresse")
+    try:
+        chain_id_int = int(body.chain_id, 16)
+    except ValueError:
+        raise HTTPException(400, "Ungültige chain_id")
     from eth_account import Account
 
     agent_key = "0x" + secrets.token_hex(32)
@@ -160,7 +171,7 @@ def agent_create(body: WalletBody):
     action = {
         "type": "approveAgent",
         "hyperliquidChain": "Mainnet" if not cfg.is_testnet else "Testnet",
-        "signatureChainId": "0x66eee",
+        "signatureChainId": body.chain_id,
         "agentAddress": agent_address,
         "agentName": "autopilot",
         "nonce": nonce,
@@ -170,7 +181,7 @@ def agent_create(body: WalletBody):
         "domain": {
             "name": "HyperliquidSignTransaction",
             "version": "1",
-            "chainId": int("0x66eee", 16),
+            "chainId": chain_id_int,
             "verifyingContract": "0x0000000000000000000000000000000000000000",
         },
         "types": {

@@ -128,7 +128,10 @@ $('btnConnect').onclick = async () => {
 $('btnAgent').onclick = async () => {
   try {
     msg('Erzeuge Agent-Wallet …');
-    const {typed_data, nonce} = await api('/api/agent/create', {address: wallet});
+    // Chain-ID der Wallet mitschicken: MetaMask signiert nur Typed Data,
+    // deren chainId zum aktiven Netzwerk passt
+    const chainId = await ethereum.request({method: 'eth_chainId'});
+    const {typed_data, nonce} = await api('/api/agent/create', {address: wallet, chain_id: chainId});
     msg('Bitte in MetaMask signieren (erteilt dem Bot Trade-Vollmacht, KEINE Auszahlungsrechte) …');
     const sig = await ethereum.request({method:'eth_signTypedData_v4', params:[wallet, JSON.stringify(typed_data)]});
     await api('/api/agent/approve', {address: wallet, nonce, signature: sig});
