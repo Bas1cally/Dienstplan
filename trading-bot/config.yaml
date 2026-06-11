@@ -11,6 +11,9 @@ market:
   coin: BTC               # Hyperliquid Perp-Symbol (BTC, ETH, SOL, ...)
   interval: 1h            # Candle-Intervall: 1m 5m 15m 1h 4h 1d
   lookback_candles: 300   # Historie für Indikatoren
+  dexs: auto              # auto = ALLE Perp-DEXs: Krypto + Builder-DEXs mit
+                          # Aktien (TSLA, NVDA, ...), Gold, Silber, Öl - alles
+                          # mit Leverage. Alternativ Liste oder "main".
 
 strategy:
   ema_fast: 20
@@ -30,10 +33,35 @@ risk:
   take_profit_r: 2.0      # Take-Profit bei 2R (2x Risiko)
   max_leverage: 4         # hartes Leverage-Limit (Validierung deckelt bei 10)
   max_daily_loss: 0.05    # Bot stoppt bei -5% Tagesverlust (Circuit Breaker)
+  max_total_drawdown: 0.10 # Max-Drawdown-Halt vom Startkapital (Prop-Firmen-Regel)
   slippage: 0.005         # max. Slippage bei Market Orders (0.5%)
+
+# === Ausführung ===
+# hyperliquid = Orders direkt auf Hyperliquid (live/testnet)
+# signals     = Bot analysiert + trackt im Paper-Modus, jede Order wird als
+#               Ticket emittiert (Telegram + runtime/signals.jsonl + optional
+#               SIGNAL_WEBHOOK_URL) - für Prop-Accounts ohne API wie Breakout.
+#               ACHTUNG: Prop-ToS prüfen (Copy-Trading/Automation oft verboten)!
+execution:
+  mode: hyperliquid
+  maker_first: true       # Edge 1: Post-Only-Limit zuerst (~0.015% statt 0.045%+Slippage),
+  maker_timeout_s: 20     # Market nur als Fallback; Glattstellungen/Stops immer Market
+
+# === Edge 3: Funding-Tilt (Carry) ===
+# Positionen, die Funding ZAHLEN würden, werden verkleinert (bis pay_scale),
+# Positionen, die Funding KASSIEREN, leicht vergrößert (bis earn_boost).
+# Ändert nie die Richtung; Caps greifen nach dem Tilt. Builder-DEX-Assets neutral.
+funding_tilt:
+  enabled: true
+  min_apr: 0.10           # |Funding| unter 10% p.a. = neutral
+  max_apr: 0.50           # ab 50% p.a. voller Tilt
+  earn_boost: 1.10
+  pay_scale: 0.85
+  cache_seconds: 300
 
 backtest:
   fee_rate: 0.00045       # Hyperliquid Taker Fee (0.045%)
+  maker_fee_rate: 0.00015 # Paper-Annahme bei maker_first (leicht optimistisch)
   slippage: 0.0002        # angenommene Slippage pro Fill
   initial_equity: 10000
 
@@ -88,8 +116,40 @@ shock:                    # die schnelle Verteidigung - direkt auf 1m-Preisdaten
 autopilot:
   reanalyze_hours: 6      # Day-Trading: Leader-Rotation alle 6h statt 24h
   min_keep_score: 35      # Leader unter diesem Score werden ausgetauscht
+  realtime: true          # Edge 2: WebSocket - Leader-Fills wecken den Loop sofort
+  autostart: false        # true für 24/7-Betrieb (VPS/systemd): startet ohne Klick
+  daily_digest: true      # Tagesbericht per Telegram/Log
+  watchdog_hours: 24      # Alarm + Diagnose, wenn so lange keine Order kam
+  shadow_variants: true   # A/B-Tuning: Varianten parallel im Schatten
   server_host: 127.0.0.1  # Web-UI nur lokal - NIE ungeschützt ins Internet!
   server_port: 8000
+
+# === VolScalper: Gegenbewegung nach Volatilitäts-Schocks (EXPERIMENTELL) ===
+# Handelt die Mean-Reversion nach Liquidations-Kaskaden, während der Copy-Bot
+# im Schock-Cooldown draußen ist. Härteste Strategie im Bot: Fees+Slippage
+# fressen dünne Edges, manchmal fällt das Messer weiter. Default AUS -
+# erst aktivieren, wenn der Paper-Lauf der anderen Module überzeugt hat.
+scalp:
+  enabled: false
+  coin: BTC                 # nur der liquideste Markt
+  risk_per_scalp: 0.005     # max. 0.5% Equity Risiko pro Scalp
+  stabilize_minutes: 3      # Mindestabstand zum Schock-Event
+  confirm_candles: 3        # 1m-Candles ohne neues Extrem = stabilisiert
+  entry_window_minutes: 25  # danach ist das Event verfallen
+  stop_buffer: 0.002        # Stop knapp hinter dem Move-Extrem
+  retrace_target: 0.382     # TP bei 38.2% Retrace des Spikes
+  max_holding_minutes: 30   # Zeit-Stop - ein Scalp wird nie eine Dauerposition
+  max_notional_frac: 0.15   # max. 15% Equity Notional
+
+# === Investigator: Wallets durchleuchten & beobachten ===
+# Dossier zu jeder Adresse: python investigate.py 0x...   |   Markt-Puls
+# (Funding/OI, gecrowdete Coins): python investigate.py --pulse
+# Watchlist: Whales/mutmaßliche MMs - Positionswechsel landen im Journal
+# und als Telegram-Alert.
+investigator:
+  watchlist: []                # z.B. [ "0xabc...", "0xdef..." ]
+  poll_seconds: 60
+  min_notional_change: 25000   # Alerts erst ab dieser Positionsänderung (USD)
 
 # === Zwei-Bot-Prinzip: Trade-Validator (Bot 2) ===
 # Bot 1 (Copy-Engine) schlägt vor, Bot 2 prüft gegen die Markttechnik

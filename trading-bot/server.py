@@ -18,6 +18,7 @@ ins Internet stellen - er hält den Agent-Key und steuert den Bot.
 
 import json
 import logging
+import os
 import re
 import secrets
 import time
@@ -25,8 +26,8 @@ from pathlib import Path
 
 import requests
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from bot.autopilot import Autopilot
@@ -42,6 +43,23 @@ autopilot = Autopilot(cfg)
 app = FastAPI(title="Hyperliquid Trading Bot")
 STATIC = Path(__file__).parent / "static"
 ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
+# Optionaler Zugriffsschutz: DASHBOARD_TOKEN in .env setzen, wenn das UI
+# über Tailscale/SSH-Tunnel von unterwegs erreichbar sein soll. Ohne Token
+# bleibt alles wie gehabt (nur sinnvoll auf 127.0.0.1).
+from dotenv import load_dotenv
+
+load_dotenv(ROOT / ".env")
+DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "")
+
+
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    if DASHBOARD_TOKEN and request.url.path.startswith("/api"):
+        supplied = request.headers.get("x-auth-token", "")
+        if not secrets.compare_digest(supplied, DASHBOARD_TOKEN):
+            return JSONResponse({"detail": "Token fehlt oder falsch"}, status_code=401)
+    return await call_next(request)
 
 # Schwebende Agent-Approvals: nonce -> (agent_key, action)
 _pending: dict[int, tuple[str, dict]] = {}
@@ -76,6 +94,28 @@ def status():
         "max_daily_loss": cfg.risk.max_daily_loss,
     }
     return s
+
+
+@app.get("/api/journal")
+def journal(limit: int = 25):
+    """Letzte Bot-Entscheidungen (Orders, Vetos, Rotationen) fürs Dashboard."""
+    return autopilot.journal.tail(min(limit, 200))
+
+
+@app.post("/api/paper/reset")
+def paper_reset():
+    """Setzt das Paper-Konto zurück (nur im Dry-Run, nur bei gestopptem Bot)."""
+    if not cfg.dry_run:
+        raise HTTPException(400, "Nur im Dry-Run-Modus verfügbar")
+    if autopilot.running:
+        raise HTTPException(400, "Erst den Autopilot stoppen")
+    from bot.paper import PaperBroker
+
+    PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate).reset()
+    for name in ("history.jsonl", "trades.jsonl", "leader_perf.json"):
+        (Path(__file__).parent / "runtime" / name).unlink(missing_ok=True)
+    log.info("Paper-Konto und Verlaufsdaten zurückgesetzt")
+    return {"ok": True}
 
 
 @app.get("/api/history")
@@ -218,5 +258,10 @@ def _write_env(agent_key: str, address: str) -> None:
 
 
 if __name__ == "__main__":
+    if cfg.autopilot.autostart:
+        # 24/7-Betrieb (VPS/systemd): nach jedem (Neu-)Start sofort weitermachen,
+        # ohne dass jemand im Dashboard auf "Start" klicken muss.
+        log.info("Autostart aktiv - Autopilot startet sofort")
+        autopilot.start()
     print(f"\n  Dashboard: http://{cfg.autopilot.server_host}:{cfg.autopilot.server_port}\n")
     uvicorn.run(app, host=cfg.autopilot.server_host, port=cfg.autopilot.server_port, log_level="warning")

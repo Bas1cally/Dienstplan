@@ -30,13 +30,17 @@ class ShockState:
 
 
 class ShockDetector:
-    def __init__(self, cfg):
+    def __init__(self, cfg, clock=time.time):
         self.cfg = cfg
+        self._clock = clock  # injizierbar für Simulation/Backtest
         self._cooldown_until = 0.0
+        # letztes Schock-Event (Zeit + signierter Move) - der VolScalper
+        # nutzt es, um nach Stabilisierung die Gegenbewegung zu handeln
+        self.last_event: dict | None = None
 
     def check(self, candles_1m: pd.DataFrame, now: float | None = None) -> ShockState:
         """Erwartet 1m-Candles (mind. 65 Stück) mit Spalte close."""
-        now = now if now is not None else time.time()
+        now = now if now is not None else self._clock()
         if not self.cfg.enabled:
             return ShockState(False)
         if now < self._cooldown_until:
@@ -49,18 +53,19 @@ class ShockDetector:
         move = close[-1] / close[-1 - w] - 1.0
 
         if abs(move) >= self.cfg.move_threshold:
-            self._trigger(now)
+            self._trigger(now, move)
             return ShockState(True, reason=f"{move:+.2%} in {w}min", move_pct=move)
 
         rets = np.diff(np.log(close))
         recent_vol = float(np.std(rets[-w:]))
         base_vol = float(np.std(rets[-60 - w:-w]))
         if base_vol > 0 and recent_vol / base_vol >= self.cfg.vol_spike_ratio and abs(move) > 0.01:
-            self._trigger(now)
+            self._trigger(now, move)
             return ShockState(True, reason=f"Vola-Spike {recent_vol / base_vol:.1f}x, Move {move:+.2%}", move_pct=move)
 
         return ShockState(False, move_pct=move)
 
-    def _trigger(self, now: float) -> None:
+    def _trigger(self, now: float, move: float) -> None:
         self._cooldown_until = now + self.cfg.cooldown_minutes * 60
+        self.last_event = {"time": now, "move": move}
         log.warning("SCHOCK erkannt - RISK_OFF für %d Minuten", self.cfg.cooldown_minutes)

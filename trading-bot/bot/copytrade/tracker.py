@@ -36,15 +36,24 @@ class LeaderSnapshot:
 
 
 class LeaderTracker:
-    def __init__(self, info, addresses: list[str]):
+    def __init__(self, info, addresses: list[str], dexs: list[str] | None = None):
         self.info = info
         self.addresses = addresses
+        self.dexs = dexs or [""]  # Haupt-DEX + Builder-DEXs (Aktien, Gold, Öl)
 
     def snapshot(self, address: str) -> LeaderSnapshot:
-        state = self.info.user_state(address)
-        equity = float(state["marginSummary"]["accountValue"])
+        equity = 0.0
+        raw_positions: list = []
+        for dex in self.dexs:
+            try:
+                state = self.info.user_state(address, dex=dex) if dex else self.info.user_state(address)
+            except Exception:
+                log.debug("Leader %s: DEX %r nicht abrufbar", address[:10], dex, exc_info=True)
+                continue
+            equity += float(state["marginSummary"]["accountValue"])
+            raw_positions.extend(state.get("assetPositions", []))
         positions: dict[str, LeaderPosition] = {}
-        for p in state.get("assetPositions", []):
+        for p in raw_positions:
             pos = p["position"]
             size = float(pos["szi"])
             if size == 0:

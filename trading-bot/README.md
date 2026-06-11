@@ -3,10 +3,23 @@
 Trendfolge-Bot für Hyperliquid Perpetuals mit striktem Risikomanagement,
 Backtesting und mehrstufigem Sicherheitskonzept.
 
+## Die drei Edges (was private profitable Bots ausmacht)
+
+| Edge | Was | Ehrliche Einordnung |
+|---|---|---|
+| **Kosten** | Maker-first-Execution: Post-Only-Limit zum Mid (`tif: Alo`, ~0,015 %), Market nur als Fallback nach `maker_timeout_s` | Sicher messbar: ~60–70 % Fee-Ersparnis je Maker-Fill. Glattstellungen und Scalp-Exits bleiben bewusst Market (Stop ist heilig). Report zeigt die Maker-Quote. |
+| **Geschwindigkeit** | WebSocket-Echtzeit: `userFills` je Leader wecken den Loop sofort statt 10s-Polling; `allMids` liefert frischere Preise | Copy-Lag sinkt von Sekunden auf Millisekunden. WS-Ausfall = automatischer Polling-Fallback, Reconciliation bleibt die Wahrheit. |
+| **Carry** | Funding-Tilt: Positionen, die Funding zahlen würden, werden bis −15 % verkleinert; kassierende bis +10 % vergrößert (linear zwischen 10 % und 50 % p.a.) | Kleiner, stetiger Zusatzertrag. Ändert nie die Richtung, Caps greifen nach dem Tilt, Builder-Assets neutral. |
+
+Konfiguration: `execution.maker_first`, `autopilot.realtime`, `funding_tilt`-Block.
+Paper-Modus rechnet bei `maker_first` mit `backtest.maker_fee_rate` (0,015 %) -
+leicht optimistisch, da reale Maker-Fills nicht garantiert sind.
+
 ## Schnellstart: Autopilot mit Web-UI
 
 ```bash
 pip install -r requirements.txt
+python doctor.py          # Preflight: prüft Config, Tests, alle APIs
 python server.py          # -> http://127.0.0.1:8000
 ```
 
@@ -19,6 +32,52 @@ Copy-Trading, News-/Schock-Überwachung, Circuit Breaker.
   verlässt nie den Browser; der Agent-Key liegt nur lokal in `.env` (chmod 600).
 - Headless ohne UI: `python autopilot.py`
 - Der Server bindet auf `127.0.0.1` - niemals ungeschützt ins Internet stellen.
+
+### 24/7-Betrieb: einmal starten und gut is (VPS + systemd)
+
+Der Bot ist ein Dauerprozess - IRGENDEIN Rechner muss laufen, aber nicht dein
+PC. Empfehlung: kleiner VPS (~4-6 €/Monat, z.B. Hetzner CX22) oder ein
+Raspberry Pi. Setup einmalig ~15 Minuten:
+
+```bash
+# auf dem VPS:
+git clone <repo> && cd Dienstplan/trading-bot
+pip install -r requirements.txt
+cp .env.example .env          # Keys/Token eintragen, DASHBOARD_TOKEN setzen!
+# in config.yaml: autopilot.autostart: true
+python doctor.py              # alles grün?
+sudo cp deploy/trading-bot.service /etc/systemd/system/   # Pfade anpassen
+sudo systemctl enable --now trading-bot
+```
+
+Ab da gilt wirklich "einmal starten und gut is": systemd startet den Bot beim
+Boot, startet ihn nach jedem Crash neu (`Restart=always`), `autostart: true`
+legt ohne Dashboard-Klick los, der Paper-State überlebt alles, und Digest/
+Watchdog melden sich per Telegram. Dashboard vom Handy: Tailscale auf VPS +
+Handy installieren → `http://<vps-name>:8000` (Token-geschützt).
+
+Logs: `journalctl -u trading-bot -f` | Stopp: `systemctl stop trading-bot`
+
+### Fernzugriff: Dashboard von unterwegs (nur für dich)
+
+**Warum nicht GitHub Pages?** Pages hostet nur statische Dateien und ist
+immer öffentlich (Zugriffsbeschränkung gibt es nur mit GitHub Enterprise).
+Unser Dashboard braucht aber das lokale Backend, das den Agent-Key hält -
+das gehört nie auf einen öffentlichen Host. Die saubere Lösung:
+
+1. **Token setzen** (Pflicht bei Fernzugriff): in `.env`
+   `DASHBOARD_TOKEN=$(openssl rand -hex 24)` - das UI fragt den Token einmal
+   ab und merkt ihn sich; alle API-Calls sind sonst 401.
+2. **Privaten Zugangsweg wählen** (Empfehlung: Tailscale):
+
+   | Weg | Setup | Eigenschaften |
+   |---|---|---|
+   | **Tailscale** | App auf Rechner + Handy, gleiches Konto | privates Mesh-VPN, Dashboard unter `http://<rechnername>:8000`, nichts öffentlich exponiert |
+   | **SSH-Tunnel** | `ssh -L 8000:127.0.0.1:8000 user@rechner` | klassisch, kein Zusatzdienst, Verbindung nur bei aktivem Tunnel |
+   | Cloudflare Tunnel + Access | `cloudflared` + E-Mail-Gate | öffentliche URL mit Login davor - nur wenn Tailscale/SSH nicht gehen |
+
+   In allen Fällen bleibt `server_host: 127.0.0.1` - der Tunnel/das VPN
+   verbindet sich lokal, der Server selbst ist nie direkt im Internet.
 
 > **Risikohinweis:** Kein Trading-Bot ist garantiert profitabel. Leverage
 > verstärkt Verluste genauso wie Gewinne – bis hin zur Liquidation. Handle
@@ -184,6 +243,197 @@ python tests/test_autopilot.py    # Unit-Tests Leader-Rotation + KI-Merge
 3. **Copy-Loop + MarketGuard** wie gehabt, plus `runtime/status.json` als
    Live-Zustand für das Web-Frontend.
 
+## Paper-Trading-Modus (Default)
+
+`dry_run: true` ist seit dem Paper-Broker (`bot/paper.py`) ein vollwertiger
+Simulationsmodus statt reinem Signal-Logging:
+
+- **Simulierte Fills** zum Mid-Preis inkl. Taker-Fee, Positions-Tracking mit
+  Durchschnitts-Entry, realisiertem und unrealisiertem PnL
+- **Persistenz:** `runtime/paper_state.json` übersteht Neustarts
+- **Alles läuft wie live:** Equity-Kurve, Circuit Breaker, Leader-Tracking
+  und Telegram-Alerts arbeiten auf dem simulierten Konto
+- **Reset:** Button im Dashboard oder `POST /api/paper/reset`
+  (löscht Paper-Konto, Equity-Verlauf und Journal)
+
+Damit ist der Paper-Test aussagekräftig: Was der Bot im Paper-Modus macht,
+würde er mit echtem Geld genauso machen - nur die Fills sind idealisiert
+(kein Slippage über den Mid-Preis hinaus, keine Teilausführungen).
+
+## Trade-Journal
+
+Jede Entscheidung landet in `runtime/trades.jsonl` und im Aktivitäts-Feed
+des Dashboards: ausgeführte Orders, **Validator-Vetos mit Begründung**,
+Leader-Rotationen, Risk-Off-Glattstellungen und Circuit-Breaker-Events.
+Nach dem Paper-Test lässt sich damit beantworten, ob die Filter PnL retten
+oder nur Trades kosten.
+
+## Preflight-Check
+
+```bash
+python doctor.py            # alle Checks
+python doctor.py --notify   # zusätzlich Telegram-Testnachricht
+```
+
+Prüft Pflicht (Dependencies, Config, Unit-Tests, Hyperliquid-API,
+Leaderboard) und Optionales (News-Feeds, Konvergenz-Quellen, Claude-Key,
+Telegram, Paper-Konto-Zustand). Exit-Code 0 = startklar.
+
+## Shadow-Varianten: Tuning per A/B-Test im Livebetrieb
+
+Eine Schraube drehen und Tage warten vergleicht immer gegen einen ANDEREN
+Marktzeitraum - so tuned man nicht. Shadow-Varianten (`bot/shadow.py`,
+`autopilot.shadow_variants: true`) laufen **parallel auf exakt denselben
+Live-Daten**, jede mit eigenem persistentem Paper-Konto:
+
+| Variante | Filter |
+|---|---|
+| Haupt-Buch (baseline) | aktuelle Config inkl. Validator |
+| `ohne_validator` | jede geplante Order wird ausgeführt |
+| `validator_locker` | Einstiege schon ab Technik-Score ≥ 1 |
+
+Gleiche Leader, gleiche Konvergenz, gleiche Preise, gleiche RISK_OFF-Events -
+der einzige Unterschied ist der Einstiegs-Filter. Dashboard und `report.py`
+zeigen das Delta zum Haupt-Buch; ab 10 Trades und ±1 % Abstand formuliert
+der Report die Konsequenz ("validation.min_score 2 → 1" bzw. "Filter
+behalten"). Reduzierungen werden auch in Varianten nie geblockt.
+
+Dazu: `./start.sh` (bzw. `./start.sh headless`) hält den Bot mit
+Auto-Restart und Backoff am Leben - "läuft wie von alleine" auch nach
+einem Absturz oder Reboot-Skript.
+
+## Auswertung & Frühwarnung: nie wieder "+1$ nach 4 Wochen"
+
+Ein flacher Paper-Lauf hat fast immer eine stille Ursache: zu wenige Trades,
+zu strenge Filter oder inaktive Leader - und niemand merkt es wochenlang.
+Drei Werkzeuge schließen diese Lücke:
+
+**1. Report mit Auto-Empfehlungen** (`python report.py`)
+
+Verdichtet Journal + Equity-Historie + Paper-State zu einer Diagnose mit
+konkreten Stellschrauben. Herzstück ist die **Veto-Outcome-Analyse**: Jedes
+Validator-Veto speichert den Preis; der Report bewertet später, was die
+geblockten Trades nach X Stunden gebracht *hätten* (`--horizon 24`):
+
+- Geblockte Trades wären profitabel gewesen → "min_score 2 → 1 lockern"
+- Geblockte Trades wären Verluste gewesen → "Filter rettet PnL, so lassen"
+- Keine Orders → "top_percent/max_leaders erhöhen" (mehr Signalquellen)
+- Fees > 40 % vom Brutto → "rebalance_threshold erhöhen"
+- Flat trotz Aktivität → Leader-Rotation schärfen - explizit **nicht**
+  einfach Leverage erhöhen (das skaliert eine flache Strategie nur in
+  beide Richtungen)
+
+**2. Täglicher Digest** (Telegram/Log): Equity-Delta 24h, Orders, Vetos,
+Scalp-PnL, Risiko-Level - der Flat-Lauf fällt am Tag 2 auf, nicht am Tag 28.
+
+**3. Inaktivitäts-Watchdog**: Kommt `watchdog_hours` (24h) lang keine Order,
+meldet sich der Bot von selbst MIT Diagnose: Vetos nach Ursache gruppiert,
+Leader flach, Buch im Ziel oder Bot HALTED - inklusive dem passenden
+nächsten Schritt.
+
+## Prop-Accounts (z.B. Breakout by Kraken): Signal-Modus
+
+**Ehrliche Einordnung zuerst:** Breakout ist eine geschlossene Plattform -
+eine öffentliche Trading-API ist nicht bekannt, direkter Bot-Zugriff also
+nicht möglich. Wichtiger noch: **Prop-Firmen verbieten in ihren ToS häufig
+Copy-Trading fremder Quellen und Vollautomation** - das vor dem ersten Trade
+prüfen, sonst ist der Funded Account weg.
+
+Der gangbare Weg ist der **Signal-Modus** (`execution.mode: signals`):
+
+1. Der Bot sammelt und analysiert alles wie gehabt (Leader, LARP, Validator,
+   Konvergenz, News/Schock) und führt im Paper-Modus mit - du siehst also
+   jederzeit, wie die Strategie wirklich performt.
+2. Jede Entscheidung wird zusätzlich als **fertiges Order-Ticket** emittiert:
+   Telegram (ausführfertig formatiert: Coin, Seite, Größe, Stop, TP),
+   `runtime/signals.jsonl` und optional als POST an `SIGNAL_WEBHOOK_URL`.
+3. Du führst die Tickets auf Breakout aus - die Ausführung bleibt bewusst
+   manuell (Compliance), das Denken übernimmt der Bot.
+
+Dazu passend gibt es jetzt einen **Max-Drawdown-Halt**
+(`risk.max_total_drawdown`, default 10 %) zusätzlich zum Tages-Circuit-Breaker
+(-5 %) - das Paar entspricht den typischen Prop-Regeln (daily/max drawdown).
+Beide stellen alles glatt und pausieren den Bot bis zum Neustart.
+Der Signal-Modus erfordert `dry_run: true` (Validierung erzwingt das).
+
+## Multi-Asset: alle Hyperliquid-Märkte (Krypto + Aktien, Gold, Silber, Öl)
+
+Hyperliquid listet über Builder-DEXs (HIP-3) längst mehr als Krypto: Aktien
+wie TSLA/NVDA, Gold, Silber, Öl - alles als Perps mit Leverage. Mit
+`market.dexs: auto` (Default) arbeitet der Bot über **alle** Perp-DEXs:
+
+- **Leader-Tracking über alle DEXs:** Hält ein Top-Trader TSLA long und Gold
+  short, spiegelt der Copier das mit - Equity und Exposure werden über die
+  DEXs hinweg korrekt summiert (Builder-DEXs haben separates Collateral).
+- **Datenebene vs. Ausführungsebene:** Marktdaten (Candles, Mids) kommen
+  IMMER vom Mainnet mit allen DEXs - auch im Testnet-Modus sieht der
+  Validator damit echte Preise. Orders gehen auf das konfigurierte Netz
+  (Builder-DEXs existieren nur auf Mainnet; im Testnet wird nur der
+  Haupt-DEX ausgeführt, der Paper-Modus kann alles simulieren).
+- **Saubere Grenzen:** Die Binance/OKX/Bybit-Konvergenz gilt nur für
+  Krypto-Coins - Builder-Assets (erkennbar am `dex:`-Präfix) werden neutral
+  behandelt statt sinnlose API-Calls zu feuern. Validator, Paper-Broker,
+  Journal und Risiko-Caps sind asset-agnostisch und greifen überall gleich.
+
+`python doctor.py` zeigt, welche DEXs und Märkte entdeckt wurden.
+
+## VolScalper: Volatilitäts-Schocks als Scalp-Chance (experimentell, opt-in)
+
+Der Schock-Detektor erkennt Liquidations-Kaskaden ohnehin - der VolScalper
+(`bot/scalper.py`) nutzt sie offensiv: Während der Copy-Bot im Cooldown
+sicher draußen ist, handelt er die **Gegenbewegung** nach dem Überschießen.
+
+```
+Schock (-3% in 5min) → Stabilisierung abwarten (3min + 3 Candles ohne
+neues Tief) → Long mit Stop knapp unterm Crash-Tief → TP bei 38.2%
+Retrace ODER Zeit-Stop nach 30min. Maximal EIN Scalp pro Event.
+```
+
+Harte Grenzen: 0,5 % Equity Risiko, max. 15 % Notional, nur BTC (Liquidität).
+Der Copier nimmt den Scalp-Bestand explizit von seiner Reconciliation aus
+(`exempt_inventory`) - sonst würde er die Position sofort "wegrebalancen".
+
+> **Default AUS** (`scalp.enabled: false`). Das ist die schwierigste Strategie
+> im Bot: ~0,1 % Fees+Slippage pro Round-Trip fressen dünne Edges, und
+> manchmal fällt das Messer weiter. Erst aktivieren, wenn der Paper-Lauf der
+> übrigen Module überzeugt - und dann den Scalp-PnL im Journal
+> (`scalp_open`/`scalp_close`) separat auswerten.
+
+## Investigator: Wallets durchleuchten, Market Makern auf die Finger schauen
+
+Analytics-Seiten wie hl.eco sind Frontends über dieselben öffentlichen
+Hyperliquid-Daten, die der Bot ohnehin nutzt (eine offizielle API haben sie
+nicht). Der Investigator (`bot/investigator.py`) baut die Werkzeuge nativ nach:
+
+```bash
+python investigate.py 0xWALLET    # Dossier: Positionen + Leverage, Equity,
+                                  # Round-Trips, Haltedauer, Drawdown,
+                                  # LARP-Verdict ("käme als Leader infrage?")
+python investigate.py --pulse     # Markt-Puls: Funding & Open Interest aller
+                                  # Coins, gecrowdete Richtungen markiert
+```
+
+- **Watchlist** (`investigator.watchlist` in config.yaml): beliebige Wallets
+  (Whales, mutmaßliche MMs) werden im Autopilot mitbeobachtet - jede
+  Positionsänderung über `min_notional_change` landet im Journal und als
+  Telegram-Alert (open/close/flip/increase/decrease). Der erste Snapshot
+  alertet nie.
+- **Markt-Puls-Lesart:** Positives Funding = Longs zahlen = die Taker-Crowd
+  ist long und die Gegenseite (meist Market Maker) kassiert. Extremwerte
+  (>±50 % p.a.) markiert der Puls als "gecrowdet" - gegen solche Richtungen
+  einzusteigen ist statistisch teuer.
+
+## Generalprobe (End-to-End-Simulation)
+
+```bash
+python simulate.py
+```
+
+Spielt 720 Minuten gegen einen synthetischen Markt durch (Einstiege,
+Flash-Crash -12 %, Erholung) und prüft das Zusammenspiel des gesamten Stacks:
+Schock-Erkennung, RISK_OFF-Glattstellung, Cooldown, Wiedereinstieg,
+Paper-Persistenz, Journal-Lückenlosigkeit. Läuft komplett offline.
+
 ## Zwei-Bot-Prinzip: der Trade-Validator (Bot 2)
 
 Jeder Einstieg braucht zwei unabhängige Ja-Stimmen:
@@ -323,6 +573,7 @@ RSS/CryptoPanic (Kontext, kostenlos)**.
 ```
 trading-bot/
 ├── config.yaml          # alle Parameter (Strategie, Risiko, Copy-Trading)
+├── doctor.py            # Preflight-Check vor dem Start
 ├── server.py            # Web-UI: Wallet-Connect + Autopilot-Steuerung
 ├── autopilot.py         # CLI: Autopilot headless
 ├── static/index.html    # Dashboard (MetaMask, Status, Leader, Positionen)
@@ -349,6 +600,8 @@ trading-bot/
     │   ├── larp.py         # harte K.O.-Gates gegen Blender
     │   ├── tracker.py      # Snapshots der Leader-Positionen
     │   └── copier.py       # Ziel-Portfolio + Rebalancing mit Risiko-Caps
+    ├── paper.py            # Paper-Broker: simuliertes Konto mit Persistenz
+    ├── journal.py          # Trade-Journal (Orders, Vetos, Rotationen)
     ├── validator.py        # Bot 2: prüft jeden Einstieg (EMA/RSI + Claude-Option)
     ├── convergence.py      # Top-Trader-Ratios Binance/OKX/Bybit als Verstärker
     ├── notify.py           # Telegram-Alerts

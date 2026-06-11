@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""Paper-Lauf auswerten: Diagnose + konkrete Stellschrauben-Empfehlungen.
+
+  python report.py                  # volle Auswertung inkl. Veto-Outcomes
+  python report.py --offline        # ohne Netz (keine Veto-Outcome-Analyse)
+  python report.py --horizon 4      # Veto-Bewertung nach 4h statt 24h
+"""
+
+import argparse
+import json
+import logging
+from pathlib import Path
+
+from bot.report import recommendations, summarize, veto_outcomes
+
+logging.basicConfig(level=logging.WARNING)
+RUNTIME = Path(__file__).parent / "runtime"
+
+
+def load_jsonl(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text().splitlines():
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def make_price_fn():
+    """Candle-basierter Preis-Lookup (1h-Auflösung) für die Veto-Outcome-Analyse."""
+    from bot.exchange import HyperliquidClient
+
+    client = HyperliquidClient(testnet=False, dexs="auto")
+    cache: dict[str, list] = {}
+
+    def price_fn(coin: str, t_unix: float) -> float | None:
+        try:
+            if coin not in cache:
+                cache[coin] = client.market.candles_snapshot(
+                    coin, "1h", int((t_unix - 90 * 86_400) * 1000), int(__import__("time").time() * 1000))
+            for c in cache[coin]:
+                if int(c["t"]) <= t_unix * 1000 < int(c["t"]) + 3_600_000:
+                    return float(c["c"])
+        except Exception:
+            return None
+        return None
+
+    return price_fn
+
+
+def main() -> None:
+    p = argparse.ArgumentParser()
+    p.add_argument("--offline", action="store_true", help="keine Veto-Outcome-Analyse (kein Netz)")
+    p.add_argument("--horizon", type=float, default=24, help="Veto-Bewertung nach X Stunden")
+    args = p.parse_args()
+
+    journal = load_jsonl(RUNTIME / "trades.jsonl")
+    history = load_jsonl(RUNTIME / "history.jsonl")
+    paper = None
+    if (RUNTIME / "paper_state.json").exists():
+        paper = json.loads((RUNTIME / "paper_state.json").read_text())
+
+    if not journal and not history:
+        print("\nNoch keine Daten in runtime/ - erst den Bot laufen lassen.\n")
+        return
+
+    s = summarize(journal, history, paper)
+
+    print("\n=== Paper-Lauf-Report ===\n")
+    if "days" in s:
+        print(f"  Zeitraum          {s['days']} Tage")
+        print(f"  Equity            {s['equity_start']:,.2f} -> {s['equity_end']:,.2f}  ({s['return_pct']:+.2f}%)")
+        print(f"  Max Drawdown      {s['max_drawdown_pct']:.2f}%")
+    print(f"  Orders            {s['orders']}" + (f"  ({s.get('orders_per_day', 0)}/Tag)" if "orders_per_day" in s else "")
+          + (f"  Maker-Quote {s['maker_share']:.0%}" if s.get("maker_share") is not None else ""))
+    print(f"  Vetos             {s['vetoes']}  ({s['veto_per_order']}x je Order)")
+    if s["veto_reasons"]:
+        print(f"    Gründe          {s['veto_reasons']}")
+    if paper:
+        print(f"  Realisierter PnL  {s['realized_pnl']:+,.2f} USD  |  Fees {s['fees_paid']:,.2f} "
+              f"({s['fee_share_pct']:.0f}% vom Brutto)")
+    if s["scalp_trades"]:
+        print(f"  Scalps            {s['scalp_trades']}  PnL {s['scalp_pnl']:+,.2f} USD")
+    if s["risk_events"]:
+        print(f"  Risk-Events       {s['risk_events']} (Flatten/Circuit-Breaker/Max-DD)")
+
+    veto_stats = None
+    vetoes = [e for e in journal if e.get("kind") == "veto"]
+    if vetoes and not args.offline:
+        print("\n  Bewerte geblockte Trades (Veto-Outcome) ...")
+        veto_stats = veto_outcomes(vetoes, make_price_fn(), horizon_hours=args.horizon)
+        if veto_stats["evaluated"]:
+            print(f"  Veto-Outcome      {veto_stats['evaluated']} bewertet: hätten im Schnitt "
+                  f"{veto_stats['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h gebracht "
+                  f"(Trefferquote {veto_stats['win_share']:.0%})")
+
+    # Shadow-Varianten: welche Config hätte mehr gemacht?
+    shadow_recs = []
+    shadows_file = RUNTIME / "shadows.json"
+    if shadows_file.exists() and paper:
+        from bot.shadow import shadow_recommendations
+
+        shadows = json.loads(shadows_file.read_text()).get("variants", {})
+        baseline = s.get("equity_end") or (10_000 + s.get("realized_pnl", 0))
+        if shadows:
+            print("\n  Shadow-Varianten (gleiche Daten, andere Filter):")
+            for name, v in shadows.items():
+                edge = (v["equity"] / baseline - 1) * 100 if baseline else 0
+                print(f"    {name:20s} {v['equity']:>10,.2f} $  ({edge:+.2f}% vs. Haupt-Buch, "
+                      f"{v['trades']} Trades)")
+            shadow_recs = shadow_recommendations(baseline, shadows)
+
+    print("\n=== Empfehlungen ===\n")
+    for r in recommendations(s, veto_stats) + shadow_recs:
+        print(f"  • {r}")
+    print()
+
+
+if __name__ == "__main__":
+    main()

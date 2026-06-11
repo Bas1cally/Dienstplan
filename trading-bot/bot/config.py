@@ -15,6 +15,7 @@ class MarketConfig:
     coin: str
     interval: str
     lookback_candles: int
+    dexs: str = "auto"   # "auto" = alle Perp-DEXs (Krypto + Aktien/Gold/Öl) | Liste | "main"
 
 
 @dataclass
@@ -36,6 +37,7 @@ class RiskConfig:
     max_leverage: int
     max_daily_loss: float
     slippage: float
+    max_total_drawdown: float = 0.10   # Gesamt-Drawdown-Halt (Prop-Firmen-Regel)
 
 
 @dataclass
@@ -43,6 +45,7 @@ class BacktestConfig:
     fee_rate: float
     slippage: float
     initial_equity: float
+    maker_fee_rate: float = 0.00015   # Paper-Annahme bei maker_first (leicht optimistisch)
 
 
 @dataclass
@@ -82,6 +85,11 @@ class NewsConfig:
 class AutopilotConfig:
     reanalyze_hours: float = 24      # wie oft das Leaderboard neu analysiert wird
     min_keep_score: float = 35       # Leader unter diesem Score werden rotiert
+    daily_digest: bool = True        # Tagesbericht per Telegram/Log
+    watchdog_hours: float = 24       # Alarm + Diagnose, wenn so lange keine Order kam
+    shadow_variants: bool = True     # A/B-Tuning: Varianten parallel im Schatten testen
+    realtime: bool = True            # WebSocket: Leader-Fills wecken den Loop sofort
+    autostart: bool = False          # Autopilot beim Server-Start sofort loslegen (24/7-Betrieb)
     server_host: str = "127.0.0.1"
     server_port: int = 8000
 
@@ -98,6 +106,50 @@ class ValidationConfig:
     cache_seconds: int = 120
     llm_enabled: bool = False        # Claude-Zweitmeinung (ANTHROPIC_API_KEY)
     llm_model: str = "claude-opus-4-8"
+
+
+@dataclass
+class ExecutionConfig:
+    # hyperliquid = Orders direkt (live/testnet) | signals = nur Order-Tickets
+    # emittieren (Prop-Accounts ohne API, z.B. Breakout by Kraken)
+    mode: str = "hyperliquid"
+    maker_first: bool = True        # Post-Only-Limit zuerst, Market nur als Fallback
+    maker_timeout_s: float = 20     # so lange auf den Maker-Fill warten
+
+
+@dataclass
+class FundingTiltConfig:
+    enabled: bool = True
+    min_apr: float = 0.10           # darunter neutral (10% p.a.)
+    max_apr: float = 0.50           # ab hier voller Tilt
+    earn_boost: float = 1.10        # Position kassiert Funding -> bis +10%
+    pay_scale: float = 0.85         # Position zahlt Funding -> bis -15%
+    cache_seconds: int = 300
+
+
+@dataclass
+class ScalpConfig:
+    enabled: bool = False            # opt-in: erst nach überzeugendem Paper-Lauf!
+    coin: str = "BTC"                # nur der liquideste Markt (Slippage)
+    risk_per_scalp: float = 0.005    # max. 0.5% Equity Risiko pro Scalp
+    stabilize_minutes: int = 3       # Mindestabstand zum Schock-Event
+    confirm_candles: int = 3         # so viele 1m-Candles ohne neues Extrem
+    entry_window_minutes: int = 25   # danach ist das Event verfallen
+    stop_buffer: float = 0.002       # Stop knapp hinter dem Move-Extrem
+    retrace_target: float = 0.382    # TP bei 38.2% Retrace des Spikes
+    max_holding_minutes: int = 30    # Zeit-Stop: ein Scalp wird nie eine Position
+    max_notional_frac: float = 0.15  # max. 15% Equity Notional pro Scalp
+
+
+@dataclass
+class InvestigatorConfig:
+    watchlist: list = None  # type: ignore[assignment]  # Wallets (Whales/MMs) beobachten
+    poll_seconds: int = 60
+    min_notional_change: float = 25_000   # Alerts erst ab dieser Positionsänderung
+
+    def __post_init__(self):
+        if self.watchlist is None:
+            self.watchlist = []
 
 
 @dataclass
@@ -150,6 +202,10 @@ class Config:
     autopilot: AutopilotConfig
     convergence: ConvergenceConfig
     validation: ValidationConfig
+    investigator: InvestigatorConfig
+    scalp: ScalpConfig
+    execution: ExecutionConfig
+    funding_tilt: FundingTiltConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -175,6 +231,10 @@ def load_config(path: Path | None = None) -> Config:
         autopilot=AutopilotConfig(**raw.get("autopilot", {})),
         convergence=ConvergenceConfig(**raw.get("convergence", {})),
         validation=ValidationConfig(**raw.get("validation", {})),
+        investigator=InvestigatorConfig(**raw.get("investigator", {})),
+        scalp=ScalpConfig(**raw.get("scalp", {})),
+        execution=ExecutionConfig(**raw.get("execution", {})),
+        funding_tilt=FundingTiltConfig(**raw.get("funding_tilt", {})),
     )
     _validate(cfg)
     return cfg
@@ -188,6 +248,13 @@ def _validate(cfg: Config) -> None:
         raise ValueError("max_leverage muss zwischen 1 und 10 liegen")
     if cfg.strategy.ema_fast >= cfg.strategy.ema_slow:
         raise ValueError("ema_fast muss kleiner als ema_slow sein")
+    if cfg.execution.mode not in ("hyperliquid", "signals"):
+        raise ValueError("execution.mode muss 'hyperliquid' oder 'signals' sein")
+    if cfg.execution.mode == "signals" and not cfg.dry_run:
+        raise ValueError("execution.mode 'signals' erfordert dry_run: true - "
+                         "Ausführung passiert extern, der Bot trackt nur im Paper-Modus")
+    if not 0 < cfg.risk.max_total_drawdown <= 0.5:
+        raise ValueError("max_total_drawdown muss zwischen 0 und 50% liegen")
     ct = cfg.copytrade
     if not 0 < ct.copy_ratio <= 1:
         raise ValueError("copy_ratio muss zwischen 0 und 1 liegen")

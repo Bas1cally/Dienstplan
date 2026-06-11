@@ -1,0 +1,39 @@
+# systemd-Unit für den 24/7-Betrieb auf einem VPS/Linux-Server.
+#
+# Installation (als root oder mit sudo):
+#   1. Pfade unten anpassen (User, WorkingDirectory)
+#   2. cp deploy/trading-bot.service /etc/systemd/system/
+#   3. systemctl daemon-reload
+#   4. systemctl enable --now trading-bot
+#
+# Danach: startet beim Boot, startet nach Crash neu - "einmal starten und gut is".
+#   Status:  systemctl status trading-bot
+#   Logs:    journalctl -u trading-bot -f
+#   Stopp:   systemctl stop trading-bot
+
+[Unit]
+Description=Hyperliquid Trading Bot (Autopilot + Dashboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# ANPASSEN: Nutzer und Pfad zum trading-bot-Ordner
+# (bei venv: ExecStart auf .venv/bin/python3 zeigen lassen - siehe VPS-SETUP.md)
+User=trader
+WorkingDirectory=/home/trader/Dienstplan/trading-bot
+ExecStart=/home/trader/Dienstplan/trading-bot/.venv/bin/python3 server.py
+Restart=always
+RestartSec=10
+# Logs zusätzlich ins journalctl
+StandardOutput=journal
+StandardError=journal
+# Härtung: Service sieht nur sein eigenes Verzeichnis beschreibbar
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/trader/Dienstplan/trading-bot
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

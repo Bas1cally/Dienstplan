@@ -24,26 +24,59 @@ def api_url(testnet: bool) -> str:
 
 
 class HyperliquidClient:
-    def __init__(self, testnet: bool, private_key: str | None = None, account_address: str | None = None):
+    """Zwei Ebenen: Marktdaten IMMER vom Mainnet (alle Perp-DEXs - Krypto plus
+    Builder-DEXs mit Aktien, Gold, Silber, Öl), Account/Orders auf dem
+    konfigurierten Netz. So sieht der Bot echte Preise, auch im Testnet-Modus.
+    """
+
+    def __init__(self, testnet: bool, private_key: str | None = None,
+                 account_address: str | None = None, dexs: str | list = "auto"):
         self.base_url = api_url(testnet)
+        self.testnet = testnet
         self.account_address = account_address
+        # Account-/Order-Ebene (testnet oder mainnet)
         self.info = Info(self.base_url, skip_ws=True)
+        # Datenebene: Mainnet, alle gewünschten Perp-DEXs
+        self.dexs = self._resolve_dexs(dexs)
+        try:
+            self.market = Info(api_url(False), skip_ws=True, perp_dexs=self.dexs)
+        except Exception:
+            log.exception("Multi-DEX-Marktdaten nicht ladbar - nur Haupt-DEX")
+            self.dexs = [""]
+            self.market = Info(api_url(False), skip_ws=True)
+        # Builder-DEXs existieren nur auf Mainnet - Testnet-Orders nur Haupt-DEX
+        self.exec_dexs = self.dexs if not testnet else [""]
         self.exchange = None
         if private_key:
             from eth_account import Account
             from hyperliquid.exchange import Exchange
 
             wallet = Account.from_key(private_key)
-            self.exchange = Exchange(wallet, self.base_url, account_address=account_address)
-        self._sz_decimals: dict[str, int] = {}
+            self.exchange = Exchange(wallet, self.base_url, account_address=account_address,
+                                     perp_dexs=self.exec_dexs if self.exec_dexs != [""] else None)
 
-    # ---------- Marktdaten ----------
+    @staticmethod
+    def _resolve_dexs(dexs: str | list) -> list[str]:
+        if isinstance(dexs, list):
+            return dexs or [""]
+        if dexs != "auto":
+            return [""]
+        try:
+            probe = Info(api_url(False), skip_ws=True)
+            names = [d["name"] for d in probe.perp_dexs()[1:] if d and d.get("name")]
+            log.info("Perp-DEXs entdeckt: Haupt-DEX + %s", names or "keine Builder-DEXs")
+            return [""] + names
+        except Exception:
+            log.warning("DEX-Discovery fehlgeschlagen - nur Haupt-DEX (Krypto)")
+            return [""]
+
+    # ---------- Marktdaten (immer Mainnet, alle DEXs) ----------
 
     def candles(self, coin: str, interval: str, lookback: int) -> pd.DataFrame:
         """Holt die letzten `lookback` Candles als OHLCV-DataFrame."""
         end = int(time.time() * 1000)
         start = end - lookback * INTERVAL_MS[interval]
-        raw = self.info.candles_snapshot(coin, interval, start, end)
+        raw = self.market.candles_snapshot(coin, interval, start, end)
         df = pd.DataFrame(
             {
                 "time": [int(c["t"]) for c in raw],
@@ -59,25 +92,49 @@ class HyperliquidClient:
             df = df.iloc[:-1]
         return df.reset_index(drop=True)
 
+    def all_mids(self) -> dict[str, str]:
+        """Mid-Preise über ALLE DEXs gemerged (Krypto + Aktien/Gold/Öl)."""
+        merged: dict[str, str] = {}
+        for dex in self.dexs:
+            try:
+                merged.update(self.market.all_mids(dex=dex))
+            except Exception:
+                log.debug("all_mids für DEX %r nicht abrufbar", dex, exc_info=True)
+        return merged
+
     def mid_price(self, coin: str) -> float:
-        return float(self.info.all_mids()[coin])
+        return float(self.all_mids()[coin])
 
     def sz_decimals(self, coin: str) -> int:
-        """Nachkommastellen für Ordergrößen laut Exchange-Metadaten."""
-        if not self._sz_decimals:
-            meta = self.info.meta()
-            self._sz_decimals = {a["name"]: a["szDecimals"] for a in meta["universe"]}
-        return self._sz_decimals[coin]
+        """Nachkommastellen für Ordergrößen laut Exchange-Metadaten (alle DEXs)."""
+        return self.market.asset_to_sz_decimals[self.market.coin_to_asset[coin]]
 
     # ---------- Account ----------
 
+    def merged_user_state(self, address: str) -> dict:
+        """user_state über alle Ausführungs-DEXs: Equity summiert, Positionen vereint.
+
+        Builder-DEXs haben separates Collateral - für das Gesamtbild zählt die
+        Summe; Positions-Coins sind über DEXs hinweg eindeutig benannt.
+        """
+        equity = 0.0
+        positions: list = []
+        for dex in self.exec_dexs:
+            try:
+                state = self.info.user_state(address, dex=dex)
+            except Exception:
+                log.debug("user_state für DEX %r nicht abrufbar", dex, exc_info=True)
+                continue
+            equity += float(state["marginSummary"]["accountValue"])
+            positions.extend(state.get("assetPositions", []))
+        return {"marginSummary": {"accountValue": str(equity)}, "assetPositions": positions}
+
     def equity(self) -> float:
-        state = self.info.user_state(self.account_address)
-        return float(state["marginSummary"]["accountValue"])
+        return float(self.merged_user_state(self.account_address)["marginSummary"]["accountValue"])
 
     def position(self, coin: str) -> dict | None:
         """Offene Position für coin oder None. szi > 0 = long, < 0 = short."""
-        state = self.info.user_state(self.account_address)
+        state = self.merged_user_state(self.account_address)
         for p in state.get("assetPositions", []):
             pos = p["position"]
             if pos["coin"] == coin and float(pos["szi"]) != 0:
@@ -89,6 +146,66 @@ class HyperliquidClient:
         return None
 
     # ---------- Orders ----------
+
+    @staticmethod
+    def round_px(px: float) -> float:
+        """Preisrundung wie im SDK (_slippage_price): 5 signifikante Stellen,
+        max. 6 Dezimalen - sonst lehnt Hyperliquid die Order ab."""
+        return round(float(f"{px:.5g}"), 6)
+
+    def smart_order(self, coin: str, is_buy: bool, size: float, slippage: float,
+                    timeout_s: float = 20.0, poll_s: float = 1.0) -> str:
+        """Maker-first-Ausführung: Post-Only-Limit zum Mid, bei Timeout/Reject
+        Market-Fallback. Liefert 'maker' oder 'taker_fallback' (fürs Journal).
+
+        Der Fee-Unterschied (Maker ~0.015% vs. Taker ~0.045% + Slippage) ist
+        bei häufigem Rebalancing einer der größten messbaren Edges.
+        """
+        assert self.exchange, "Exchange nicht initialisiert (kein Private Key)"
+        size = round(size, self.sz_decimals(coin))
+        px = self.round_px(self.mid_price(coin))
+        try:
+            res = self.exchange.order(coin, is_buy, size, px, {"limit": {"tif": "Alo"}})
+            status = res["response"]["data"]["statuses"][0]
+        except Exception:
+            log.exception("Maker-Order %s fehlgeschlagen - Market-Fallback", coin)
+            self.market_open(coin, is_buy, size, slippage)
+            return "taker_fallback"
+
+        if "filled" in status:  # sofort als Maker gefüllt (selten, aber möglich)
+            return "maker"
+        if "error" in status:   # ALO abgelehnt (würde sofort matchen) -> Taker
+            log.info("Maker-Order %s abgelehnt (%s) - Market-Fallback", coin, status["error"])
+            self.market_open(coin, is_buy, size, slippage)
+            return "taker_fallback"
+
+        oid = status["resting"]["oid"]
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            time.sleep(poll_s)
+            try:
+                st = self.info.query_order_by_oid(self.account_address, oid)
+                order_status = st.get("order", {}).get("status", "")
+                if order_status == "filled":
+                    return "maker"
+                if order_status in ("canceled", "rejected"):
+                    break
+            except Exception:
+                log.debug("Order-Status %s nicht abrufbar", oid, exc_info=True)
+
+        # Timeout: Rest canceln und den noch offenen Teil als Market nachziehen
+        remaining = size
+        try:
+            self.exchange.cancel(coin, oid)
+            st = self.info.query_order_by_oid(self.account_address, oid)
+            order = st.get("order", {}).get("order", {})
+            if order:
+                remaining = float(order.get("sz", size))  # sz = noch offener Rest
+        except Exception:
+            log.debug("Cancel/Status %s: nehme volle Restgröße an", oid, exc_info=True)
+        if remaining > 0:
+            self.market_open(coin, is_buy, round(remaining, self.sz_decimals(coin)), slippage)
+        return "taker_fallback"
 
     def set_leverage(self, coin: str, leverage: int) -> None:
         assert self.exchange, "Exchange nicht initialisiert (kein Private Key)"
