@@ -258,5 +258,10 @@ def _write_env(agent_key: str, address: str) -> None:
 
 
 if __name__ == "__main__":
+    if cfg.autopilot.autostart:
+        # 24/7-Betrieb (VPS/systemd): nach jedem (Neu-)Start sofort weitermachen,
+        # ohne dass jemand im Dashboard auf "Start" klicken muss.
+        log.info("Autostart aktiv - Autopilot startet sofort")
+        autopilot.start()
     print(f"\n  Dashboard: http://{cfg.autopilot.server_host}:{cfg.autopilot.server_port}\n")
     uvicorn.run(app, host=cfg.autopilot.server_host, port=cfg.autopilot.server_port, log_level="warning")

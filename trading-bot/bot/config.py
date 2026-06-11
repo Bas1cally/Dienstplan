@@ -89,6 +89,7 @@ class AutopilotConfig:
     watchdog_hours: float = 24       # Alarm + Diagnose, wenn so lange keine Order kam
     shadow_variants: bool = True     # A/B-Tuning: Varianten parallel im Schatten testen
     realtime: bool = True            # WebSocket: Leader-Fills wecken den Loop sofort
+    autostart: bool = False          # Autopilot beim Server-Start sofort loslegen (24/7-Betrieb)
     server_host: str = "127.0.0.1"
     server_port: int = 8000
 

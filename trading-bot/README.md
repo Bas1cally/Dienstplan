@@ -33,6 +33,31 @@ Copy-Trading, News-/Schock-Überwachung, Circuit Breaker.
 - Headless ohne UI: `python autopilot.py`
 - Der Server bindet auf `127.0.0.1` - niemals ungeschützt ins Internet stellen.
 
+### 24/7-Betrieb: einmal starten und gut is (VPS + systemd)
+
+Der Bot ist ein Dauerprozess - IRGENDEIN Rechner muss laufen, aber nicht dein
+PC. Empfehlung: kleiner VPS (~4-6 €/Monat, z.B. Hetzner CX22) oder ein
+Raspberry Pi. Setup einmalig ~15 Minuten:
+
+```bash
+# auf dem VPS:
+git clone <repo> && cd Dienstplan/trading-bot
+pip install -r requirements.txt
+cp .env.example .env          # Keys/Token eintragen, DASHBOARD_TOKEN setzen!
+# in config.yaml: autopilot.autostart: true
+python doctor.py              # alles grün?
+sudo cp deploy/trading-bot.service /etc/systemd/system/   # Pfade anpassen
+sudo systemctl enable --now trading-bot
+```
+
+Ab da gilt wirklich "einmal starten und gut is": systemd startet den Bot beim
+Boot, startet ihn nach jedem Crash neu (`Restart=always`), `autostart: true`
+legt ohne Dashboard-Klick los, der Paper-State überlebt alles, und Digest/
+Watchdog melden sich per Telegram. Dashboard vom Handy: Tailscale auf VPS +
+Handy installieren → `http://<vps-name>:8000` (Token-geschützt).
+
+Logs: `journalctl -u trading-bot -f` | Stopp: `systemctl stop trading-bot`
+
 ### Fernzugriff: Dashboard von unterwegs (nur für dich)
 
 **Warum nicht GitHub Pages?** Pages hostet nur statische Dateien und ist

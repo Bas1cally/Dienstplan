@@ -117,6 +117,7 @@ autopilot:
   reanalyze_hours: 6      # Day-Trading: Leader-Rotation alle 6h statt 24h
   min_keep_score: 35      # Leader unter diesem Score werden ausgetauscht
   realtime: true          # Edge 2: WebSocket - Leader-Fills wecken den Loop sofort
+  autostart: false        # true für 24/7-Betrieb (VPS/systemd): startet ohne Klick
   daily_digest: true      # Tagesbericht per Telegram/Log
   watchdog_hours: 24      # Alarm + Diagnose, wenn so lange keine Order kam
   shadow_variants: true   # A/B-Tuning: Varianten parallel im Schatten
