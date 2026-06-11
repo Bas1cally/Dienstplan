@@ -45,6 +45,7 @@ def compute_targets(
     cfg: CopytradeConfig,
     risk: RiskConfig,
     convergence=None,
+    funding=None,   # (apr_by_coin, FundingTiltConfig) - Carry-Edge
 ) -> dict[str, float]:
     """Ziel-Notional (signiert, USD) je Coin für UNSER Konto."""
     targets: dict[str, float] = {}
@@ -65,6 +66,14 @@ def compute_targets(
                 log.info("Konvergenz %s: Faktor %.2f (extern %+.2f, %d Quellen)",
                          coin, v.factor, v.external or 0.0, v.sources)
                 targets[coin] = notional * v.factor
+
+    # Funding-Tilt: Größen zugunsten der Funding-kassierenden Seite neigen.
+    # Ebenfalls VOR den Caps - der Boost wird mit gedeckelt.
+    if funding is not None:
+        from ..funding import apply_funding_tilt
+
+        apr_by_coin, tilt_cfg = funding
+        targets = apply_funding_tilt(targets, apr_by_coin, tilt_cfg)
 
     # Cap je Coin
     max_coin = cfg.max_alloc_per_coin * equity
@@ -146,6 +155,8 @@ class CopyTrader:
         self.validator = validator          # TradeValidator (optional, Bot 2)
         self.signals = signals              # SignalBridge (optional, Prop-Modus)
         self.shadows = None                 # ShadowFleet (optional, Paper-Modus)
+        self.feed = None                    # RealtimeFeed (optional, WS-Preise)
+        self.funding = None                 # FundingCache (optional, Carry-Edge)
         self.start_equity: float | None = None  # für den Max-Drawdown-Halt
         self.last_snapshots: list[LeaderSnapshot] = []  # für Performance-Tracking
         self.last_prices: dict[str, float] = {}
@@ -163,6 +174,10 @@ class CopyTrader:
         if self.halted:
             return
         prices = {c: float(p) for c, p in self.client.all_mids().items()}
+        if self.feed:
+            ws = self.feed.mids()
+            if ws:
+                prices.update(ws)  # frischere WS-Preise überschreiben (nur Haupt-DEX)
         self.last_prices = prices
         equity = self._equity(prices)
         self.last_equity = equity
@@ -206,8 +221,11 @@ class CopyTrader:
         if not snapshots:
             return
         self.last_snapshots = snapshots
-        targets = compute_targets(snapshots, self.weights, equity, self.ct, self.cfg.risk,
-                                  convergence=self.convergence)
+        targets = compute_targets(
+            snapshots, self.weights, equity, self.ct, self.cfg.risk,
+            convergence=self.convergence,
+            funding=(self.funding.apr_by_coin(), self.cfg.funding_tilt) if self.funding else None,
+        )
         # Shadow-Varianten laufen auf denselben Targets/Preisen mit (A/B-Tuning)
         if self.shadows:
             self.shadows.tick(targets, prices)
@@ -224,20 +242,29 @@ class CopyTrader:
             log.info("REBALANCE %s %s %.5f @ ~%.2f (Ist %.0f -> Ziel %.0f USD)",
                      side, o.coin, abs(o.delta_size), o.price,
                      o.current_notional, o.target_notional)
+            maker_first = self.cfg.execution.maker_first
             if self.cfg.dry_run:
-                self.paper.execute(o.coin, o.delta_size, o.price)
+                # Paper-Annahme bei maker_first: Maker-Fee (leicht optimistisch)
+                fee = self.cfg.backtest.maker_fee_rate if maker_first else None
+                self.paper.execute(o.coin, o.delta_size, o.price, fee_rate=fee)
                 self.journal.record("order", coin=o.coin, side=side, size=round(o.delta_size, 6),
                                     price=o.price, target=round(o.target_notional, 2),
-                                    mode="paper")
+                                    mode="paper", exec="maker" if maker_first else "taker")
                 if self.signals:
                     self.signals.emit("copy", o.coin, side, o.delta_size, o.price,
                                       reason=f"Ziel {o.target_notional:,.0f} USD")
             else:
                 try:
-                    self.client.market_open(o.coin, o.is_buy, abs(o.delta_size), self.cfg.risk.slippage)
+                    if maker_first:
+                        exec_kind = self.client.smart_order(
+                            o.coin, o.is_buy, abs(o.delta_size), self.cfg.risk.slippage,
+                            timeout_s=self.cfg.execution.maker_timeout_s)
+                    else:
+                        self.client.market_open(o.coin, o.is_buy, abs(o.delta_size), self.cfg.risk.slippage)
+                        exec_kind = "taker"
                     self.journal.record("order", coin=o.coin, side=side, size=round(o.delta_size, 6),
                                         price=o.price, target=round(o.target_notional, 2),
-                                        mode="live")
+                                        mode="live", exec=exec_kind)
                 except Exception:
                     log.exception("Order für %s fehlgeschlagen", o.coin)
                     self.journal.record("order_failed", coin=o.coin, side=side)
@@ -304,6 +331,7 @@ class CopyTrader:
                                           size, price, reason="Glattstellung (Risk-Off/Halt)")
             else:
                 try:
+                    # Glattstellen ist zeitkritisch (Risk-Off/Halt) -> immer Market
                     self.client.market_open(coin, size < 0, abs(size), self.cfg.risk.slippage)
                 except Exception:
                     log.exception("Schließen von %s fehlgeschlagen", coin)

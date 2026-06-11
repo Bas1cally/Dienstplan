@@ -171,7 +171,8 @@ async function refresh() {
     const s = await api('/api/status');
     running = s.autopilot_running;
     $('net').textContent = (s.config.network || '') + (s.config.dry_run ? ' · dry-run' : ' · LIVE') +
-      ` · max ${s.config.max_leverage}x · Tageslimit −${(s.config.max_daily_loss*100).toFixed(0)}%`;
+      ` · max ${s.config.max_leverage}x · Tageslimit −${(s.config.max_daily_loss*100).toFixed(0)}%` +
+      (s.realtime ? ` · ⚡ WS live (${s.ws_fills || 0} Fills)` : ' · Polling');
     badge($('stState'), running ? (s.state || 'running') : 'gestoppt', running ? 'b-green' : 'b-dim');
     const rl = s.risk_level || 'NORMAL';
     badge($('stRisk'), rl, rl === 'NORMAL' ? 'b-green' : rl === 'CAUTION' ? 'b-amber' : 'b-red');

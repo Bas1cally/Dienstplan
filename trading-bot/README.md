@@ -3,6 +3,18 @@
 Trendfolge-Bot für Hyperliquid Perpetuals mit striktem Risikomanagement,
 Backtesting und mehrstufigem Sicherheitskonzept.
 
+## Die drei Edges (was private profitable Bots ausmacht)
+
+| Edge | Was | Ehrliche Einordnung |
+|---|---|---|
+| **Kosten** | Maker-first-Execution: Post-Only-Limit zum Mid (`tif: Alo`, ~0,015 %), Market nur als Fallback nach `maker_timeout_s` | Sicher messbar: ~60–70 % Fee-Ersparnis je Maker-Fill. Glattstellungen und Scalp-Exits bleiben bewusst Market (Stop ist heilig). Report zeigt die Maker-Quote. |
+| **Geschwindigkeit** | WebSocket-Echtzeit: `userFills` je Leader wecken den Loop sofort statt 10s-Polling; `allMids` liefert frischere Preise | Copy-Lag sinkt von Sekunden auf Millisekunden. WS-Ausfall = automatischer Polling-Fallback, Reconciliation bleibt die Wahrheit. |
+| **Carry** | Funding-Tilt: Positionen, die Funding zahlen würden, werden bis −15 % verkleinert; kassierende bis +10 % vergrößert (linear zwischen 10 % und 50 % p.a.) | Kleiner, stetiger Zusatzertrag. Ändert nie die Richtung, Caps greifen nach dem Tilt, Builder-Assets neutral. |
+
+Konfiguration: `execution.maker_first`, `autopilot.realtime`, `funding_tilt`-Block.
+Paper-Modus rechnet bei `maker_first` mit `backtest.maker_fee_rate` (0,015 %) -
+leicht optimistisch, da reale Maker-Fills nicht garantiert sind.
+
 ## Schnellstart: Autopilot mit Web-UI
 
 ```bash

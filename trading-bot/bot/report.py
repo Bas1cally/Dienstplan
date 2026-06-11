@@ -27,8 +27,10 @@ def summarize(journal: list[dict], history: list[dict], paper: dict | None) -> d
     scalps = [e for e in journal if e.get("kind") == "scalp_close"]
     flattens = [e for e in journal if e.get("kind") in ("flatten", "circuit_breaker", "max_drawdown_halt")]
 
+    execs = [e.get("exec") for e in orders if e.get("exec")]
     out = {
         "orders": len(orders),
+        "maker_share": round(execs.count("maker") / len(execs), 2) if execs else None,
         "vetoes": len(vetoes),
         "veto_per_order": round(len(vetoes) / len(orders), 1) if orders else float("inf") if vetoes else 0.0,
         "scalp_trades": len(scalps),
@@ -136,6 +138,11 @@ def recommendations(summary: dict, veto_stats: dict | None = None) -> list[str]:
     if reasons.get("keine_daten", 0) > orders:
         recs.append("Viele Vetos wegen fehlender Daten (fail-closed): Markt-Anbindung prüfen "
                     "(doctor.py) - das sind keine Strategie-, sondern Infrastruktur-Vetos.")
+
+    maker = summary.get("maker_share")
+    if maker is not None and maker < 0.5 and orders > 10:
+        recs.append(f"Nur {maker:.0%} der Orders wurden als Maker gefüllt (Rest teurer "
+                    f"Taker-Fallback): execution.maker_timeout_s erhöhen (20 -> 40).")
 
     if summary.get("fee_share_pct", 0) > 40 and orders > 10:
         recs.append(f"Fees fressen {summary['fee_share_pct']:.0f}% des Brutto-PnL: "

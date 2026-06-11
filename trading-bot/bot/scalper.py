@@ -42,6 +42,7 @@ class VolScalper:
                  notifier=None, equity_fn=None, clock=time.time, signals=None):
         self.cfg = cfg                  # ScalpConfig
         self.full_risk = None           # wird vom Autopilot gesetzt (RiskConfig)
+        self.exec_cfg = None            # ExecutionConfig (maker_first für Einstiege)
         self.client = client
         self.shock = shock              # ShockDetector (liefert last_event)
         self.paper = paper              # PaperBroker im Dry-Run, sonst None
@@ -157,7 +158,7 @@ class VolScalper:
         if not reason:
             return
 
-        self._execute(pos.coin, -pos.size, price)
+        self._execute(pos.coin, -pos.size, price, urgent=True)  # Exit immer sofort
         pnl = pos.size * (price - pos.entry)
         log.info("SCALP EXIT %s (%s): PnL %+.2f USD", pos.coin, reason, pnl)
         if self.journal:
@@ -171,9 +172,17 @@ class VolScalper:
                               pos.size, price, reason=f"Scalp-Exit ({reason})")
         self.position = None
 
-    def _execute(self, coin: str, delta_size: float, price: float) -> None:
+    def _execute(self, coin: str, delta_size: float, price: float, urgent: bool = False) -> None:
+        """Einstiege maker-first (Fee-Edge), Exits immer Market (Stop ist heilig)."""
+        slippage = self.full_risk.slippage if self.full_risk else 0.005
+        maker = (not urgent and self.exec_cfg is not None and self.exec_cfg.maker_first)
         if self.paper is not None:
-            self.paper.execute(coin, delta_size, price)
+            fee = None
+            if maker and self.full_risk is not None:
+                fee = getattr(self, "paper_maker_fee", None)
+            self.paper.execute(coin, delta_size, price, fee_rate=fee)
+        elif maker:
+            self.client.smart_order(coin, delta_size > 0, abs(delta_size), slippage,
+                                    timeout_s=self.exec_cfg.maker_timeout_s)
         else:
-            self.client.market_open(coin, delta_size > 0, abs(delta_size),
-                                    self.full_risk.slippage if self.full_risk else 0.005)
+            self.client.market_open(coin, delta_size > 0, abs(delta_size), slippage)

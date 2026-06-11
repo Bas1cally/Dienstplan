@@ -74,7 +74,8 @@ def main() -> None:
         print(f"  Zeitraum          {s['days']} Tage")
         print(f"  Equity            {s['equity_start']:,.2f} -> {s['equity_end']:,.2f}  ({s['return_pct']:+.2f}%)")
         print(f"  Max Drawdown      {s['max_drawdown_pct']:.2f}%")
-    print(f"  Orders            {s['orders']}" + (f"  ({s.get('orders_per_day', 0)}/Tag)" if "orders_per_day" in s else ""))
+    print(f"  Orders            {s['orders']}" + (f"  ({s.get('orders_per_day', 0)}/Tag)" if "orders_per_day" in s else "")
+          + (f"  Maker-Quote {s['maker_share']:.0%}" if s.get("maker_share") is not None else ""))
     print(f"  Vetos             {s['vetoes']}  ({s['veto_per_order']}x je Order)")
     if s["veto_reasons"]:
         print(f"    Gründe          {s['veto_reasons']}")

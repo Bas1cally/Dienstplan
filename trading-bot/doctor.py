@@ -203,6 +203,23 @@ def main() -> None:
 
     check("Claude-KI", claude, mandatory=False)
 
+    def websocket():
+        from bot.config import load_config
+
+        cfg = load_config()
+        if not cfg.autopilot.realtime:
+            raise SkipCheck("autopilot.realtime: false")
+        from bot.realtime import RealtimeFeed
+
+        feed = RealtimeFeed()
+        ok = feed.connected
+        feed.close()
+        if not ok:
+            raise RuntimeError("WebSocket nicht verbindbar - Bot fällt auf Polling zurück")
+        return "verbunden (Echtzeit-Fills aktiv)"
+
+    check("WebSocket-Echtzeit", websocket, mandatory=False)
+
     def telegram():
         from bot.notify import Notifier
 

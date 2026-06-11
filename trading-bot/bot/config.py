@@ -45,6 +45,7 @@ class BacktestConfig:
     fee_rate: float
     slippage: float
     initial_equity: float
+    maker_fee_rate: float = 0.00015   # Paper-Annahme bei maker_first (leicht optimistisch)
 
 
 @dataclass
@@ -87,6 +88,7 @@ class AutopilotConfig:
     daily_digest: bool = True        # Tagesbericht per Telegram/Log
     watchdog_hours: float = 24       # Alarm + Diagnose, wenn so lange keine Order kam
     shadow_variants: bool = True     # A/B-Tuning: Varianten parallel im Schatten testen
+    realtime: bool = True            # WebSocket: Leader-Fills wecken den Loop sofort
     server_host: str = "127.0.0.1"
     server_port: int = 8000
 
@@ -110,6 +112,18 @@ class ExecutionConfig:
     # hyperliquid = Orders direkt (live/testnet) | signals = nur Order-Tickets
     # emittieren (Prop-Accounts ohne API, z.B. Breakout by Kraken)
     mode: str = "hyperliquid"
+    maker_first: bool = True        # Post-Only-Limit zuerst, Market nur als Fallback
+    maker_timeout_s: float = 20     # so lange auf den Maker-Fill warten
+
+
+@dataclass
+class FundingTiltConfig:
+    enabled: bool = True
+    min_apr: float = 0.10           # darunter neutral (10% p.a.)
+    max_apr: float = 0.50           # ab hier voller Tilt
+    earn_boost: float = 1.10        # Position kassiert Funding -> bis +10%
+    pay_scale: float = 0.85         # Position zahlt Funding -> bis -15%
+    cache_seconds: int = 300
 
 
 @dataclass
@@ -190,6 +204,7 @@ class Config:
     investigator: InvestigatorConfig
     scalp: ScalpConfig
     execution: ExecutionConfig
+    funding_tilt: FundingTiltConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -218,6 +233,7 @@ def load_config(path: Path | None = None) -> Config:
         investigator=InvestigatorConfig(**raw.get("investigator", {})),
         scalp=ScalpConfig(**raw.get("scalp", {})),
         execution=ExecutionConfig(**raw.get("execution", {})),
+        funding_tilt=FundingTiltConfig(**raw.get("funding_tilt", {})),
     )
     _validate(cfg)
     return cfg

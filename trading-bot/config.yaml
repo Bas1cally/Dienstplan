@@ -44,9 +44,24 @@ risk:
 #               ACHTUNG: Prop-ToS prüfen (Copy-Trading/Automation oft verboten)!
 execution:
   mode: hyperliquid
+  maker_first: true       # Edge 1: Post-Only-Limit zuerst (~0.015% statt 0.045%+Slippage),
+  maker_timeout_s: 20     # Market nur als Fallback; Glattstellungen/Stops immer Market
+
+# === Edge 3: Funding-Tilt (Carry) ===
+# Positionen, die Funding ZAHLEN würden, werden verkleinert (bis pay_scale),
+# Positionen, die Funding KASSIEREN, leicht vergrößert (bis earn_boost).
+# Ändert nie die Richtung; Caps greifen nach dem Tilt. Builder-DEX-Assets neutral.
+funding_tilt:
+  enabled: true
+  min_apr: 0.10           # |Funding| unter 10% p.a. = neutral
+  max_apr: 0.50           # ab 50% p.a. voller Tilt
+  earn_boost: 1.10
+  pay_scale: 0.85
+  cache_seconds: 300
 
 backtest:
   fee_rate: 0.00045       # Hyperliquid Taker Fee (0.045%)
+  maker_fee_rate: 0.00015 # Paper-Annahme bei maker_first (leicht optimistisch)
   slippage: 0.0002        # angenommene Slippage pro Fill
   initial_equity: 10000
 
@@ -101,6 +116,10 @@ shock:                    # die schnelle Verteidigung - direkt auf 1m-Preisdaten
 autopilot:
   reanalyze_hours: 6      # Day-Trading: Leader-Rotation alle 6h statt 24h
   min_keep_score: 35      # Leader unter diesem Score werden ausgetauscht
+  realtime: true          # Edge 2: WebSocket - Leader-Fills wecken den Loop sofort
+  daily_digest: true      # Tagesbericht per Telegram/Log
+  watchdog_hours: 24      # Alarm + Diagnose, wenn so lange keine Order kam
+  shadow_variants: true   # A/B-Tuning: Varianten parallel im Schatten
   server_host: 127.0.0.1  # Web-UI nur lokal - NIE ungeschützt ins Internet!
   server_port: 8000
 

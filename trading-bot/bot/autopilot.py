@@ -137,6 +137,7 @@ class Autopilot:
         self._leader_perf: dict = self._load_perf()
         self.watcher: WalletWatcher | None = None
         self.scalper = None
+        self.feed = None
         self._last_watch_poll = 0.0
         self._digest_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self._digest_equity: float | None = None
@@ -199,7 +200,16 @@ class Autopilot:
                 self._publish()
             except Exception:
                 log.exception("Autopilot-Tick fehlgeschlagen")
-            self._stop.wait(self.cfg.copytrade.poll_seconds)
+            # Ereignisgesteuert: Leader-Fill weckt sofort, sonst normales Intervall
+            if self.feed and self.feed.connected:
+                if self.feed.wait(self.cfg.copytrade.poll_seconds):
+                    log.info("Leader-Fill per WebSocket - Tick sofort (Copy-Lag minimiert)")
+                if self._stop.is_set():
+                    break
+            else:
+                self._stop.wait(self.cfg.copytrade.poll_seconds)
+        if self.feed:
+            self.feed.close()
         self._set_status(state="stopped")
         self.notifier.send("⏹ Autopilot gestoppt.")
 
@@ -244,6 +254,19 @@ class Autopilot:
             )
             log.info("Shadow-Varianten aktiv: %s",
                      [v.name for v in self.copier.shadows.variants])
+
+        # Edge 3: Funding-Tilt (Carry) - nutzt die Mainnet-Marktdaten
+        if self.cfg.funding_tilt.enabled:
+            from .funding import FundingCache
+
+            self.copier.funding = FundingCache(self.client.market, self.cfg.funding_tilt)
+
+        # Edge 2: WebSocket-Echtzeit - Leader-Fills wecken den Loop sofort
+        if self.cfg.autopilot.realtime:
+            from .realtime import RealtimeFeed
+
+            self.feed = RealtimeFeed(addresses=[l["address"] for l in self.leaders])
+            self.copier.feed = self.feed
         if self.cfg.investigator.watchlist:
             self.watcher = WalletWatcher(leader_info, self.cfg.investigator.watchlist,
                                          self.cfg.investigator.min_notional_change)
@@ -259,6 +282,8 @@ class Autopilot:
                 signals=signals,
             )
             self.scalper.full_risk = self.cfg.risk
+            self.scalper.exec_cfg = self.cfg.execution
+            self.scalper.paper_maker_fee = self.cfg.backtest.maker_fee_rate
             log.info("VolScalper aktiv (%s, Risiko %.1f%%/Scalp)",
                      self.cfg.scalp.coin, self.cfg.scalp.risk_per_scalp * 100)
 
@@ -319,6 +344,8 @@ class Autopilot:
             if self.copier:
                 self.copier.weights = {l["address"]: float(l["weight"]) for l in new_leaders}
                 self.copier.tracker.addresses = [l["address"] for l in new_leaders]
+            if self.feed:
+                self.feed.resubscribe([l["address"] for l in new_leaders])
         self._last_analysis = time.time()
 
     # ---------- Status für das Frontend ----------
@@ -374,6 +401,8 @@ class Autopilot:
             mode="dry_run" if self.cfg.dry_run else "live",
             network="testnet" if self.cfg.is_testnet else "mainnet",
             risk_level=self.guard.last_level.name if self.guard else "NORMAL",
+            realtime=bool(self.feed and self.feed.connected),
+            ws_fills=self.feed.fills_seen if self.feed else 0,
             equity=equity,
             positions=positions or [],
             paper=paper_stats,

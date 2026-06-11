@@ -37,11 +37,13 @@ class PaperBroker:
 
     # ---------- Ausführung ----------
 
-    def execute(self, coin: str, delta_size: float, price: float) -> None:
-        """Simulierter Market-Fill: delta_size signiert, zum Mid-Preis + Fee."""
+    def execute(self, coin: str, delta_size: float, price: float,
+                fee_rate: float | None = None) -> None:
+        """Simulierter Fill: delta_size signiert, zum Mid-Preis + Fee.
+        fee_rate-Override erlaubt Maker-Fees (Maker-first-Simulation)."""
         if delta_size == 0 or price <= 0:
             return
-        fee = abs(delta_size) * price * self.fee_rate
+        fee = abs(delta_size) * price * (self.fee_rate if fee_rate is None else fee_rate)
         self.fees_paid += fee
         self.realized_pnl -= fee
         self.trades += 1

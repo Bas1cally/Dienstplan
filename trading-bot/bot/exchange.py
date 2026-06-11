@@ -147,6 +147,66 @@ class HyperliquidClient:
 
     # ---------- Orders ----------
 
+    @staticmethod
+    def round_px(px: float) -> float:
+        """Preisrundung wie im SDK (_slippage_price): 5 signifikante Stellen,
+        max. 6 Dezimalen - sonst lehnt Hyperliquid die Order ab."""
+        return round(float(f"{px:.5g}"), 6)
+
+    def smart_order(self, coin: str, is_buy: bool, size: float, slippage: float,
+                    timeout_s: float = 20.0, poll_s: float = 1.0) -> str:
+        """Maker-first-Ausführung: Post-Only-Limit zum Mid, bei Timeout/Reject
+        Market-Fallback. Liefert 'maker' oder 'taker_fallback' (fürs Journal).
+
+        Der Fee-Unterschied (Maker ~0.015% vs. Taker ~0.045% + Slippage) ist
+        bei häufigem Rebalancing einer der größten messbaren Edges.
+        """
+        assert self.exchange, "Exchange nicht initialisiert (kein Private Key)"
+        size = round(size, self.sz_decimals(coin))
+        px = self.round_px(self.mid_price(coin))
+        try:
+            res = self.exchange.order(coin, is_buy, size, px, {"limit": {"tif": "Alo"}})
+            status = res["response"]["data"]["statuses"][0]
+        except Exception:
+            log.exception("Maker-Order %s fehlgeschlagen - Market-Fallback", coin)
+            self.market_open(coin, is_buy, size, slippage)
+            return "taker_fallback"
+
+        if "filled" in status:  # sofort als Maker gefüllt (selten, aber möglich)
+            return "maker"
+        if "error" in status:   # ALO abgelehnt (würde sofort matchen) -> Taker
+            log.info("Maker-Order %s abgelehnt (%s) - Market-Fallback", coin, status["error"])
+            self.market_open(coin, is_buy, size, slippage)
+            return "taker_fallback"
+
+        oid = status["resting"]["oid"]
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            time.sleep(poll_s)
+            try:
+                st = self.info.query_order_by_oid(self.account_address, oid)
+                order_status = st.get("order", {}).get("status", "")
+                if order_status == "filled":
+                    return "maker"
+                if order_status in ("canceled", "rejected"):
+                    break
+            except Exception:
+                log.debug("Order-Status %s nicht abrufbar", oid, exc_info=True)
+
+        # Timeout: Rest canceln und den noch offenen Teil als Market nachziehen
+        remaining = size
+        try:
+            self.exchange.cancel(coin, oid)
+            st = self.info.query_order_by_oid(self.account_address, oid)
+            order = st.get("order", {}).get("order", {})
+            if order:
+                remaining = float(order.get("sz", size))  # sz = noch offener Rest
+        except Exception:
+            log.debug("Cancel/Status %s: nehme volle Restgröße an", oid, exc_info=True)
+        if remaining > 0:
+            self.market_open(coin, is_buy, round(remaining, self.sz_decimals(coin)), slippage)
+        return "taker_fallback"
+
     def set_leverage(self, coin: str, leverage: int) -> None:
         assert self.exchange, "Exchange nicht initialisiert (kein Private Key)"
         res = self.exchange.update_leverage(leverage, coin, is_cross=True)
