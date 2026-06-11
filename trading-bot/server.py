@@ -34,7 +34,8 @@ from bot.autopilot import Autopilot
 from bot.config import ROOT, load_config
 from bot.exchange import api_url
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+                    format="%(asctime)s %(levelname)s %(message)s",
                     handlers=[logging.StreamHandler(), logging.FileHandler("autopilot.log")])
 log = logging.getLogger(__name__)
 
