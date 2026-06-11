@@ -2,20 +2,29 @@
 
 ## 0. Anbieter & Konditionen
 
-Der Bot ist genügsam: 2 vCPU, 2-4 GB RAM, 40 GB Disk reichen locker.
+Gemessener Bedarf des Bots: **~95 MB RAM** (Voll-Import), ~150-300 MB im
+Betrieb, < 2 GB Disk, minimale CPU-Last. **1 vCPU / 1 GB RAM reicht locker** -
+cost-optimized ist hier die richtige Wahl, ein dickerer Server bringt nichts.
 
 | Anbieter | Modell | Preis (prüfen!) | Einordnung |
 |---|---|---|---|
-| **Hetzner Cloud** (Empfehlung) | CX22 (2 vCPU, 4 GB) | ~4-5 €/Monat | Bestes Preis/Leistung, deutscher Anbieter, stündliche Abrechnung, jederzeit kündbar |
-| Netcup | VPS 200/500 | ~3-5 €/Monat | günstig, solide, träger Support |
-| DigitalOcean / Vultr | Basic 2 GB | ~6-7 $/Monat | gut, wenn du eine Region nahe Tokio willst (s.u.) |
-| Contabo | VPS S | ~5 €/Monat | billig, aber durchwachsener Ruf - eher nicht |
+| **IONOS** (Sparfuchs-Empfehlung) | VPS XS (1 vCPU, 1 GB) | **~1 €/Monat** | günstigster solider deutscher Anbieter; 1 GB reicht (Swap einrichten, s.u.) |
+| Netcup | VPS piko/nano | ~2-3 €/Monat | sehr günstig, solide |
+| **Hetzner** (Komfort-Empfehlung) | CAX11 (ARM, 2 vCPU, 4 GB) | ~4 €/Monat | viel Luft, ARM ist für Python egal, stündlich kündbar |
+| Oracle Cloud Free Tier | ARM, bis 24 GB | 0 € | wirklich kostenlos, ABER: zähe Registrierung, Instanzen können bei Inaktivität reklamiert werden - nur wenn du Bastellaune hast |
 
-**Region:** Für unseren Bot (Reconciliation, kein HFT) ist EU (Falkenstein/
-Nürnberg) völlig ok. Wer das letzte Quäntchen Copy-Lag will: Hyperliquids
-Infrastruktur läuft in Tokio (AWS ap-northeast-1) - Vultr/DO Tokio oder
-Hetzner Singapur senken die Latenz von ~250 ms auf ~10-70 ms. Für den
-Paper-Test: egal, nimm EU.
+**Bei 1-GB-Servern direkt nach Schritt 1 Swap einrichten** (fängt Spitzen ab):
+
+```bash
+fallocate -l 1G /swapfile && chmod 600 /swapfile
+mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+```
+
+**Region:** Für unseren Bot (Reconciliation, kein HFT) ist EU völlig ok. Wer
+das letzte Quäntchen Copy-Lag will: Hyperliquids Infrastruktur läuft in Tokio -
+Vultr/DO Tokio senken die Latenz von ~250 ms auf ~10-70 ms, kosten aber mehr.
+Für den Paper-Test: egal, nimm den billigsten EU-Server.
 
 **Image:** Ubuntu 24.04 LTS. Beim Anlegen direkt deinen **SSH-Key** hinterlegen
 (kein Passwort-Login).
