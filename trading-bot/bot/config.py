@@ -158,6 +158,29 @@ class InvestigatorConfig:
 
 
 @dataclass
+class AnomalyConfig:
+    """Anomalie-Scout: frische Wallets mit großen, konzentrierten Wetten melden.
+
+    Reiner Beobachter (öffentliche On-Chain-Daten) - handelt nie, meldet nur.
+    """
+    enabled: bool = True
+    coins: list = None  # type: ignore[assignment]  # beobachtete Trade-Ströme
+    poll_seconds: int = 300
+    min_trade_notional: float = 100_000   # erst ab dieser Trade-Größe wird die Wallet geprüft
+    min_position_notional: float = 100_000  # ... und nur ab dieser Positionsgröße gemeldet
+    lookback_days: int = 7                # Historie-Fenster für "frisch"
+    max_prior_fills: int = 10             # mehr alte Fills = alter Hase, keine Meldung
+    min_concentration: float = 0.6        # Anteil der größten Position am Gesamt-Buch
+    max_checks_per_scan: int = 5          # API-Budget je Scan (Rate-Limit-Hygiene)
+    recheck_hours: float = 12
+    throttle_s: float = 1.0
+
+    def __post_init__(self):
+        if self.coins is None:
+            self.coins = ["BTC", "ETH", "SOL", "HYPE"]
+
+
+@dataclass
 class ConvergenceConfig:
     enabled: bool = True
     sources: list = None  # type: ignore[assignment]  # binance | okx | bybit
@@ -211,6 +234,7 @@ class Config:
     scalp: ScalpConfig
     execution: ExecutionConfig
     funding_tilt: FundingTiltConfig
+    anomaly: AnomalyConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -240,6 +264,7 @@ def load_config(path: Path | None = None) -> Config:
         scalp=ScalpConfig(**raw.get("scalp", {})),
         execution=ExecutionConfig(**raw.get("execution", {})),
         funding_tilt=FundingTiltConfig(**raw.get("funding_tilt", {})),
+        anomaly=AnomalyConfig(**raw.get("anomaly", {})),
     )
     _validate(cfg)
     return cfg

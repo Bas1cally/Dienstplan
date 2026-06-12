@@ -136,6 +136,7 @@ class Autopilot:
         self._last_history_write = 0.0
         self._leader_perf: dict = self._load_perf()
         self.watcher: WalletWatcher | None = None
+        self.scout = None
         self.scalper = None
         self.feed = None
         self._last_watch_poll = 0.0
@@ -212,6 +213,8 @@ class Autopilot:
                     self.scalper.tick()
                     self.copier.scalp_inventory = self.scalper.inventory()
                 self._watch_wallets()
+                if self.scout:
+                    self.scout.tick()
                 self._maybe_digest()
                 self._maybe_watchdog()
                 self._publish()
@@ -288,6 +291,14 @@ class Autopilot:
             self.watcher = WalletWatcher(leader_info, self.cfg.investigator.watchlist,
                                          self.cfg.investigator.min_notional_change)
             log.info("Investigator: beobachte %d Wallets", len(self.cfg.investigator.watchlist))
+        self.scout = None
+        if self.cfg.anomaly.enabled:
+            from .anomaly import AnomalyScout
+
+            self.scout = AnomalyScout(leader_info, self.cfg.anomaly,
+                                      notifier=self.notifier, journal=self.journal)
+            log.info("Anomalie-Scout aktiv: %s (nur Beobachtung, handelt nie)",
+                     ", ".join(self.cfg.anomaly.coins))
         self.scalper = None
         if self.cfg.scalp.enabled:
             from .scalper import VolScalper
@@ -420,6 +431,7 @@ class Autopilot:
             risk_level=self.guard.last_level.name if self.guard else "NORMAL",
             realtime=bool(self.feed and self.feed.connected),
             ws_fills=self.feed.fills_seen if self.feed else 0,
+            anomalies=list(self.scout.flagged[-5:]) if self.scout else [],
             equity=equity,
             positions=positions or [],
             paper=paper_stats,
