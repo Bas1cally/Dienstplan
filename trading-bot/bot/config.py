@@ -9,6 +9,11 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# .env sofort beim Import laden, damit Telegram/Claude/Dashboard-Token auch in
+# doctor.py, autopilot.py (headless) und report.py greifen - nicht nur, wenn
+# load_credentials() (Live-Modus) oder server.py sie explizit lädt.
+load_dotenv(ROOT / ".env")
+
 
 @dataclass
 class MarketConfig:
