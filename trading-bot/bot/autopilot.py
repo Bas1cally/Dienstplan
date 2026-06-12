@@ -171,14 +171,31 @@ class Autopilot:
     # ---------- Hauptschleife ----------
 
     def _run(self) -> None:
-        try:
-            self._setup()
-        except Exception as e:
-            log.exception("Autopilot-Setup fehlgeschlagen")
-            self.error = str(e)
-            self._set_status(state="error", error=str(e))
-            return
+        # Setup darf NIE endgültig sterben (z.B. 429-Rate-Limit beim Hochfahren):
+        # mit Backoff weiterprobieren, beim ersten Fehlschlag einmal alarmieren.
+        delay, alerted = 60.0, False
+        while True:
+            try:
+                self._setup()
+                break
+            except Exception as e:
+                log.exception("Autopilot-Setup fehlgeschlagen - neuer Versuch in %.0fs", delay)
+                self.error = str(e)
+                self._set_status(state="retrying", error=str(e), retry_in_s=int(delay))
+                if not alerted:
+                    self.notifier.send(
+                        f"⚠️ <b>Autopilot-Setup fehlgeschlagen</b>\n{str(e)[:300]}\n"
+                        f"Ich versuche es automatisch weiter (Backoff bis 15 min)."
+                    )
+                    alerted = True
+                if self._stop.wait(delay):
+                    self._set_status(state="stopped")
+                    return
+                delay = min(delay * 2, 900.0)
 
+        self.error = None
+        if alerted:
+            self.notifier.send("✅ Setup im neuen Anlauf geglückt - Autopilot fährt hoch.")
         self._set_status(state="running")
         self.notifier.send(
             f"🚀 <b>Autopilot gestartet</b>\n"

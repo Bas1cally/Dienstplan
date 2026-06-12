@@ -60,6 +60,87 @@ def test_rotation_weights_sum_to_one():
     assert abs(sum(l["weight"] for l in out) - 1.0) < 0.01
 
 
+def test_setup_retries_until_success():
+    """Setup-Fehler (z.B. 429 beim Hochfahren) dürfen den Autopilot nie endgültig
+    töten: er probiert mit Backoff weiter und läuft beim nächsten Erfolg los."""
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+
+    ap = Autopilot(load_config())
+    attempts = {"n": 0}
+
+    def flaky_setup():
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise RuntimeError("(429, None, 'null', None, {...})")
+        ap._stop.set()  # Erfolg: Loop direkt wieder beenden, kein echtes Setup nötig
+
+    sent = []
+    ap._setup = flaky_setup
+    ap.notifier.send = sent.append
+    ap._stop_wait_orig = ap._stop.wait
+    ap._stop.wait = lambda t=None: ap._stop.is_set()  # Backoff im Test nicht schlafen
+    ap._run()
+    assert attempts["n"] == 3, "muss nach Fehlschlägen weiterprobieren"
+    assert any("fehlgeschlagen" in s for s in sent), "erster Fehlschlag muss alarmieren"
+    assert sum("fehlgeschlagen" in s for s in sent) == 1, "aber nur einmal (kein Spam)"
+    assert any("geglückt" in s for s in sent)
+    assert ap.status()["state"] == "stopped"
+
+
+def test_setup_retry_stop_aborts():
+    """Stop-Signal während des Retry-Backoffs beendet den Thread sauber."""
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+
+    ap = Autopilot(load_config())
+
+    def failing_setup():
+        raise RuntimeError("API down")
+
+    ap._setup = failing_setup
+    ap.notifier.send = lambda *a, **k: None
+    ap._stop.wait = lambda t=None: True  # Nutzer stoppt während des Wartens
+    ap._run()
+    assert ap.status()["state"] == "stopped"
+    assert "API down" in (ap.error or "")
+
+
+def test_analyzer_retries_on_429():
+    """429 vom Rate-Limit wird mit Backoff wiederholt statt die Wallet zu verwerfen."""
+    from bot.copytrade.analyzer import TraderAnalyzer
+
+    an = TraderAnalyzer(info=None, days=21, throttle_s=0)
+    calls = {"n": 0}
+
+    def rate_limited_then_ok(addr):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise Exception((429, None, "null", None, {}))
+        return {"ok": True}
+
+    import time as _time
+    naps = []
+    orig_sleep = _time.sleep
+    _time.sleep = naps.append
+    try:
+        out = an._call(rate_limited_then_ok, "0xabc")
+    finally:
+        _time.sleep = orig_sleep
+    assert out == {"ok": True}
+    assert calls["n"] == 3
+    assert naps == [2.0, 4.0], "exponentieller Backoff"
+
+    def always_500(addr):
+        raise RuntimeError("HTTP 500 kaputt")
+
+    try:
+        an._call(always_500, "0xabc")
+        assert False, "Nicht-429-Fehler müssen sofort durchschlagen"
+    except RuntimeError:
+        pass
+
+
 def test_llm_merge_takes_maximum():
     """KI-Score überschreibt Keyword-Score nur, wenn er höher ist."""
     from bot.news.sentiment import score_item

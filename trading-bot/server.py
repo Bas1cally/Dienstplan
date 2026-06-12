@@ -91,7 +91,9 @@ def status():
     s = autopilot.status()
     s["autopilot_running"] = autopilot.running
     s["wallet"] = autopilot.account_address
-    s["agent_ready"] = bool((ROOT / ".env").exists() and "HL_PRIVATE_KEY=0x" in (ROOT / ".env").read_text())
+    env_text = (ROOT / ".env").read_text() if (ROOT / ".env").exists() else ""
+    # echter 32-Byte-Key zählt, nicht der "0x..."-Platzhalter aus .env.example
+    s["agent_ready"] = bool(re.search(r"^HL_PRIVATE_KEY=0x[0-9a-fA-F]{64}\s*$", env_text, re.M))
     s["config"] = {
         "dry_run": cfg.dry_run,
         "network": cfg.network,

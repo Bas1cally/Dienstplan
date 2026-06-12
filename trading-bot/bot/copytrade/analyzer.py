@@ -204,26 +204,51 @@ def _score(m: TraderMetrics) -> float:
 
 
 class TraderAnalyzer:
-    """Holt Fill-Historien über die Info-API und bewertet Trader."""
+    """Holt Fill-Historien über die Info-API und bewertet Trader.
 
-    def __init__(self, info, days: int):
+    Rate-Limit-Hygiene: Hyperliquid drosselt pro IP. Zwischen den Wallets wird
+    deshalb pausiert (`throttle_s`), und ein 429 wird mit Backoff wiederholt
+    statt die Wallet still zu verwerfen.
+    """
+
+    def __init__(self, info, days: int, throttle_s: float = 1.0):
         self.info = info
         self.days = days
+        self.throttle_s = throttle_s
+
+    def _call(self, fn, *args, tries: int = 5):
+        import time as _time
+
+        delay = 2.0
+        for attempt in range(tries):
+            try:
+                return fn(*args)
+            except Exception as e:
+                rate_limited = getattr(e, "status_code", None) == 429 or "429" in str(e)[:120]
+                if not rate_limited or attempt == tries - 1:
+                    raise
+                log.warning("Rate-Limit (429) - warte %.0fs und versuche erneut", delay)
+                _time.sleep(delay)
+                delay = min(delay * 2, 60.0)
 
     def analyze(self, address: str) -> TraderMetrics:
         import time as _time
 
         end = int(_time.time() * 1000)
         start = end - self.days * 86_400_000
-        fills = self.info.user_fills_by_time(address, start, end)
-        state = self.info.user_state(address)
+        fills = self._call(self.info.user_fills_by_time, address, start, end)
+        state = self._call(self.info.user_state, address)
         account_value = float(state["marginSummary"]["accountValue"])
         return analyze_fills(address, fills, account_value, self.days)
 
     def rank(self, addresses: list[str], min_score: float, larp=None) -> list[TraderMetrics]:
         """Bewertet Wallets; `larp` (LarpFilter) sortiert Blender vorab hart aus."""
+        import time as _time
+
         results = []
-        for addr in addresses:
+        for i, addr in enumerate(addresses):
+            if i and self.throttle_s:
+                _time.sleep(self.throttle_s)
             try:
                 m = self.analyze(addr)
                 log.info("Analysiert %s: score=%.1f roi=%.1f%% pf=%.2f trips=%d dd=%.1f%% hold=%.0fmin",
