@@ -97,6 +97,24 @@ def main() -> None:
                   f"{veto_stats['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h gebracht "
                   f"(Trefferquote {veto_stats['win_share']:.0%})")
 
+    # Anomalie-Scout: hatten die "verdächtigen" Wallets recht?
+    anomalies = load_jsonl(RUNTIME / "anomalies.jsonl")
+    if anomalies:
+        print(f"\n  Anomalie-Scout      {len(anomalies)} gemeldete Wallets")
+        if not args.offline:
+            from bot.report import anomaly_outcomes
+
+            ao = anomaly_outcomes(anomalies, make_price_fn(), horizon_hours=args.horizon)
+            if ao["evaluated"]:
+                verdict = ("Wallets lagen RICHTIG" if ao["avg_return_pct"] > 0.1
+                           else "kein Vorlauf erkennbar" if abs(ao["avg_return_pct"]) <= 0.1
+                           else "Wallets lagen FALSCH")
+                taugt = ao["avg_return_pct"] > 0.3 and ao["win_share"] >= 0.55
+                print(f"    Follow-through    {ao['evaluated']} bewertet: im Schnitt "
+                      f"{ao['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h in Positionsrichtung "
+                      f"(Trefferquote {ao['win_share']:.0%}) -> {verdict}")
+                print(f"                      {'taugt als Copy-Signal' if taugt else 'noch nicht überzeugend, weiter beobachten'}")
+
     # Shadow-Varianten: welche Config hätte mehr gemacht?
     shadow_recs = []
     shadows_file = RUNTIME / "shadows.json"

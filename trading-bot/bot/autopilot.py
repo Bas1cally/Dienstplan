@@ -144,6 +144,103 @@ class Autopilot:
         self._digest_equity: float | None = None
         self._watchdog_warned = False
         self._start_time = time.time()
+        self.commander = self._build_commander()
+
+    def _build_commander(self):
+        """Telegram-Fernsteuerung (nur aktiv, wenn TELEGRAM_* gesetzt)."""
+        from .telecmd import TelegramCommander
+
+        return TelegramCommander({
+            "/status": self._cmd_status,
+            "/report": self._cmd_report,
+            "/leaders": self._cmd_leaders,
+            "/anomalies": self._cmd_anomalies,
+            "/stop": self._cmd_stop,
+            "/start": self._cmd_start,
+            "/help": self._cmd_help,
+        })
+
+    # ---------- Telegram-Befehle (Antworten als HTML-String) ----------
+
+    def _cmd_help(self) -> str:
+        return ("<b>Befehle</b>\n/status – Zustand & Equity\n/report – Auswertung\n"
+                "/leaders – Leader + ROI\n/anomalies – Scout-Funde\n"
+                "/stop /start – Autopilot steuern")
+
+    def _cmd_status(self) -> str:
+        s = self.status()
+        eq = self.copier.last_equity if self.copier else None
+        day_t = int(time.time()) - 86_400
+        orders = sum(1 for e in self.journal.tail(2000)
+                     if e.get("kind") == "order" and e.get("t", 0) >= day_t)
+        return (f"<b>Status</b>: {s.get('state', '?')}\n"
+                f"Equity: {f'{eq:,.2f}' if eq else 'n/a'}\n"
+                f"Orders (24h): {orders}\n"
+                f"Risiko: {self.guard.last_level.name if self.guard else 'NORMAL'}\n"
+                f"Leader: {len(self.leaders)} | WS: {'an' if self.feed and self.feed.connected else 'aus'}")
+
+    def _cmd_report(self) -> str:
+        from .report import summarize
+        journal = self.journal.tail(5000)
+        history = []
+        try:
+            hist_path = RUNTIME / "history.jsonl"
+            if hist_path.exists():
+                for line in hist_path.read_text().splitlines()[-1000:]:
+                    try:
+                        history.append(json.loads(line))
+                    except ValueError:
+                        continue
+        except OSError:
+            pass
+        paper = None
+        if self.copier and self.copier.paper:
+            b = self.copier.paper
+            paper = {"trades": b.trades, "realized_pnl": round(b.realized_pnl, 2),
+                     "fees_paid": round(b.fees_paid, 2)}
+        s = summarize(journal, history, paper)
+        lines = [f"<b>Report</b>"]
+        if "days" in s:
+            lines.append(f"{s['days']}T: {s['equity_start']:,.0f}→{s['equity_end']:,.0f} "
+                         f"({s['return_pct']:+.2f}%)")
+        lines.append(f"Orders: {s['orders']} | Vetos: {s['vetoes']}")
+        if s.get("maker_share") is not None:
+            lines.append(f"Maker-Quote: {s['maker_share']:.0%}")
+        if paper:
+            lines.append(f"PnL: {s.get('realized_pnl', 0):+,.2f} | Fees: {s.get('fees_paid', 0):,.2f}")
+        return "\n".join(lines)
+
+    def _cmd_leaders(self) -> str:
+        if not self.leaders:
+            return "Noch keine Leader (Analyse läuft?)."
+        out = ["<b>Leader</b>"]
+        for l in self._with_performance(self.leaders):
+            roi = l.get("roi_since_copy_pct")
+            out.append(f"<code>{l['address'][:10]}…</code> Score {l.get('score', '?')}"
+                       + (f" | {roi:+.2f}% seit Kopie" if roi is not None else ""))
+        return "\n".join(out)
+
+    def _cmd_anomalies(self) -> str:
+        flagged = self.scout.flagged[-5:] if self.scout else []
+        if not flagged:
+            return "Noch keine Anomalien gemeldet."
+        out = ["<b>Anomalie-Scout</b>"]
+        for f in reversed(flagged):
+            out.append(f"{f['side']} {f['coin']} ${f['notional']:,.0f} "
+                       f"<code>{f['address'][:10]}…</code>")
+        return "\n".join(out)
+
+    def _cmd_stop(self) -> str:
+        if not self.running:
+            return "Autopilot läuft nicht."
+        self.stop()
+        return "⏹ Autopilot wird gestoppt."
+
+    def _cmd_start(self) -> str:
+        if self.running:
+            return "Autopilot läuft bereits."
+        self.start()
+        return "▶️ Autopilot wird gestartet."
 
     # ---------- Lebenszyklus ----------
 
@@ -152,6 +249,9 @@ class Autopilot:
         return self._thread is not None and self._thread.is_alive()
 
     def start(self, account_address: str | None = None) -> None:
+        # Fernsteuerung läuft unabhängig vom Worker - so erreichbar, selbst wenn
+        # das Setup gerade in der Retry-Schleife hängt.
+        self.commander.start()
         if self.running:
             return
         if account_address:

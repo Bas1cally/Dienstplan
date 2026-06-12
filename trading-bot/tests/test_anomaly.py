@@ -23,12 +23,17 @@ DAY_MS = 86_400_000
 class FakeInfo:
     """Stellt recentTrades / userFills / userState aus Testdaten bereit."""
 
-    def __init__(self, trades=None, fills=None, states=None, errors=None):
+    def __init__(self, trades=None, fills=None, states=None, errors=None, mids=None):
         self.trades = trades or {}     # coin -> Trades
         self.fills = fills or {}       # addr -> Fills
         self.states = states or {}     # addr -> user_state
         self.errors = errors or set()  # Adressen, deren Abfragen knallen
+        self.mids = mids or {}         # coin -> Mid-Preis
         self.calls = []
+
+    def all_mids(self):
+        self.calls.append(("all_mids", None))
+        return {k: str(v) for k, v in self.mids.items()}
 
     def post(self, path, payload):
         self.calls.append(("recentTrades", payload["coin"]))
@@ -111,6 +116,17 @@ def test_diversified_book_not_flagged():
                                            ("BTC", 1, 100_000), ("ETH", 20, 80_000)])},
     )
     assert scout(info).scan() == []
+
+
+def test_entry_price_captured_for_outcome_analysis():
+    info = FakeInfo(
+        trades={"SOL": [trade("SOL", 200, 1000, ["0xfresh"])]},
+        fills={"0xfresh": []},
+        states={"0xfresh": state(300_000, [("SOL", 1200, 250_000)])},
+        mids={"SOL": 201.5},
+    )
+    out = scout(info).scan()
+    assert out[0]["price"] == 201.5, "Mid bei Fund muss für report.py festgehalten werden"
 
 
 def test_short_side_detected():

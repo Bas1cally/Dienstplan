@@ -107,6 +107,17 @@ def veto_outcomes(vetoes: list[dict], price_fn, horizon_hours: float = 24,
     }
 
 
+def anomaly_outcomes(anomalies: list[dict], price_fn, horizon_hours: float = 24,
+                     max_samples: int = 100) -> dict:
+    """Hatten die 'verdächtigen' Wallets recht? Misst die Kursbewegung in ihre
+    Positionsrichtung nach `horizon_hours` ab dem Meldezeitpunkt.
+
+    Identische Mechanik wie veto_outcomes (coin/side/price/t je Eintrag) - das
+    ist die Datenbasis für die Entscheidung, ob der Scout je ans Copy-Trading darf.
+    """
+    return veto_outcomes(anomalies, price_fn, horizon_hours, max_samples)
+
+
 def recommendations(summary: dict, veto_stats: dict | None = None) -> list[str]:
     """Konkrete Stellschrauben-Vorschläge - die Antwort auf '+1$ nach 4 Wochen'."""
     recs: list[str] = []

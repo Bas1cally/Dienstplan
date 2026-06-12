@@ -120,7 +120,7 @@ class AnomalyScout:
         if concentration < self.cfg.min_concentration:
             return None
 
-        return {
+        finding = {
             "address": addr,
             "coin": coin,
             "side": "LONG" if szi > 0 else "SHORT",
@@ -129,6 +129,15 @@ class AnomalyScout:
             "account_value": round(account_value, 0),
             "prior_fills": len(prior),
         }
+        # Mid-Preis bei Fund festhalten (gleiches Feld wie Vetos): report.py
+        # misst später, ob der Markt der Wallet recht gab (Treffsicherheit).
+        try:
+            mid = float(self.info.all_mids().get(coin, 0)) or None
+        except Exception:
+            mid = None
+        if mid:
+            finding["price"] = mid
+        return finding
 
     # ---------- Meldung (beobachten, nie handeln) ----------
 
