@@ -67,7 +67,7 @@ backtest:
 
 copytrade:
   leaders_file: leaders.json   # Ergebnis von analyze_traders.py (manuell editierbar)
-  max_leaders: 3               # auf wie viele Top-Trader das Kapital verteilt wird
+  max_leaders: 6               # mehr Signalquellen fürs Paper-Trade = belastbarere Daten
   copy_ratio: 0.6              # Day-Trading-Profil: etwas aggressiver allokieren
   max_alloc_per_coin: 0.25     # max. 25% der Equity in einem Coin
   rebalance_threshold: 0.02    # erst handeln ab 2% Equity Abweichung (gegen Fee-Churn)
@@ -77,9 +77,9 @@ copytrade:
     days: 21                   # kürzeres Fenster - Day-Trader-Form ist schnelllebig
     min_account_value: 10000   # Mindest-Kontogröße der Kandidaten
     min_volume: 500000         # Mindest-Monatsvolumen (statistische Aussagekraft)
-    top_percent: 1.0           # nur das Top-1% (nach Monats-ROI) geht in die Tiefenanalyse
-    top_n: 30                  # harter Deckel für die Tiefenanalyse (API-Calls je Wallet)
-    min_score: 40              # Mindest-Score, um als Leader infrage zu kommen
+    top_percent: 2.0           # Top-2% (nach Monats-ROI) gehen in die Tiefenanalyse
+    top_n: 50                  # harter Deckel für die Tiefenanalyse (API-Calls je Wallet)
+    min_score: 35              # Mindest-Score, um als Leader infrage zu kommen
     larp:                      # harte K.O.-Gates gegen Blender (bot/copytrade/larp.py)
       min_round_trips: 30            # weniger Trades = Zufall nicht ausschließbar
       min_active_days: 10
@@ -117,7 +117,7 @@ autopilot:
   reanalyze_hours: 6      # Day-Trading: Leader-Rotation alle 6h statt 24h
   min_keep_score: 35      # Leader unter diesem Score werden ausgetauscht
   realtime: true          # Edge 2: WebSocket - Leader-Fills wecken den Loop sofort
-  autostart: false        # true für 24/7-Betrieb (VPS/systemd): startet ohne Klick
+  autostart: true         # 24/7-Betrieb (VPS/systemd): startet ohne Dashboard-Klick
   daily_digest: true      # Tagesbericht per Telegram/Log
   watchdog_hours: 24      # Alarm + Diagnose, wenn so lange keine Order kam
   shadow_variants: true   # A/B-Tuning: Varianten parallel im Schatten
