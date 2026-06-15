@@ -181,6 +181,25 @@ class AnomalyConfig:
 
 
 @dataclass
+class PolymarketConfig:
+    """Polymarket-Scout: erfahrenes Geld in Prediction Markets beobachten.
+
+    Read-only, separates Tier - handelt nie. Datenquelle: Polymarket Data-API
+    (öffentlich). Endpunkte überschreibbar, falls die API sich ändert.
+    """
+    enabled: bool = False           # opt-in - separate Domain
+    poll_seconds: int = 600
+    trades_url: str = "https://data-api.polymarket.com/trades"
+    positions_url: str = "https://data-api.polymarket.com/positions"
+    trade_limit: int = 100
+    min_trade_notional: float = 5_000     # USDC - ab dieser Wettgröße prüfen
+    min_wallet_profit: float = 10_000     # nur Wallets mit nachweisbarem Track-Record
+    max_checks_per_scan: int = 5
+    recheck_hours: float = 12
+    throttle_s: float = 1.0
+
+
+@dataclass
 class ConvergenceConfig:
     enabled: bool = True
     sources: list = None  # type: ignore[assignment]  # binance | okx | bybit
@@ -284,6 +303,7 @@ class Config:
     execution: ExecutionConfig
     funding_tilt: FundingTiltConfig
     anomaly: AnomalyConfig
+    polymarket: PolymarketConfig
     labs: LabsConfig
 
     @property
@@ -316,6 +336,7 @@ def load_config(path: Path | None = None) -> Config:
         execution=ExecutionConfig(**raw.get("execution", {})),
         funding_tilt=FundingTiltConfig(**raw.get("funding_tilt", {})),
         anomaly=AnomalyConfig(**raw.get("anomaly", {})),
+        polymarket=PolymarketConfig(**raw.get("polymarket", {})),
         labs=labs,
     )
     _validate(cfg)

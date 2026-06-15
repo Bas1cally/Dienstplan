@@ -187,6 +187,19 @@ anomaly:
   max_checks_per_scan: 5          # API-Budget je Scan (Rate-Limit-Hygiene)
   recheck_hours: 12
 
+# === Polymarket-Scout: erfahrenes Geld in Prediction Markets (read-only) ===
+# Polymarket läuft on-chain - sichtbare Wallets. Der Scout meldet, wenn eine
+# Wallet mit nachweislich profitabler Historie eine große Wette platziert
+# ("informed money"). SEPARATES Tier, HANDELT NIE - reine Beobachtung, damit
+# wir über Wochen sehen, ob da ein folgbares Signal ist (Telegram /polymarket).
+# Ehrlich: Lag wie bei jedem Follower, Märkte dünn - erst messen, dann glauben.
+polymarket:
+  enabled: true
+  poll_seconds: 600
+  min_trade_notional: 5000      # USDC - ab dieser Wettgröße wird die Wallet geprüft
+  min_wallet_profit: 10000      # nur Wallets mit nachweisbarem Track-Record melden
+  max_checks_per_scan: 5
+
 # === Investigator: Wallets durchleuchten & beobachten ===
 # Dossier zu jeder Adresse: python investigate.py 0x...   |   Markt-Puls
 # (Funding/OI, gecrowdete Coins): python investigate.py --pulse

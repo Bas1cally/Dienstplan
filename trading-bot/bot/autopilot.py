@@ -137,6 +137,7 @@ class Autopilot:
         self._leader_perf: dict = self._load_perf()
         self.watcher: WalletWatcher | None = None
         self.scout = None
+        self.poly_scout = None
         self.labs = None
         self.scalper = None
         self.feed = None
@@ -156,6 +157,7 @@ class Autopilot:
             "/report": self._cmd_report,
             "/leaders": self._cmd_leaders,
             "/anomalies": self._cmd_anomalies,
+            "/polymarket": self._cmd_polymarket,
             "/stop": self._cmd_stop,
             "/start": self._cmd_start,
             "/help": self._cmd_help,
@@ -165,7 +167,8 @@ class Autopilot:
 
     def _cmd_help(self) -> str:
         return ("<b>Befehle</b>\n/status – Zustand & Equity\n/report – Auswertung\n"
-                "/leaders – Leader + ROI\n/anomalies – Scout-Funde\n"
+                "/leaders – Leader + ROI\n/anomalies – HL-Scout-Funde\n"
+                "/polymarket – Prediction-Market-Funde\n"
                 "/stop /start – Autopilot steuern")
 
     def _cmd_status(self) -> str:
@@ -229,6 +232,16 @@ class Autopilot:
         for f in reversed(flagged):
             out.append(f"{f['side']} {f['coin']} ${f['notional']:,.0f} "
                        f"<code>{f['address'][:10]}…</code>")
+        return "\n".join(out)
+
+    def _cmd_polymarket(self) -> str:
+        flagged = self.poly_scout.flagged[-5:] if self.poly_scout else []
+        if not flagged:
+            return "Noch keine Polymarket-Funde (oder Scout aus)."
+        out = ["<b>Polymarket-Scout</b>"]
+        for f in reversed(flagged):
+            out.append(f"${f['bet_usdc']:,.0f} auf {f['outcome']} — „{f['market'][:40]}\" "
+                       f"(PnL ${f['realized_pnl']:,.0f})")
         return "\n".join(out)
 
     def _cmd_stop(self) -> str:
@@ -316,6 +329,8 @@ class Autopilot:
                 self._watch_wallets()
                 if self.scout:
                     self.scout.tick()
+                if self.poly_scout:
+                    self.poly_scout.tick()
                 if self.labs and self.copier:
                     self.labs.tick(self.copier.last_prices)
                     self.labs.persist_stats(self.copier.last_prices)
@@ -403,6 +418,15 @@ class Autopilot:
                                       notifier=self.notifier, journal=self.journal)
             log.info("Anomalie-Scout aktiv: %s (nur Beobachtung, handelt nie)",
                      ", ".join(self.cfg.anomaly.coins))
+
+        # Polymarket-Scout: erfahrenes Geld in Prediction Markets (read-only)
+        self.poly_scout = None
+        if self.cfg.polymarket.enabled:
+            from .polymarket import PolymarketScout
+
+            self.poly_scout = PolymarketScout(self.cfg.polymarket,
+                                              notifier=self.notifier, journal=self.journal)
+            log.info("Polymarket-Scout aktiv (read-only, handelt nie)")
 
         # Strategie-Labor: eigene Signale parallel im Paper-Schatten messen
         self.labs = None
@@ -546,6 +570,7 @@ class Autopilot:
             realtime=bool(self.feed and self.feed.connected),
             ws_fills=self.feed.fills_seen if self.feed else 0,
             anomalies=list(self.scout.flagged[-5:]) if self.scout else [],
+            polymarket=list(self.poly_scout.flagged[-5:]) if self.poly_scout else [],
             labs=(self.labs.stats(self.copier.last_prices)
                   if self.labs and self.copier and self.copier.last_prices else None),
             equity=equity,

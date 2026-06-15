@@ -115,6 +115,14 @@ def main() -> None:
                       f"(Trefferquote {ao['win_share']:.0%}) -> {verdict}")
                 print(f"                      {'taugt als Copy-Signal' if taugt else 'noch nicht überzeugend, weiter beobachten'}")
 
+    # Polymarket-Scout: erfahrenes Geld in Prediction Markets (read-only)
+    poly = load_jsonl(RUNTIME / "polymarket.jsonl")
+    if poly:
+        print(f"\n  Polymarket-Scout     {len(poly)} gemeldete Wetten erfahrener Wallets")
+        for f in poly[-3:]:
+            print(f"    ${f.get('bet_usdc', 0):,.0f} auf {f.get('outcome', '?')} — "
+                  f"„{str(f.get('market', '?'))[:45]}\" (Track-Record ${f.get('realized_pnl', 0):,.0f})")
+
     # Strategie-Labor: tragen eigene Signale (TA / Funding) einen Edge?
     labs_file = RUNTIME / "labs.json"
     if labs_file.exists():
