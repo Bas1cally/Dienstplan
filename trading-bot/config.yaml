@@ -141,6 +141,33 @@ scalp:
   max_holding_minutes: 30   # Zeit-Stop - ein Scalp wird nie eine Dauerposition
   max_notional_frac: 0.15   # max. 15% Equity Notional
 
+# === Strategie-Labor: eigene Signale parallel im Paper-Schatten messen ===
+# Der Copy-Bot folgt fremden Tradern (kein originäres Alpha). Hier laufen EIGENE
+# Strategien mit Spielgeld parallel mit, damit der Report (python report.py)
+# schwarz auf weiß zeigt, ob das Signal trägt - BEVOR Kapital fließt.
+#  - trend:   die "meistgenudelte" EMA/RSI-Trendstrategie (erbt strategy:-Block).
+#             Ehrlich: Standard-TA ist nach Fees meist nahe null - wir messen es.
+#  - funding: Funding-Capture - die kassierende Seite halten, solange Funding
+#             extrem ist. KEIN delta-neutrales Arb (ohne Spot-Hedge bleibt
+#             Kursrisiko, durch Stop + Zeitlimit begrenzt) - der Carry ist der Edge.
+labs:
+  enabled: true
+  trend:
+    enabled: true
+    coin: BTC
+    interval: 1h
+    risk_frac: 0.01         # 1% Equity-Risiko pro Trade (über die Stop-Distanz)
+    max_notional_frac: 0.25
+  funding:
+    enabled: true
+    coins: [BTC, ETH, SOL, HYPE]
+    entry_apr: 0.30         # ab |Funding| >= 30% p.a. die kassierende Seite einnehmen
+    exit_apr: 0.10          # unter 10% p.a. wieder raus
+    stop_frac: 0.03         # harter Kurs-Stop 3% gegen die Position
+    max_hold_hours: 24
+    max_positions: 3
+    risk_frac: 0.02         # Notional pro Position (2% Equity)
+
 # === Anomalie-Scout: "verdächtig gut informierte" Wallets aufspüren ===
 # Liest den ÖFFENTLICHEN Trade-Strom (jeder Fill auf Hyperliquid ist on-chain
 # einsehbar) und meldet das klassische Muster "frische Wallet + sofort große,

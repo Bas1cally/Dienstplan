@@ -115,6 +115,18 @@ def main() -> None:
                       f"(Trefferquote {ao['win_share']:.0%}) -> {verdict}")
                 print(f"                      {'taugt als Copy-Signal' if taugt else 'noch nicht überzeugend, weiter beobachten'}")
 
+    # Strategie-Labor: tragen eigene Signale (TA / Funding) einen Edge?
+    labs_file = RUNTIME / "labs.json"
+    if labs_file.exists():
+        labs = json.loads(labs_file.read_text()).get("labs", {})
+        if labs:
+            init = paper.get("initial_equity", 10_000) if paper else 10_000
+            print("\n  Strategie-Labor (eigene Signale, Paper):")
+            for name, v in labs.items():
+                edge = (v["equity"] / init - 1) * 100 if init else 0
+                print(f"    {name:18s} {v['equity']:>10,.2f} $  ({edge:+.2f}%, {v['trades']} Trades, "
+                      f"PnL {v['realized_pnl']:+,.2f}, {v['open_positions']} offen)")
+
     # Shadow-Varianten: welche Config hätte mehr gemacht?
     shadow_recs = []
     shadows_file = RUNTIME / "shadows.json"

@@ -137,6 +137,7 @@ class Autopilot:
         self._leader_perf: dict = self._load_perf()
         self.watcher: WalletWatcher | None = None
         self.scout = None
+        self.labs = None
         self.scalper = None
         self.feed = None
         self._last_watch_poll = 0.0
@@ -315,6 +316,9 @@ class Autopilot:
                 self._watch_wallets()
                 if self.scout:
                     self.scout.tick()
+                if self.labs and self.copier:
+                    self.labs.tick(self.copier.last_prices)
+                    self.labs.persist_stats(self.copier.last_prices)
                 self._maybe_digest()
                 self._maybe_watchdog()
                 self._publish()
@@ -399,6 +403,16 @@ class Autopilot:
                                       notifier=self.notifier, journal=self.journal)
             log.info("Anomalie-Scout aktiv: %s (nur Beobachtung, handelt nie)",
                      ", ".join(self.cfg.anomaly.coins))
+
+        # Strategie-Labor: eigene Signale parallel im Paper-Schatten messen
+        self.labs = None
+        if self.cfg.dry_run and self.cfg.labs.enabled:
+            from .labs import LabFleet
+
+            self.labs = LabFleet(self.cfg.labs, self.client,
+                                 self.cfg.backtest.initial_equity, self.cfg.backtest.fee_rate)
+            log.info("Strategie-Labor aktiv: %s (Paper, eigene Signale zur Messung)",
+                     ", ".join(l.name for l in self.labs.labs))
         self.scalper = None
         if self.cfg.scalp.enabled:
             from .scalper import VolScalper
@@ -532,6 +546,8 @@ class Autopilot:
             realtime=bool(self.feed and self.feed.connected),
             ws_fills=self.feed.fills_seen if self.feed else 0,
             anomalies=list(self.scout.flagged[-5:]) if self.scout else [],
+            labs=(self.labs.stats(self.copier.last_prices)
+                  if self.labs and self.copier and self.copier.last_prices else None),
             equity=equity,
             positions=positions or [],
             paper=paper_stats,

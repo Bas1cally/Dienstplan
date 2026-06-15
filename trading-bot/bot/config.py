@@ -217,6 +217,55 @@ class CopytradeConfig:
 
 
 @dataclass
+class TrendLabConfig:
+    """Eigene TA-Strategie im Paper-Schatten (EMA/RSI-Trend)."""
+    enabled: bool = True
+    coin: str = "BTC"
+    interval: str = "1h"
+    lookback: int = 300
+    atr_stop_mult: float = 2.0
+    take_profit_r: float = 2.0
+    risk_frac: float = 0.01          # 1% Equity-Risiko pro Trade (über Stop-Distanz)
+    max_notional_frac: float = 0.25  # Notional-Deckel pro Position
+    min_notional: float = 10
+    strategy: StrategyConfig = None  # type: ignore[assignment]  # geerbt aus cfg.strategy
+
+
+@dataclass
+class FundingLabConfig:
+    """Funding-Capture im Paper-Schatten (kassierende Seite halten)."""
+    enabled: bool = True
+    coins: list = None  # type: ignore[assignment]
+    entry_apr: float = 0.30          # ab |Funding| >= 30% p.a. einsteigen
+    exit_apr: float = 0.10           # unter 10% p.a. wieder raus
+    stop_frac: float = 0.03          # harter Kurs-Stop 3% gegen die Position
+    max_hold_hours: float = 24
+    max_positions: int = 3
+    risk_frac: float = 0.02          # Notional pro Position (2% Equity)
+    min_notional: float = 10
+    cache_seconds: int = 300
+
+    def __post_init__(self):
+        if self.coins is None:
+            self.coins = ["BTC", "ETH", "SOL", "HYPE"]
+
+
+@dataclass
+class LabsConfig:
+    """Strategie-Labor: eigene Signale parallel im Paper-Modus messen."""
+    enabled: bool = True
+    candle_fetch_seconds: int = 60   # Drossel für TrendLab-Candle-Abfragen (API-Last)
+    trend: TrendLabConfig = None    # type: ignore[assignment]
+    funding: FundingLabConfig = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.trend is None:
+            self.trend = TrendLabConfig()
+        if self.funding is None:
+            self.funding = FundingLabConfig()
+
+
+@dataclass
 class Config:
     network: str
     dry_run: bool
@@ -235,6 +284,7 @@ class Config:
     execution: ExecutionConfig
     funding_tilt: FundingTiltConfig
     anomaly: AnomalyConfig
+    labs: LabsConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -247,6 +297,7 @@ def load_config(path: Path | None = None) -> Config:
         raw = yaml.safe_load(f)
     ct_raw = dict(raw.get("copytrade", {}))
     analysis = AnalysisConfig(**ct_raw.pop("analysis", {}))
+    labs = _build_labs(raw.get("labs", {}), raw["strategy"])
     cfg = Config(
         network=raw.get("network", "testnet"),
         dry_run=bool(raw.get("dry_run", True)),
@@ -265,9 +316,20 @@ def load_config(path: Path | None = None) -> Config:
         execution=ExecutionConfig(**raw.get("execution", {})),
         funding_tilt=FundingTiltConfig(**raw.get("funding_tilt", {})),
         anomaly=AnomalyConfig(**raw.get("anomaly", {})),
+        labs=labs,
     )
     _validate(cfg)
     return cfg
+
+
+def _build_labs(raw: dict, strategy_raw: dict) -> "LabsConfig":
+    """Baut die Labs-Config; TrendLab erbt die Indikator-Parameter aus strategy."""
+    raw = dict(raw or {})
+    trend_raw = dict(raw.pop("trend", {}) or {})
+    funding_raw = dict(raw.pop("funding", {}) or {})
+    trend = TrendLabConfig(strategy=StrategyConfig(**strategy_raw), **trend_raw)
+    funding = FundingLabConfig(**funding_raw)
+    return LabsConfig(trend=trend, funding=funding, **raw)
 
 
 def _validate(cfg: Config) -> None:
