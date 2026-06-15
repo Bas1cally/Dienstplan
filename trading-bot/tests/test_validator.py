@@ -114,13 +114,22 @@ def order(coin, current, target, price=100.0):
                           target_notional=target, current_notional=current, price=price)
 
 
-def make_copier(validator):
+class RecordingJournal:
+    def __init__(self):
+        self.entries = []
+
+    def record(self, kind, **data):
+        self.entries.append({"kind": kind, **data})
+
+
+def make_copier(validator, journal=None):
     """Minimaler CopyTrader nur für _validate_orders (ohne Netz/Config)."""
     from bot.copytrade.copier import CopyTrader
 
     ct = CopyTrader.__new__(CopyTrader)
     ct.validator = validator
-    ct.journal = None
+    ct.journal = journal
+    ct._veto_state = {}
     return ct
 
 
@@ -154,6 +163,38 @@ def test_no_validator_passthrough():
     ct = make_copier(None)
     out = ct._validate_orders([order("BTC", 0, 2000)])
     assert len(out) == 1
+
+
+def test_veto_debounced_across_ticks():
+    """Dasselbe Veto darf nicht bei jedem Tick neu ins Journal - nur bei Wechsel."""
+    j = RecordingJournal()
+    ct = make_copier(StubValidator(ok=False), journal=j)
+    for _ in range(100):  # 100 Ticks, gleiches geblocktes Ziel
+        ct._validate_orders([order("BTC", 0, 2000)])
+    assert len(j.entries) == 1, "geblocktes Dauer-Ziel darf nur einmal protokolliert werden"
+
+
+def test_veto_relogged_after_state_change():
+    """Hebt der Validator das Veto auf und blockt später erneut, wird neu geloggt."""
+    val = StubValidator(ok=False)
+    j = RecordingJournal()
+    ct = make_copier(val, journal=j)
+    ct._validate_orders([order("BTC", 0, 2000)])      # Veto #1
+    ct._validate_orders([order("BTC", 0, 2000)])      # selber Zustand -> kein neuer Eintrag
+    val._ok = True
+    ct._validate_orders([order("BTC", 0, 2000)])      # durchgelassen -> Zustand zurückgesetzt
+    val._ok = False
+    ct._validate_orders([order("BTC", 0, 2000)])      # erneut geblockt -> Veto #2
+    assert len(j.entries) == 2
+
+
+def test_veto_per_coin_independent():
+    j = RecordingJournal()
+    ct = make_copier(StubValidator(ok=False), journal=j)
+    ct._validate_orders([order("BTC", 0, 2000), order("ETH", 0, 1500)])
+    ct._validate_orders([order("BTC", 0, 2000), order("ETH", 0, 1500)])
+    assert {e["coin"] for e in j.entries} == {"BTC", "ETH"}
+    assert len(j.entries) == 2, "zwei Coins, je ein Veto-Eintrag trotz mehrerer Ticks"
 
 
 if __name__ == "__main__":

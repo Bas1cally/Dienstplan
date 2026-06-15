@@ -162,6 +162,7 @@ class CopyTrader:
         self.last_prices: dict[str, float] = {}
         self.last_equity: float | None = None
         self.scalp_inventory: dict[str, float] = {}  # vom Scalper gehaltener Bestand
+        self._veto_state: dict[str, str] = {}  # coin -> letzte Veto-Signatur (Entprellung)
         self.risk = RiskManager(cfg.risk)
         self.journal = Journal()
         self.day_start_equity = 0.0
@@ -280,6 +281,7 @@ class CopyTrader:
         if not self.validator:
             return orders
         out = []
+        seen: set[str] = set()
         for o in orders:
             increases = abs(o.target_notional) > abs(o.current_notional)
             if not increases:
@@ -289,15 +291,27 @@ class CopyTrader:
             if verdict.ok:
                 log.info("Validator %s: %s", o.coin, verdict.summary())
                 out.append(o)
-            else:
-                log.info("Validator blockt %s-Einstieg: %s", o.coin, verdict.summary())
-                if self.journal:
-                    # price mitschreiben: Basis für die Veto-Outcome-Analyse im Report
-                    self.journal.record("veto", coin=o.coin,
-                                        side="LONG" if o.target_notional > 0 else "SHORT",
-                                        target=round(o.target_notional, 2),
-                                        price=o.price,
-                                        reasons=verdict.reasons[:4])
+                self._veto_state.pop(o.coin, None)  # Veto aufgehoben
+                continue
+            # Entprellung: dasselbe Veto wird sonst bei JEDEM Tick (alle paar
+            # Sekunden) neu protokolliert - der Report wird unlesbar, das Journal
+            # läuft voll. Nur bei Zustandswechsel (Richtung/Grund) loggen.
+            side = "LONG" if o.target_notional > 0 else "SHORT"
+            sig = f"{side}:{'|'.join(verdict.reasons[:4])}"
+            seen.add(o.coin)
+            if self._veto_state.get(o.coin) == sig:
+                continue
+            self._veto_state[o.coin] = sig
+            log.info("Validator blockt %s-Einstieg: %s", o.coin, verdict.summary())
+            if self.journal:
+                # price mitschreiben: Basis für die Veto-Outcome-Analyse im Report
+                self.journal.record("veto", coin=o.coin, side=side,
+                                    target=round(o.target_notional, 2),
+                                    price=o.price, reasons=verdict.reasons[:4])
+        # Coins, die diese Runde gar kein Veto mehr auslösten, vergessen
+        for coin in list(self._veto_state):
+            if coin not in seen:
+                self._veto_state.pop(coin, None)
         return out
 
     # ---------- Hilfsfunktionen ----------
