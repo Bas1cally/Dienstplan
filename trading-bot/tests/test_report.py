@@ -84,6 +84,40 @@ def test_keeps_validator_when_vetoes_lossy():
     assert not any("min_score 2 -> 1" in r for r in recs)
 
 
+def test_validator_conflict_surfaced_not_two_recs():
+    """Der reale 6-Tage-Fall: Veto-Outcome sagt 'rettet', Shadow sagt 'schadet'.
+    Statt zweier gegensätzlicher Ratschläge muss EIN Widerspruchs-Hinweis kommen."""
+    journal = [order(1)] + [veto(i + 10) for i in range(20)]
+    s = summarize(journal, history(6), None)
+    veto_stats = {"evaluated": 55, "avg_return_pct": -1.44, "win_share": 0.33, "horizon_hours": 24}
+    shadow_stats = {"baseline": 10_140, "variants": {"ohne_validator": {"equity": 10_256, "trades": 60}}}
+    recs = recommendations(s, veto_stats, shadow_stats)
+    assert any("WIDERSPRECHEN" in r for r in recs)
+    assert not any("enabled:false" in r.replace(" ", "") for r in recs), "kein Abschalt-Rat bei Widerspruch"
+    assert sum("Validator" in r or "Filter" in r for r in recs) == 1, "genau EIN Validator-Urteil"
+
+
+def test_validator_both_agree_hurts_short_sample_is_cautious():
+    journal = [order(1)] + [veto(i + 10) for i in range(20)]
+    s = summarize(journal, history(6), None)
+    veto_stats = {"evaluated": 55, "avg_return_pct": 0.8, "win_share": 0.7, "horizon_hours": 24}
+    shadow_stats = {"baseline": 10_000, "variants": {"ohne_validator": {"equity": 10_300, "trades": 60}}}
+    recs = recommendations(s, veto_stats, shadow_stats)
+    assert any("min_score 2 -> 1" in r for r in recs)
+    assert any("enabled:false" in r.replace(" ", "") for r in recs), "muss VOR enabled:false warnen"
+    assert any("Stressphase" in r or "Abverkauf" in r for r in recs)
+
+
+def test_validator_both_agree_helps():
+    journal = [order(1)] + [veto(i + 10) for i in range(20)]
+    s = summarize(journal, history(6), None)
+    veto_stats = {"evaluated": 55, "avg_return_pct": -1.0, "win_share": 0.3, "horizon_hours": 24}
+    shadow_stats = {"baseline": 10_000, "variants": {"ohne_validator": {"equity": 9_800, "trades": 60}}}
+    recs = recommendations(s, veto_stats, shadow_stats)
+    assert any("rettet" in r and "behalten" in r for r in recs)
+    assert not any("WIDERSPRECHEN" in r for r in recs)
+
+
 def test_recommends_fee_reduction():
     journal = [order(i) for i in range(20)]
     s = summarize(journal, history(7, 10_000, 10_010), {"fees_paid": 50.0, "realized_pnl": 10.0})

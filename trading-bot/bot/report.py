@@ -118,7 +118,60 @@ def anomaly_outcomes(anomalies: list[dict], price_fn, horizon_hours: float = 24,
     return veto_outcomes(anomalies, price_fn, horizon_hours, max_samples)
 
 
-def recommendations(summary: dict, veto_stats: dict | None = None) -> list[str]:
+def _validator_verdict(summary: dict, veto_stats: dict | None,
+                       shadow_stats: dict | None) -> list[str]:
+    """EIN ehrliches Validator-Urteil aus zwei Messungen.
+
+    Veto-Outcome ist ein grober Proxy (Einstieg + 24h stur halten, kein Stop);
+    die Shadow-Variante ohne_validator ist die Vollsimulation (gleiche Engine,
+    nur ohne Filter). Beide adressieren dieselbe Frage. Widersprechen sie sich,
+    ist das fast immer ein Zeichen zu kleiner Stichprobe - dann wird der
+    Widerspruch BENANNT, statt zu gegensätzlichen Ratschlägen zu führen.
+    Richtung: +1 = Filter schadet (blockt Gewinner), -1 = Filter rettet PnL.
+    """
+    days = summary.get("days", 0)
+    veto_dir = 0
+    if veto_stats and veto_stats.get("evaluated", 0) >= 10:
+        a = veto_stats["avg_return_pct"]
+        veto_dir = 1 if a > 0.1 else -1 if a < -0.1 else 0
+    shadow_dir, edge = 0, None
+    if shadow_stats and shadow_stats.get("baseline"):
+        ov = (shadow_stats.get("variants") or {}).get("ohne_validator")
+        if ov and ov.get("trades", 0) >= 10:
+            edge = (ov["equity"] / shadow_stats["baseline"] - 1) * 100
+            shadow_dir = 1 if edge >= 1.0 else -1 if edge <= -1.0 else 0
+
+    if veto_dir == 0 and shadow_dir == 0:
+        return []
+
+    if veto_dir * shadow_dir < 0:  # echter Widerspruch
+        return [("Validator-Signale WIDERSPRECHEN sich (Veto-Outcome: Filter "
+                 + ("schadet" if veto_dir > 0 else "rettet PnL")
+                 + f"; Shadow ohne_validator {edge:+.1f}%: Filter "
+                 + ("schadet" if shadow_dir > 0 else "rettet PnL")
+                 + "). Beide messen unterschiedlich - typisch für eine zu kleine "
+                 "Stichprobe. NICHTS abschalten: eine Risiko-Schicht entfernt man nicht "
+                 "auf widersprüchlicher Evidenz, erst recht ohne Stress-Regime im Sample.")]
+
+    if veto_dir > 0 or shadow_dir > 0:  # einig: Filter schadet
+        conf = "Beide Signale einig" if veto_dir > 0 and shadow_dir > 0 else "Ein Signal (schwach)"
+        if days < 14:
+            return [f"{conf}: der Validator kostet hier PnL - aber erst {days:.0f} Tage und "
+                    "kein Abverkauf im Sample. Vor dem Lockern 2-3 Wochen inkl. Stressphase "
+                    "abwarten, dann validation.min_score 2 -> 1 als milder erster Schritt "
+                    "(NICHT gleich enabled:false)."]
+        return [f"{conf}: der Validator kostet PnL über ein ausreichendes Fenster - "
+                "validation.min_score 2 -> 1 testen (Crash-Versicherung bleibt, deshalb "
+                "nicht gleich enabled:false)."]
+
+    # einig: Filter rettet PnL
+    conf = "Beide Signale einig" if veto_dir < 0 and shadow_dir < 0 else "Ein Signal"
+    return [f"{conf}: der Validator rettet PnL (geblockte Trades wären negativ gewesen) - "
+            "Filter behalten, ggf. sogar verschärfen."]
+
+
+def recommendations(summary: dict, veto_stats: dict | None = None,
+                    shadow_stats: dict | None = None) -> list[str]:
     """Konkrete Stellschrauben-Vorschläge - die Antwort auf '+1$ nach 4 Wochen'."""
     recs: list[str] = []
     orders = summary.get("orders", 0)
@@ -133,17 +186,8 @@ def recommendations(summary: dict, veto_stats: dict | None = None) -> list[str]:
                     "Leader flach liegen (dann rotieren: min_keep_score erhöhen) oder ob "
                     "Vetos blocken (siehe Veto-Analyse).")
 
-    if summary.get("veto_per_order", 0) > 5 and veto_stats and veto_stats.get("evaluated", 0) >= 10:
-        if veto_stats["avg_return_pct"] > 0.1:
-            recs.append(f"Validator blockt PROFITABLE Trades (geblockte Einstiege hätten im "
-                        f"Schnitt {veto_stats['avg_return_pct']:+.2f}% nach "
-                        f"{veto_stats['horizon_hours']:.0f}h gebracht, Trefferquote "
-                        f"{veto_stats['win_share']:.0%}): validation.min_score 2 -> 1 oder "
-                        f"rsi_max_long/rsi_min_short lockern (75/25 -> 80/20).")
-        elif veto_stats["avg_return_pct"] < -0.1:
-            recs.append(f"Validator rettet PnL (geblockte Trades hätten "
-                        f"{veto_stats['avg_return_pct']:+.2f}% gebracht): Filter so lassen "
-                        f"oder sogar verschärfen.")
+    if summary.get("veto_per_order", 0) > 5:
+        recs.extend(_validator_verdict(summary, veto_stats, shadow_stats))
 
     reasons = summary.get("veto_reasons", {})
     if reasons.get("keine_daten", 0) > orders:

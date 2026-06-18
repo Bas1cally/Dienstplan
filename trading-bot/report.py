@@ -137,6 +137,7 @@ def main() -> None:
 
     # Shadow-Varianten: welche Config hätte mehr gemacht?
     shadow_recs = []
+    shadow_stats = None
     shadows_file = RUNTIME / "shadows.json"
     if shadows_file.exists() and paper:
         from bot.shadow import shadow_recommendations
@@ -149,10 +150,15 @@ def main() -> None:
                 edge = (v["equity"] / baseline - 1) * 100 if baseline else 0
                 print(f"    {name:20s} {v['equity']:>10,.2f} $  ({edge:+.2f}% vs. Haupt-Buch, "
                       f"{v['trades']} Trades)")
-            shadow_recs = shadow_recommendations(baseline, shadows)
+            shadow_stats = {"baseline": baseline, "variants": shadows}
+            # Validator-Urteil besitzt recommendations() (sieht beide Signale);
+            # hier nur Shadow-Hinweise zu NICHT-Validator-Varianten anhängen,
+            # damit kein Selbstwiderspruch entsteht.
+            shadow_recs = [r for r in shadow_recommendations(baseline, shadows)
+                           if "ohne_validator" not in r and "validator_locker" not in r]
 
     print("\n=== Empfehlungen ===\n")
-    for r in recommendations(s, veto_stats) + shadow_recs:
+    for r in recommendations(s, veto_stats, shadow_stats) + shadow_recs:
         print(f"  • {r}")
     print()
 
