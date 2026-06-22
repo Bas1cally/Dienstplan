@@ -138,6 +138,7 @@ class Autopilot:
         self.watcher: WalletWatcher | None = None
         self.scout = None
         self.poly_scout = None
+        self.book_scout = None
         self.labs = None
         self.scalper = None
         self.feed = None
@@ -157,6 +158,7 @@ class Autopilot:
             "/report": self._cmd_report,
             "/leaders": self._cmd_leaders,
             "/anomalies": self._cmd_anomalies,
+            "/orderbook": self._cmd_orderbook,
             "/polymarket": self._cmd_polymarket,
             "/stop": self._cmd_stop,
             "/start": self._cmd_start,
@@ -168,7 +170,7 @@ class Autopilot:
     def _cmd_help(self) -> str:
         return ("<b>Befehle</b>\n/status – Zustand & Equity\n/report – Auswertung\n"
                 "/leaders – Leader + ROI\n/anomalies – HL-Scout-Funde\n"
-                "/polymarket – Prediction-Market-Funde\n"
+                "/orderbook – Mikrostruktur-Signale\n/polymarket – Prediction-Market-Funde\n"
                 "/stop /start – Autopilot steuern")
 
     def _cmd_status(self) -> str:
@@ -232,6 +234,16 @@ class Autopilot:
         for f in reversed(flagged):
             out.append(f"{f['side']} {f['coin']} ${f['notional']:,.0f} "
                        f"<code>{f['address'][:10]}…</code>")
+        return "\n".join(out)
+
+    def _cmd_orderbook(self) -> str:
+        flagged = self.book_scout.flagged[-6:] if self.book_scout else []
+        if not flagged:
+            return "Noch keine Orderbuch-Signale (oder Scout aus)."
+        out = ["<b>Orderbuch-Scout</b>"]
+        for f in reversed(flagged):
+            out.append(f"{f['coin']}: Imbalance {f['imbalance']:+.2f}"
+                       + (f" | Wall {f['wall']}" if f.get("wall") else ""))
         return "\n".join(out)
 
     def _cmd_polymarket(self) -> str:
@@ -329,6 +341,8 @@ class Autopilot:
                 self._watch_wallets()
                 if self.scout:
                     self.scout.tick()
+                if self.book_scout:
+                    self.book_scout.tick()
                 if self.poly_scout:
                     self.poly_scout.tick()
                 if self.labs and self.copier:
@@ -418,6 +432,16 @@ class Autopilot:
                                       notifier=self.notifier, journal=self.journal)
             log.info("Anomalie-Scout aktiv: %s (nur Beobachtung, handelt nie)",
                      ", ".join(self.cfg.anomaly.coins))
+
+        # Orderbuch-Scout: Mikrostruktur (Imbalance, Walls) - read-only
+        self.book_scout = None
+        if self.cfg.orderbook.enabled:
+            from .orderbook import OrderBookScout
+
+            self.book_scout = OrderBookScout(self.client.market, self.cfg.orderbook,
+                                             notifier=self.notifier, journal=self.journal)
+            log.info("Orderbuch-Scout aktiv: %s (Mikrostruktur, handelt nie)",
+                     ", ".join(self.cfg.orderbook.coins))
 
         # Polymarket-Scout: erfahrenes Geld in Prediction Markets (read-only)
         self.poly_scout = None
@@ -570,6 +594,7 @@ class Autopilot:
             realtime=bool(self.feed and self.feed.connected),
             ws_fills=self.feed.fills_seen if self.feed else 0,
             anomalies=list(self.scout.flagged[-5:]) if self.scout else [],
+            orderbook=list(self.book_scout.flagged[-5:]) if self.book_scout else [],
             polymarket=list(self.poly_scout.flagged[-5:]) if self.poly_scout else [],
             labs=(self.labs.stats(self.copier.last_prices)
                   if self.labs and self.copier and self.copier.last_prices else None),

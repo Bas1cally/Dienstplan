@@ -181,6 +181,26 @@ class AnomalyConfig:
 
 
 @dataclass
+class OrderBookConfig:
+    """Orderbuch-Scout: Mikrostruktur (Imbalance, Walls, dünne Liquidität).
+
+    Read-only - eine der echten strukturellen Edges. Ehrliche Grenze: nicht-
+    kolokiertes Polling fängt nur langsame Signale, kein HFT/Spoofing.
+    """
+    enabled: bool = True
+    coins: list = None  # type: ignore[assignment]
+    poll_seconds: int = 60
+    band_pct: float = 0.005          # nur Levels innerhalb 0.5% um den Mid zählen
+    imbalance_threshold: float = 0.35  # |Imbalance| ab hier melden
+    wall_ratio: float = 5.0          # Level >= 5x mittlere Größe = Wall
+    throttle_s: float = 0.5          # Pause zwischen Coin-Abfragen (Rate-Limit)
+
+    def __post_init__(self):
+        if self.coins is None:
+            self.coins = ["BTC", "ETH", "SOL", "HYPE"]
+
+
+@dataclass
 class PolymarketConfig:
     """Polymarket-Scout: erfahrenes Geld in Prediction Markets beobachten.
 
@@ -303,6 +323,7 @@ class Config:
     execution: ExecutionConfig
     funding_tilt: FundingTiltConfig
     anomaly: AnomalyConfig
+    orderbook: OrderBookConfig
     polymarket: PolymarketConfig
     labs: LabsConfig
 
@@ -336,6 +357,7 @@ def load_config(path: Path | None = None) -> Config:
         execution=ExecutionConfig(**raw.get("execution", {})),
         funding_tilt=FundingTiltConfig(**raw.get("funding_tilt", {})),
         anomaly=AnomalyConfig(**raw.get("anomaly", {})),
+        orderbook=OrderBookConfig(**raw.get("orderbook", {})),
         polymarket=PolymarketConfig(**raw.get("polymarket", {})),
         labs=labs,
     )

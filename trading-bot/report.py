@@ -115,6 +115,22 @@ def main() -> None:
                       f"(Trefferquote {ao['win_share']:.0%}) -> {verdict}")
                 print(f"                      {'taugt als Copy-Signal' if taugt else 'noch nicht überzeugend, weiter beobachten'}")
 
+    # Orderbuch-Scout: hatte die Imbalance Vorhersagekraft? (grobes 1h-Raster)
+    book = load_jsonl(RUNTIME / "orderbook.jsonl")
+    if book:
+        print(f"\n  Orderbuch-Scout      {len(book)} Mikrostruktur-Signale")
+        if not args.offline:
+            from bot.report import anomaly_outcomes  # gleiche coin/side/price/t-Mechanik
+
+            bo = anomaly_outcomes(book, make_price_fn(), horizon_hours=args.horizon)
+            if bo["evaluated"]:
+                verdict = ("Imbalance war prädiktiv" if bo["avg_return_pct"] > 0.1
+                           else "kein Vorhersagewert" if abs(bo["avg_return_pct"]) <= 0.1
+                           else "Imbalance war KONTRA-prädiktiv")
+                print(f"    Follow-through    {bo['evaluated']} bewertet: im Schnitt "
+                      f"{bo['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h in Imbalance-Richtung "
+                      f"(Trefferquote {bo['win_share']:.0%}) -> {verdict}")
+
     # Polymarket-Scout: erfahrenes Geld in Prediction Markets (read-only)
     poly = load_jsonl(RUNTIME / "polymarket.jsonl")
     if poly:

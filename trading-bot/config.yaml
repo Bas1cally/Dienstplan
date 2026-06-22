@@ -168,6 +168,20 @@ labs:
     max_positions: 3
     risk_frac: 0.02         # Notional pro Position (2% Equity)
 
+# === Orderbuch-Scout: Mikrostruktur (Imbalance, Walls, dünne Liquidität) ===
+# Der Anomalie-Scout sieht nur ausgeführte Trades; dieser liest das L2-Orderbuch:
+# Bid/Ask-Imbalance, große Walls (Support/Resistance). Eine der ECHTEN
+# strukturellen Edges. HANDELT NIE - meldet + hält den Preis fest, damit der
+# Report die Vorhersagekraft misst. Ehrlich: nicht-kolokiertes Polling fängt
+# nur langsame Signale, kein HFT/Spoofing; Follow-through im 1h-Raster ist grob.
+orderbook:
+  enabled: true
+  coins: [BTC, ETH, SOL, HYPE]
+  poll_seconds: 60
+  band_pct: 0.005           # nur Levels innerhalb 0.5% um den Mid zählen
+  imbalance_threshold: 0.35 # |Imbalance| ab hier melden
+  wall_ratio: 5.0           # Level >= 5x mittlere Größe = Wall
+
 # === Anomalie-Scout: "verdächtig gut informierte" Wallets aufspüren ===
 # Liest den ÖFFENTLICHEN Trade-Strom (jeder Fill auf Hyperliquid ist on-chain
 # einsehbar) und meldet das klassische Muster "frische Wallet + sofort große,
