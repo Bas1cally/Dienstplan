@@ -115,6 +115,25 @@ def main() -> None:
                       f"(Trefferquote {ao['win_share']:.0%}) -> {verdict}")
                 print(f"                      {'taugt als Copy-Signal' if taugt else 'noch nicht überzeugend, weiter beobachten'}")
 
+    # TWAP-Scout: lief der Kurs in TWAP-Richtung weiter? (anhaltender Flow-Edge)
+    twaps = load_jsonl(RUNTIME / "twap.jsonl")
+    if twaps:
+        print(f"\n  TWAP-Scout           {len(twaps)} laufende Whale-TWAPs erkannt")
+        for f in twaps[-3:]:
+            print(f"    {f.get('side','?')} {f.get('coin','?')}: {f.get('slices',0)} Slices, "
+                  f"${f.get('notional',0):,.0f} ({str(f.get('address','?'))[:10]}…)")
+        if not args.offline:
+            from bot.report import anomaly_outcomes
+
+            to = anomaly_outcomes(twaps, make_price_fn(), horizon_hours=args.horizon)
+            if to["evaluated"]:
+                verdict = ("Kurs folgte dem TWAP" if to["avg_return_pct"] > 0.1
+                           else "kein Folge-Effekt" if abs(to["avg_return_pct"]) <= 0.1
+                           else "Kurs lief GEGEN den TWAP")
+                print(f"    Follow-through    {to['evaluated']} bewertet: im Schnitt "
+                      f"{to['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h in TWAP-Richtung "
+                      f"(Trefferquote {to['win_share']:.0%}) -> {verdict}")
+
     # Orderbuch-Scout: hatte die Imbalance Vorhersagekraft? (grobes 1h-Raster)
     book = load_jsonl(RUNTIME / "orderbook.jsonl")
     if book:

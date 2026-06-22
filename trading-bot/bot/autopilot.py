@@ -139,6 +139,7 @@ class Autopilot:
         self.scout = None
         self.poly_scout = None
         self.book_scout = None
+        self.twap_scout = None
         self.labs = None
         self.scalper = None
         self.feed = None
@@ -159,6 +160,7 @@ class Autopilot:
             "/leaders": self._cmd_leaders,
             "/anomalies": self._cmd_anomalies,
             "/orderbook": self._cmd_orderbook,
+            "/twap": self._cmd_twap,
             "/polymarket": self._cmd_polymarket,
             "/stop": self._cmd_stop,
             "/start": self._cmd_start,
@@ -170,8 +172,8 @@ class Autopilot:
     def _cmd_help(self) -> str:
         return ("<b>Befehle</b>\n/status – Zustand & Equity\n/report – Auswertung\n"
                 "/leaders – Leader + ROI\n/anomalies – HL-Scout-Funde\n"
-                "/orderbook – Mikrostruktur-Signale\n/polymarket – Prediction-Market-Funde\n"
-                "/stop /start – Autopilot steuern")
+                "/orderbook – Mikrostruktur-Signale\n/twap – laufende Whale-TWAPs\n"
+                "/polymarket – Prediction-Market-Funde\n/stop /start – Autopilot steuern")
 
     def _cmd_status(self) -> str:
         s = self.status()
@@ -244,6 +246,16 @@ class Autopilot:
         for f in reversed(flagged):
             out.append(f"{f['coin']}: Imbalance {f['imbalance']:+.2f}"
                        + (f" | Wall {f['wall']}" if f.get("wall") else ""))
+        return "\n".join(out)
+
+    def _cmd_twap(self) -> str:
+        flagged = self.twap_scout.flagged[-6:] if self.twap_scout else []
+        if not flagged:
+            return "Keine laufenden TWAPs erkannt (oder Scout aus)."
+        out = ["<b>TWAP-Scout</b>"]
+        for f in reversed(flagged):
+            out.append(f"{f['side']} {f['coin']}: {f['slices']} Slices, ${f['notional']:,.0f} "
+                       f"<code>{f['address'][:10]}…</code>")
         return "\n".join(out)
 
     def _cmd_polymarket(self) -> str:
@@ -343,6 +355,8 @@ class Autopilot:
                     self.scout.tick()
                 if self.book_scout:
                     self.book_scout.tick()
+                if self.twap_scout:
+                    self.twap_scout.tick()
                 if self.poly_scout:
                     self.poly_scout.tick()
                 if self.labs and self.copier:
@@ -442,6 +456,24 @@ class Autopilot:
                                              notifier=self.notifier, journal=self.journal)
             log.info("Orderbuch-Scout aktiv: %s (Mikrostruktur, handelt nie)",
                      ", ".join(self.cfg.orderbook.coins))
+
+        # TWAP-Scout: laufende TWAP-Ausführungen großer Wallets (read-only).
+        # Kandidaten: Watchlist + bekannte Whales + Leader + frische Anomalie-Funde.
+        self.twap_scout = None
+        if self.cfg.twap.enabled:
+            from .twap import TwapScout
+
+            def twap_addresses():
+                addrs = list(self.cfg.investigator.watchlist)
+                addrs += [l["address"] for l in self.leaders]
+                if self.scout:
+                    addrs += [f["address"] for f in self.scout.flagged[-10:]]
+                return addrs
+
+            self.twap_scout = TwapScout(self.client.market, self.cfg.twap,
+                                        address_source=twap_addresses,
+                                        notifier=self.notifier, journal=self.journal)
+            log.info("TWAP-Scout aktiv (read-only, handelt nie)")
 
         # Polymarket-Scout: erfahrenes Geld in Prediction Markets (read-only)
         self.poly_scout = None
@@ -595,6 +627,7 @@ class Autopilot:
             ws_fills=self.feed.fills_seen if self.feed else 0,
             anomalies=list(self.scout.flagged[-5:]) if self.scout else [],
             orderbook=list(self.book_scout.flagged[-5:]) if self.book_scout else [],
+            twap=list(self.twap_scout.flagged[-5:]) if self.twap_scout else [],
             polymarket=list(self.poly_scout.flagged[-5:]) if self.poly_scout else [],
             labs=(self.labs.stats(self.copier.last_prices)
                   if self.labs and self.copier and self.copier.last_prices else None),

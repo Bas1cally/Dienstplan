@@ -201,6 +201,27 @@ class OrderBookConfig:
 
 
 @dataclass
+class TwapConfig:
+    """TWAP-Scout: laufende TWAP-Ausführungen großer Wallets aufspüren.
+
+    Prüft eine Kandidatenmenge (Watchlist + Leader + Anomalie-Funde + extra)
+    via userTwapSliceFills. Read-only - handelt nie.
+    """
+    enabled: bool = True
+    poll_seconds: int = 120
+    active_window_minutes: int = 20   # Slices in diesem Fenster = TWAP läuft
+    min_slices: int = 4               # so viele jüngste Slices = aktiver TWAP
+    max_checks_per_scan: int = 8      # API-Budget je Scan (Rate-Limit)
+    recheck_hours: float = 6          # dieselbe laufende TWAP nicht erneut melden
+    throttle_s: float = 0.5
+    extra_addresses: list = None  # type: ignore[assignment]  # bekannte Whales (z.B. Tron/Sun)
+
+    def __post_init__(self):
+        if self.extra_addresses is None:
+            self.extra_addresses = []
+
+
+@dataclass
 class PolymarketConfig:
     """Polymarket-Scout: erfahrenes Geld in Prediction Markets beobachten.
 
@@ -324,6 +345,7 @@ class Config:
     funding_tilt: FundingTiltConfig
     anomaly: AnomalyConfig
     orderbook: OrderBookConfig
+    twap: TwapConfig
     polymarket: PolymarketConfig
     labs: LabsConfig
 
@@ -358,6 +380,7 @@ def load_config(path: Path | None = None) -> Config:
         funding_tilt=FundingTiltConfig(**raw.get("funding_tilt", {})),
         anomaly=AnomalyConfig(**raw.get("anomaly", {})),
         orderbook=OrderBookConfig(**raw.get("orderbook", {})),
+        twap=TwapConfig(**raw.get("twap", {})),
         polymarket=PolymarketConfig(**raw.get("polymarket", {})),
         labs=labs,
     )
