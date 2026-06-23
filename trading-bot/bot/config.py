@@ -188,6 +188,7 @@ class OrderBookConfig:
     kolokiertes Polling fängt nur langsame Signale, kein HFT/Spoofing.
     """
     enabled: bool = True
+    notify: bool = False             # Telegram-Push (Default aus - sonst Spam)
     coins: list = None  # type: ignore[assignment]
     poll_seconds: int = 60
     band_pct: float = 0.005          # nur Levels innerhalb 0.5% um den Mid zählen

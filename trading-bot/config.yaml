@@ -192,6 +192,7 @@ twap:
 # nur langsame Signale, kein HFT/Spoofing; Follow-through im 1h-Raster ist grob.
 orderbook:
   enabled: true
+  notify: false             # KEIN Telegram-Spam - Daten landen still im Report
   coins: [BTC, ETH, SOL, HYPE]
   poll_seconds: 60
   band_pct: 0.005           # nur Levels innerhalb 0.5% um den Mid zählen

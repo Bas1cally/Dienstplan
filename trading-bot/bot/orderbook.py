@@ -152,8 +152,9 @@ class OrderBookScout:
                 fh.write(json.dumps({"t": int(self.clock()), **f}, ensure_ascii=False) + "\n")
         except OSError:
             log.exception("orderbook.jsonl nicht schreibbar")
-        # Telegram nur bei starker Imbalance (Walls sind häufig -> kein Spam)
-        if self.notifier and strong:
+        # Telegram nur, wenn ausdrücklich gewünscht (cfg.notify) UND starke
+        # Imbalance - Orderbuch-Signale sind häufig und würden sonst zuspammen.
+        if self.notifier and strong and getattr(self.cfg, "notify", False):
             self.notifier.send(
                 f"📖 <b>Orderbuch {f['coin']}</b>: Imbalance {f['imbalance']:+.2f} "
                 f"({'Bid-Übergewicht' if f['imbalance'] > 0 else 'Ask-Übergewicht'})"

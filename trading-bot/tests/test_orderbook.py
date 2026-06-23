@@ -139,24 +139,50 @@ def test_tick_respects_interval():
     assert mkt.calls.count(("mids", None)) == 2
 
 
-def test_notifier_only_on_strong_imbalance():
-    sent = []
+class _N:
+    def __init__(self):
+        self.sent = []
 
-    class N:
-        def send(self, m):
-            sent.append(m)
+    def send(self, m):
+        self.sent.append(m)
 
-    # große Ask-Wall, aber durch viele kleine Bids ausgeglichene Tiefe ->
-    # Wall erkannt, Imbalance schwach: Journal ja, Telegram nein
-    bids = [(99.9 - 0.01 * i, 10) for i in range(10)]   # 10x10 = Tiefe 100
-    asks = [(100.1, 100), (100.2, 5)]                   # Wall 100 (>>Mittel)
-    mkt = FakeMarket({"BTC": 100}, {"BTC": book(bids, asks)})
-    s = OrderBookScout(mkt, OrderBookConfig(coins=["BTC"], throttle_s=0, imbalance_threshold=0.9),
-                       notifier=N(), clock=lambda: NOW, sleep=lambda _: None)
+
+def test_no_telegram_by_default():
+    # Default notify=False: auch starke Imbalance loggt nur, pusht NICHT (kein Spam)
+    n = _N()
+    mkt = FakeMarket({"BTC": 100}, {"BTC": book([(99.9, 100), (99.8, 100)], [(100.1, 5)])})
+    s = OrderBookScout(mkt, OrderBookConfig(coins=["BTC"], throttle_s=0, imbalance_threshold=0.35),
+                       notifier=n, clock=lambda: NOW, sleep=lambda _: None)
     s.path = Path(tempfile.mkdtemp()) / "ob.jsonl"
     out = s.scan()
-    assert out and out[0]["wall"], "Wall muss erkannt und gemeldet werden"
-    assert sent == [], "schwache Imbalance -> kein Telegram-Spam"
+    assert out, "Signal wird trotzdem erfasst (fürs Report-Follow-through)"
+    assert n.sent == [], "ohne notify=True kein Telegram"
+
+
+def test_telegram_only_when_enabled_and_strong():
+    n = _N()
+    mkt = FakeMarket({"BTC": 100}, {"BTC": book([(99.9, 100), (99.8, 100)], [(100.1, 5)])})
+    s = OrderBookScout(mkt, OrderBookConfig(coins=["BTC"], throttle_s=0,
+                                            imbalance_threshold=0.35, notify=True),
+                       notifier=n, clock=lambda: NOW, sleep=lambda _: None)
+    s.path = Path(tempfile.mkdtemp()) / "ob.jsonl"
+    s.scan()
+    assert n.sent and "Imbalance" in n.sent[0], "mit notify=True + starker Imbalance: Push"
+
+
+def test_wall_only_never_pushes_even_with_notify():
+    # nur Wall, schwache Imbalance: nie Telegram, auch mit notify=True
+    n = _N()
+    bids = [(99.9 - 0.01 * i, 10) for i in range(10)]
+    asks = [(100.1, 100), (100.2, 5)]
+    mkt = FakeMarket({"BTC": 100}, {"BTC": book(bids, asks)})
+    s = OrderBookScout(mkt, OrderBookConfig(coins=["BTC"], throttle_s=0,
+                                            imbalance_threshold=0.9, notify=True),
+                       notifier=n, clock=lambda: NOW, sleep=lambda _: None)
+    s.path = Path(tempfile.mkdtemp()) / "ob.jsonl"
+    out = s.scan()
+    assert out and out[0]["wall"], "Wall muss erfasst werden"
+    assert n.sent == [], "schwache Imbalance -> kein Push, auch bei notify=True"
 
 
 if __name__ == "__main__":
