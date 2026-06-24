@@ -196,7 +196,7 @@ orderbook:
   coins: [BTC, ETH, SOL, HYPE]
   poll_seconds: 60
   band_pct: 0.005           # nur Levels innerhalb 0.5% um den Mid zählen
-  imbalance_threshold: 0.35 # |Imbalance| ab hier melden
+  imbalance_threshold: 0.5  # |Imbalance| ab hier melden (0.35 war zu laut: 5000+ Signale)
   wall_ratio: 5.0           # Level >= 5x mittlere Größe = Wall
 
 # === Anomalie-Scout: "verdächtig gut informierte" Wallets aufspüren ===
@@ -225,7 +225,7 @@ anomaly:
 # wir über Wochen sehen, ob da ein folgbares Signal ist (Telegram /polymarket).
 # Ehrlich: Lag wie bei jedem Follower, Märkte dünn - erst messen, dann glauben.
 polymarket:
-  enabled: true
+  enabled: false                # 2 Wochen nur Sportwetter geflaggt (kein Krypto-Signal) - aus
   poll_seconds: 600
   min_trade_notional: 5000      # USDC - ab dieser Wettgröße wird die Wallet geprüft
   min_wallet_profit: 10000      # nur Wallets mit nachweisbarem Track-Record melden

@@ -59,6 +59,21 @@ def test_veto_outcomes_missing_prices_skipped():
     assert stats["evaluated"] == 0 and stats["avg_return_pct"] == 0.0
 
 
+def test_veto_outcomes_evaluates_matured_not_just_recent():
+    """Regression: bei vielen frischen Signalen müssen die AUSGEREIFTEN bewertet
+    werden, nicht die jüngsten (deren Zukunftspreis noch nicht existiert)."""
+    H = 24 * 3600
+    now = 1_000_000
+    matured = [veto(now - 10 * H + i, side="LONG", price=100.0) for i in range(5)]
+    fresh = [veto(now + i, side="LONG", price=100.0) for i in range(200)]
+
+    def price_fn(coin, t):
+        return 102.0 if t <= now else None  # Zukunft (frische Einträge) nicht abrufbar
+
+    stats = veto_outcomes(matured + fresh, price_fn, horizon_hours=24, max_samples=60)
+    assert stats["evaluated"] == 5, "ausgereifte Einträge trotz 200 frischer bewerten"
+
+
 # ---------- recommendations ----------
 
 def test_recommends_more_leaders_when_zero_orders():

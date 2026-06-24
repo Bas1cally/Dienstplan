@@ -88,7 +88,13 @@ def veto_outcomes(vetoes: list[dict], price_fn, horizon_hours: float = 24,
     Richtungsfrage "war das Veto richtig?", nicht um exakte Trade-Simulation.
     """
     evaluated, wins, total_ret = 0, 0, 0.0
-    for v in vetoes[-max_samples:]:
+    # Ältester zuerst: nur ausgereifte Einträge (t + Horizont liegt in der
+    # Vergangenheit) sind bewertbar. Die JÜNGSTEN max_samples zu nehmen war ein
+    # Fehler - bei vielen frischen Signalen (Orderbuch: 5000+) ist t+24h noch
+    # Zukunft, price_fn liefert None und evaluated bleibt 0.
+    for v in sorted(vetoes, key=lambda e: e.get("t", 0)):
+        if evaluated >= max_samples:
+            break
         coin, side, t0 = v.get("coin"), v.get("side"), v.get("t")
         p0 = v.get("price") or (price_fn(coin, t0) if coin and t0 else None)
         p1 = price_fn(coin, t0 + horizon_hours * 3600) if coin and t0 else None
