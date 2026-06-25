@@ -16,6 +16,8 @@ Threads: ein Worker-Loop; start()/stop() für die Steuerung über das Web-UI.
 
 import json
 import logging
+import os
+import subprocess
 import threading
 import time
 from datetime import datetime, timezone
@@ -165,6 +167,7 @@ class Autopilot:
             "/stop": self._cmd_stop,
             "/start": self._cmd_start,
             "/resume": self._cmd_resume,
+            "/update": self._cmd_update,
             "/help": self._cmd_help,
         })
 
@@ -174,7 +177,8 @@ class Autopilot:
         return ("<b>Befehle</b>\n/status – Zustand & Equity\n/report – Auswertung\n"
                 "/leaders – Leader + ROI\n/anomalies – HL-Scout-Funde\n"
                 "/orderbook – Mikrostruktur-Signale\n/twap – laufende Whale-TWAPs\n"
-                "/polymarket – Prediction-Market-Funde\n/stop /start /resume – Autopilot/Halt steuern")
+                "/polymarket – Prediction-Market-Funde\n"
+                "/update – Update ziehen + neu starten\n/stop /start /resume – Autopilot/Halt steuern")
 
     def _cmd_status(self) -> str:
         s = self.status()
@@ -272,6 +276,27 @@ class Autopilot:
             out.append(f"${f['bet_usdc']:,.0f} auf {f['outcome']} — „{f['market'][:40]}\" "
                        f"(PnL ${f['realized_pnl']:,.0f})")
         return "\n".join(out)
+
+    def _cmd_update(self) -> str:
+        """Zieht das neueste Update (git pull) und startet neu - per Telegram vom
+        Handy. Neustart über Prozess-Exit: systemd (Restart=always) bringt den
+        Bot auf neuem Code zurück, autostart fährt den Autopiloten wieder hoch."""
+        from .config import ROOT
+
+        try:
+            r = subprocess.run(["git", "-C", str(ROOT), "pull", "--ff-only"],
+                               capture_output=True, text=True, timeout=90)
+        except Exception as e:
+            return f"⚠️ git pull fehlgeschlagen: {str(e)[:200]}"
+        out = (r.stdout + r.stderr).strip()[-600:]
+        if r.returncode != 0:
+            return ("⚠️ Update fehlgeschlagen (evtl. lokale Änderungen) - bitte am PC "
+                    f"prüfen:\n<code>{out}</code>")
+        if "up to date" in out.lower() or "up-to-date" in out.lower():
+            return f"Schon aktuell.\n<code>{out}</code>"
+        # Erfolg -> Prozess beenden, systemd startet auf neuem Code neu.
+        threading.Timer(2.0, lambda: os._exit(0)).start()
+        return f"✅ Update gezogen, starte neu (~15s)…\n<code>{out}</code>"
 
     def _cmd_resume(self) -> str:
         if not self.copier:

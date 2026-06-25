@@ -141,6 +141,74 @@ def test_analyzer_retries_on_429():
         pass
 
 
+def test_cmd_update_already_current():
+    import bot.autopilot as ap_mod
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+
+    ap = Autopilot(load_config())
+
+    class R:
+        returncode, stdout, stderr = 0, "Already up to date.\n", ""
+
+    orig = ap_mod.subprocess.run
+    ap_mod.subprocess.run = lambda *a, **k: R()
+    try:
+        msg = ap._cmd_update()
+    finally:
+        ap_mod.subprocess.run = orig
+    assert "aktuell" in msg.lower()
+
+
+def test_cmd_update_failure_reported():
+    import bot.autopilot as ap_mod
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+
+    ap = Autopilot(load_config())
+
+    class R:
+        returncode, stdout, stderr = 1, "", "local changes would be overwritten"
+
+    orig = ap_mod.subprocess.run
+    ap_mod.subprocess.run = lambda *a, **k: R()
+    try:
+        msg = ap._cmd_update()
+    finally:
+        ap_mod.subprocess.run = orig
+    assert "fehlgeschlagen" in msg.lower()
+
+
+def test_cmd_update_success_schedules_restart():
+    import bot.autopilot as ap_mod
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+
+    ap = Autopilot(load_config())
+
+    class R:
+        returncode, stdout, stderr = 0, "Updating a1b2..c3d4\n 3 files changed", ""
+
+    captured = {}
+
+    class FakeTimer:  # echten Exit-Timer NICHT starten
+        def __init__(self, t, fn):
+            captured["fn"] = fn
+
+        def start(self):
+            captured["started"] = True
+
+    orig_run, orig_timer = ap_mod.subprocess.run, ap_mod.threading.Timer
+    ap_mod.subprocess.run = lambda *a, **k: R()
+    ap_mod.threading.Timer = FakeTimer
+    try:
+        msg = ap._cmd_update()
+    finally:
+        ap_mod.subprocess.run = orig_run
+        ap_mod.threading.Timer = orig_timer
+    assert "starte neu" in msg.lower() and captured.get("started")
+
+
 def test_llm_merge_takes_maximum():
     """KI-Score überschreibt Keyword-Score nur, wenn er höher ist."""
     from bot.news.sentiment import score_item
