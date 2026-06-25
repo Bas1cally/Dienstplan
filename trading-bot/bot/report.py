@@ -15,9 +15,64 @@ braucht einen price_fn (Candles), den das CLI injiziert.
 """
 
 import logging
+import math
 from collections import Counter
 
 log = logging.getLogger(__name__)
+
+
+def _dedup_episodes(entries: list[dict], horizon_hours: float) -> list[dict]:
+    """Gegen Pseudo-Replikation: dieselbe Wallet/derselbe Coin/dieselbe Richtung
+    innerhalb eines Horizont-Fensters ist EINE Episode, kein neues Sample. Sonst
+    bläht eine lang gehaltene Position evaluated und win_share auf und jede
+    Konfidenzaussage überschätzt die Sicherheit dramatisch.
+    """
+    window = horizon_hours * 3600
+    kept, last_t = [], {}
+    for e in sorted(entries, key=lambda e: e.get("t", 0)):
+        key = (e.get("coin"), e.get("side"),
+               e.get("address") or round(float(e.get("price") or 0), 6))
+        t = e.get("t", 0)
+        prev = last_t.get(key)
+        if prev is not None and t - prev < window:
+            continue  # überlappt mit bereits gezähltem Sample
+        last_t[key] = t
+        kept.append(e)
+    return kept
+
+
+def _return_stats(returns: list[float], horizon_hours: float) -> dict:
+    """Mittel, Streuung, 95%-KI und Signifikanz (KI schließt 0 nicht ein).
+
+    Der Kern gegen 'Rauschen zu Urteilen runden': ohne KI ist +0,06% auf 30
+    Trades nicht von 0 unterscheidbar - das muss der Report sichtbar machen.
+    """
+    n = len(returns)
+    if n == 0:
+        return {"evaluated": 0, "avg_return_pct": 0.0, "win_share": 0.0,
+                "ci_low_pct": 0.0, "ci_high_pct": 0.0, "significant": False,
+                "se_pct": 0.0, "horizon_hours": horizon_hours}
+    mean = sum(returns) / n
+    if n > 1:
+        var = sum((r - mean) ** 2 for r in returns) / (n - 1)
+        se = math.sqrt(var) / math.sqrt(n)
+    else:
+        se = 0.0
+    # konservativer t-Faktor (zweiseitig, ~95%) je nach Stichprobengröße
+    t = 2.78 if n < 5 else 2.09 if n < 20 else 2.0 if n < 40 else 1.96
+    ci_low, ci_high = mean - t * se, mean + t * se
+    wins = sum(1 for r in returns if r > 0)
+    significant = n >= 5 and (ci_low > 0 or ci_high < 0)
+    return {
+        "evaluated": n,
+        "avg_return_pct": round(mean * 100, 3),
+        "win_share": round(wins / n, 2),
+        "ci_low_pct": round(ci_low * 100, 3),
+        "ci_high_pct": round(ci_high * 100, 3),
+        "se_pct": round(se * 100, 3),
+        "significant": significant,
+        "horizon_hours": horizon_hours,
+    }
 
 
 def summarize(journal: list[dict], history: list[dict], paper: dict | None) -> dict:
@@ -87,13 +142,12 @@ def veto_outcomes(vetoes: list[dict], price_fn, horizon_hours: float = 24,
     Bewertung nach `horizon_hours`. Bewusst OHNE Stop/TP - es geht um die
     Richtungsfrage "war das Veto richtig?", nicht um exakte Trade-Simulation.
     """
-    evaluated, wins, total_ret = 0, 0, 0.0
-    # Ältester zuerst: nur ausgereifte Einträge (t + Horizont liegt in der
-    # Vergangenheit) sind bewertbar. Die JÜNGSTEN max_samples zu nehmen war ein
-    # Fehler - bei vielen frischen Signalen (Orderbuch: 5000+) ist t+24h noch
-    # Zukunft, price_fn liefert None und evaluated bleibt 0.
-    for v in sorted(vetoes, key=lambda e: e.get("t", 0)):
-        if evaluated >= max_samples:
+    returns: list[float] = []
+    # Erst Episoden deduplizieren (gegen Pseudo-Replikation), dann ältester
+    # zuerst bewerten: nur ausgereifte Einträge (t + Horizont in der
+    # Vergangenheit) liefern einen Zukunftspreis.
+    for v in _dedup_episodes(vetoes, horizon_hours):
+        if len(returns) >= max_samples:
             break
         coin, side, t0 = v.get("coin"), v.get("side"), v.get("t")
         p0 = v.get("price") or (price_fn(coin, t0) if coin and t0 else None)
@@ -101,16 +155,8 @@ def veto_outcomes(vetoes: list[dict], price_fn, horizon_hours: float = 24,
         if not p0 or not p1:
             continue
         direction = 1 if side == "LONG" else -1
-        ret = direction * (p1 / p0 - 1)
-        total_ret += ret
-        wins += ret > 0
-        evaluated += 1
-    return {
-        "evaluated": evaluated,
-        "avg_return_pct": round(total_ret / evaluated * 100, 3) if evaluated else 0.0,
-        "win_share": round(wins / evaluated, 2) if evaluated else 0.0,
-        "horizon_hours": horizon_hours,
-    }
+        returns.append(direction * (p1 / p0 - 1))
+    return _return_stats(returns, horizon_hours)
 
 
 def anomaly_outcomes(anomalies: list[dict], price_fn, horizon_hours: float = 24,
@@ -137,9 +183,10 @@ def _validator_verdict(summary: dict, veto_stats: dict | None,
     """
     days = summary.get("days", 0)
     veto_dir = 0
-    if veto_stats and veto_stats.get("evaluated", 0) >= 10:
-        a = veto_stats["avg_return_pct"]
-        veto_dir = 1 if a > 0.1 else -1 if a < -0.1 else 0
+    # Nur ein STATISTISCH signifikantes Veto-Outcome (KI schließt 0 nicht ein)
+    # zählt als Signal - sonst runden wir Rauschen zu einem Urteil.
+    if veto_stats and veto_stats.get("significant") and veto_stats.get("evaluated", 0) >= 10:
+        veto_dir = 1 if veto_stats["avg_return_pct"] > 0 else -1
     shadow_dir, edge = 0, None
     if shadow_stats and shadow_stats.get("baseline"):
         ov = (shadow_stats.get("variants") or {}).get("ohne_validator")

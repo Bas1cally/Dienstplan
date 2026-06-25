@@ -17,6 +17,15 @@ logging.basicConfig(level=logging.WARNING)
 RUNTIME = Path(__file__).parent / "runtime"
 
 
+def _sig(st: dict) -> str:
+    """Konfidenzintervall + Signifikanz-Urteil als Anhang an eine Outcome-Zeile."""
+    if not st.get("evaluated"):
+        return ""
+    ci = f"[95% KI {st.get('ci_low_pct', 0):+.2f}..{st.get('ci_high_pct', 0):+.2f}%]"
+    tag = "SIGNIFIKANT" if st.get("significant") else "nicht von 0 unterscheidbar"
+    return f" {ci} → {tag}"
+
+
 def load_jsonl(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -93,9 +102,9 @@ def main() -> None:
         print("\n  Bewerte geblockte Trades (Veto-Outcome) ...")
         veto_stats = veto_outcomes(vetoes, make_price_fn(), horizon_hours=args.horizon)
         if veto_stats["evaluated"]:
-            print(f"  Veto-Outcome      {veto_stats['evaluated']} bewertet: hätten im Schnitt "
-                  f"{veto_stats['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h gebracht "
-                  f"(Trefferquote {veto_stats['win_share']:.0%})")
+            print(f"  Veto-Outcome      {veto_stats['evaluated']} Episoden: im Schnitt "
+                  f"{veto_stats['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h "
+                  f"(Trefferquote {veto_stats['win_share']:.0%}){_sig(veto_stats)}")
 
     # Anomalie-Scout: hatten die "verdächtigen" Wallets recht?
     anomalies = load_jsonl(RUNTIME / "anomalies.jsonl")
@@ -106,13 +115,10 @@ def main() -> None:
 
             ao = anomaly_outcomes(anomalies, make_price_fn(), horizon_hours=args.horizon)
             if ao["evaluated"]:
-                verdict = ("Wallets lagen RICHTIG" if ao["avg_return_pct"] > 0.1
-                           else "kein Vorlauf erkennbar" if abs(ao["avg_return_pct"]) <= 0.1
-                           else "Wallets lagen FALSCH")
-                taugt = ao["avg_return_pct"] > 0.3 and ao["win_share"] >= 0.55
-                print(f"    Follow-through    {ao['evaluated']} bewertet: im Schnitt "
+                taugt = ao["significant"] and ao["avg_return_pct"] > 0
+                print(f"    Follow-through    {ao['evaluated']} Episoden: im Schnitt "
                       f"{ao['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h in Positionsrichtung "
-                      f"(Trefferquote {ao['win_share']:.0%}) -> {verdict}")
+                      f"(Trefferquote {ao['win_share']:.0%}){_sig(ao)}")
                 print(f"                      {'taugt als Copy-Signal' if taugt else 'noch nicht überzeugend, weiter beobachten'}")
 
     # TWAP-Scout: lief der Kurs in TWAP-Richtung weiter? (anhaltender Flow-Edge)
@@ -127,12 +133,9 @@ def main() -> None:
 
             to = anomaly_outcomes(twaps, make_price_fn(), horizon_hours=args.horizon)
             if to["evaluated"]:
-                verdict = ("Kurs folgte dem TWAP" if to["avg_return_pct"] > 0.1
-                           else "kein Folge-Effekt" if abs(to["avg_return_pct"]) <= 0.1
-                           else "Kurs lief GEGEN den TWAP")
-                print(f"    Follow-through    {to['evaluated']} bewertet: im Schnitt "
+                print(f"    Follow-through    {to['evaluated']} Episoden: im Schnitt "
                       f"{to['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h in TWAP-Richtung "
-                      f"(Trefferquote {to['win_share']:.0%}) -> {verdict}")
+                      f"(Trefferquote {to['win_share']:.0%}){_sig(to)}")
 
     # Orderbuch-Scout: hatte die Imbalance Vorhersagekraft? (grobes 1h-Raster)
     book = load_jsonl(RUNTIME / "orderbook.jsonl")
@@ -143,12 +146,9 @@ def main() -> None:
 
             bo = anomaly_outcomes(book, make_price_fn(), horizon_hours=args.horizon)
             if bo["evaluated"]:
-                verdict = ("Imbalance war prädiktiv" if bo["avg_return_pct"] > 0.1
-                           else "kein Vorhersagewert" if abs(bo["avg_return_pct"]) <= 0.1
-                           else "Imbalance war KONTRA-prädiktiv")
-                print(f"    Follow-through    {bo['evaluated']} bewertet: im Schnitt "
+                print(f"    Follow-through    {bo['evaluated']} Episoden: im Schnitt "
                       f"{bo['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h in Imbalance-Richtung "
-                      f"(Trefferquote {bo['win_share']:.0%}) -> {verdict}")
+                      f"(Trefferquote {bo['win_share']:.0%}){_sig(bo)}")
 
     # Polymarket-Scout: erfahrenes Geld in Prediction Markets (read-only)
     poly = load_jsonl(RUNTIME / "polymarket.jsonl")

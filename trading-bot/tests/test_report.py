@@ -64,7 +64,8 @@ def test_veto_outcomes_evaluates_matured_not_just_recent():
     werden, nicht die jüngsten (deren Zukunftspreis noch nicht existiert)."""
     H = 24 * 3600
     now = 1_000_000
-    matured = [veto(now - 10 * H + i, side="LONG", price=100.0) for i in range(5)]
+    # 2H auseinander -> eigenständige Episoden (Dedup lässt sie stehen), alle reif
+    matured = [veto(now - (20 - 2 * i) * H, side="LONG", price=100.0) for i in range(5)]
     fresh = [veto(now + i, side="LONG", price=100.0) for i in range(200)]
 
     def price_fn(coin, t):
@@ -85,7 +86,8 @@ def test_recommends_more_leaders_when_zero_orders():
 def test_recommends_loosening_validator_when_vetoes_profitable():
     journal = [order(1)] + [veto(i + 10) for i in range(20)]
     s = summarize(journal, history(5), None)
-    veto_stats = {"evaluated": 20, "avg_return_pct": 0.8, "win_share": 0.7, "horizon_hours": 24}
+    veto_stats = {"evaluated": 20, "avg_return_pct": 0.8, "win_share": 0.7,
+                  "significant": True, "horizon_hours": 24}
     recs = recommendations(s, veto_stats)
     assert any("min_score" in r for r in recs)
 
@@ -93,7 +95,8 @@ def test_recommends_loosening_validator_when_vetoes_profitable():
 def test_keeps_validator_when_vetoes_lossy():
     journal = [order(1)] + [veto(i + 10) for i in range(20)]
     s = summarize(journal, history(5), None)
-    veto_stats = {"evaluated": 20, "avg_return_pct": -0.9, "win_share": 0.3, "horizon_hours": 24}
+    veto_stats = {"evaluated": 20, "avg_return_pct": -0.9, "win_share": 0.3,
+                  "significant": True, "horizon_hours": 24}
     recs = recommendations(s, veto_stats)
     assert any("rettet" in r for r in recs)
     assert not any("min_score 2 -> 1" in r for r in recs)
@@ -104,7 +107,8 @@ def test_validator_conflict_surfaced_not_two_recs():
     Statt zweier gegensätzlicher Ratschläge muss EIN Widerspruchs-Hinweis kommen."""
     journal = [order(1)] + [veto(i + 10) for i in range(20)]
     s = summarize(journal, history(6), None)
-    veto_stats = {"evaluated": 55, "avg_return_pct": -1.44, "win_share": 0.33, "horizon_hours": 24}
+    veto_stats = {"evaluated": 55, "avg_return_pct": -1.44, "win_share": 0.33,
+                  "significant": True, "horizon_hours": 24}
     shadow_stats = {"baseline": 10_140, "variants": {"ohne_validator": {"equity": 10_256, "trades": 60}}}
     recs = recommendations(s, veto_stats, shadow_stats)
     assert any("WIDERSPRECHEN" in r for r in recs)
@@ -115,7 +119,8 @@ def test_validator_conflict_surfaced_not_two_recs():
 def test_validator_both_agree_hurts_short_sample_is_cautious():
     journal = [order(1)] + [veto(i + 10) for i in range(20)]
     s = summarize(journal, history(6), None)
-    veto_stats = {"evaluated": 55, "avg_return_pct": 0.8, "win_share": 0.7, "horizon_hours": 24}
+    veto_stats = {"evaluated": 55, "avg_return_pct": 0.8, "win_share": 0.7,
+                  "significant": True, "horizon_hours": 24}
     shadow_stats = {"baseline": 10_000, "variants": {"ohne_validator": {"equity": 10_300, "trades": 60}}}
     recs = recommendations(s, veto_stats, shadow_stats)
     assert any("min_score 2 -> 1" in r for r in recs)
@@ -126,11 +131,44 @@ def test_validator_both_agree_hurts_short_sample_is_cautious():
 def test_validator_both_agree_helps():
     journal = [order(1)] + [veto(i + 10) for i in range(20)]
     s = summarize(journal, history(6), None)
-    veto_stats = {"evaluated": 55, "avg_return_pct": -1.0, "win_share": 0.3, "horizon_hours": 24}
+    veto_stats = {"evaluated": 55, "avg_return_pct": -1.0, "win_share": 0.3,
+                  "significant": True, "horizon_hours": 24}
     shadow_stats = {"baseline": 10_000, "variants": {"ohne_validator": {"equity": 9_800, "trades": 60}}}
     recs = recommendations(s, veto_stats, shadow_stats)
     assert any("rettet" in r and "behalten" in r for r in recs)
     assert not any("WIDERSPRECHEN" in r for r in recs)
+
+
+def test_insignificant_veto_outcome_gives_no_verdict():
+    """Kernfix: ein nicht-signifikantes Veto-Outcome darf KEIN Urteil treiben."""
+    journal = [order(1)] + [veto(i + 10) for i in range(20)]
+    s = summarize(journal, history(6), None)
+    veto_stats = {"evaluated": 55, "avg_return_pct": 0.06, "win_share": 0.5,
+                  "significant": False, "horizon_hours": 24}
+    recs = recommendations(s, veto_stats)  # ohne Shadow -> kein Signal -> kein Validator-Satz
+    assert not any("Validator" in r or "Filter" in r for r in recs)
+
+
+def test_return_stats_significance():
+    from bot.report import _return_stats
+    # enges, klar positives Sample -> signifikant
+    tight = _return_stats([0.012, 0.011, 0.013, 0.012, 0.011, 0.012, 0.013], 24)
+    assert tight["significant"] and tight["ci_low_pct"] > 0
+    # verrauschtes Sample um 0 -> nicht signifikant
+    noisy = _return_stats([0.05, -0.04, 0.03, -0.05, 0.04, -0.03], 24)
+    assert not noisy["significant"]
+
+
+def test_dedup_collapses_repeated_episodes():
+    from bot.report import _dedup_episodes
+    H = 24
+    base = 1_000_000
+    # dieselbe Wallet/Coin/Seite 5x im Fenster -> 1 Episode
+    rep = [{"coin": "BTC", "side": "LONG", "address": "0xa", "t": base + i * 3600} for i in range(5)]
+    assert len(_dedup_episodes(rep, H)) == 1
+    # nach >Horizont kommt eine neue Episode
+    rep.append({"coin": "BTC", "side": "LONG", "address": "0xa", "t": base + 30 * 3600})
+    assert len(_dedup_episodes(rep, H)) == 2
 
 
 def test_recommends_fee_reduction():
