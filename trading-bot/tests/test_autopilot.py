@@ -141,6 +141,28 @@ def test_analyzer_retries_on_429():
         pass
 
 
+def test_cmd_positions():
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+
+    ap = Autopilot(load_config())
+    assert "keine offenen" in ap._cmd_positions().lower(), "leer: keine Positionen"
+
+    ap._status = {"positions": [
+        {"coin": "BTC", "size": 0.5, "entry": 60_000, "unrealized_pnl": 120.0},
+        {"coin": "ETH", "size": -2.0, "entry": 3_000, "unrealized_pnl": -15.0},
+    ]}
+
+    class C:
+        last_prices = {"BTC": 61_000, "ETH": 3_000}
+
+    ap.copier = C()
+    ap.labs = None
+    msg = ap._cmd_positions()
+    assert "LONG BTC" in msg and "SHORT ETH" in msg
+    assert "Σ unrealisiert" in msg and "+105" in msg.replace(",", "")  # 120 - 15
+
+
 def test_cmd_update_already_current():
     import bot.autopilot as ap_mod
     from bot.autopilot import Autopilot

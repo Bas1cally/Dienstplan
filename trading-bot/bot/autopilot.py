@@ -160,6 +160,7 @@ class Autopilot:
             "/status": self._cmd_status,
             "/report": self._cmd_report,
             "/leaders": self._cmd_leaders,
+            "/positions": self._cmd_positions,
             "/anomalies": self._cmd_anomalies,
             "/orderbook": self._cmd_orderbook,
             "/twap": self._cmd_twap,
@@ -175,7 +176,7 @@ class Autopilot:
 
     def _cmd_help(self) -> str:
         return ("<b>Befehle</b>\n/status – Zustand & Equity\n/report – Auswertung\n"
-                "/leaders – Leader + ROI\n/anomalies – HL-Scout-Funde\n"
+                "/positions – offene Positionen + PnL\n/leaders – Leader + ROI\n/anomalies – HL-Scout-Funde\n"
                 "/orderbook – Mikrostruktur-Signale\n/twap – laufende Whale-TWAPs\n"
                 "/polymarket – Prediction-Market-Funde\n"
                 "/update – Update ziehen + neu starten\n/stop /start /resume – Autopilot/Halt steuern")
@@ -226,6 +227,36 @@ class Autopilot:
             for name, st in self.labs.stats(self.copier.last_prices).items():
                 lines.append(f"  {name}: {st['realized_pnl']:+,.2f} ({st['trades']} Tr.)")
         return "\n".join(lines)
+
+    def _cmd_positions(self) -> str:
+        """Was steckt der Bot gerade drin? Offene Positionen mit unrealisiertem PnL."""
+        prices = self.copier.last_prices if self.copier else {}
+        out: list[str] = []
+        rows = self.status().get("positions") or []
+        if rows:
+            out.append("<b>Copy-Buch</b>")
+            total = 0.0
+            for r in rows:
+                size = r.get("size", 0)
+                side = "LONG" if size > 0 else "SHORT"
+                entry = r.get("entry", 0)
+                px = prices.get(r["coin"], entry) or entry
+                pnl = r.get("unrealized_pnl", 0)
+                out.append(f"{side} {r['coin']}: {abs(size):.4f} @ {entry:.4f} "
+                           f"(${abs(size) * px:,.0f}, PnL {pnl:+,.2f})")
+                total += pnl
+            out.append(f"Σ unrealisiert: {total:+,.2f}")
+        # Eigene Strategien (Paper) - was sie aktuell halten
+        if self.labs:
+            for lab in self.labs.labs:
+                lrows = lab.paper.position_rows(prices)
+                if lrows:
+                    out.append(f"<b>{lab.name}</b>")
+                    for r in lrows:
+                        side = "LONG" if r["size"] > 0 else "SHORT"
+                        out.append(f"{side} {r['coin']}: {abs(r['size']):.4f} @ {r['entry']:.4f} "
+                                   f"(PnL {r['unrealized_pnl']:+,.2f})")
+        return "\n".join(out) if out else "Aktuell keine offenen Positionen."
 
     def _cmd_leaders(self) -> str:
         if not self.leaders:
