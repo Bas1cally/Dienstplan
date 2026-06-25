@@ -125,8 +125,14 @@ class OrderBookScout:
         if not strong and not m["has_wall"]:
             self._state.pop(coin, None)
             return None
+        # Richtung: bei starker Imbalance deren Vorzeichen; bei reinem Wall-Treffer
+        # NICHT das Sub-Schwellen-Rauschen, sondern die Wall-Semantik (Bid-Wall =
+        # Support = bullisch, Ask-Wall = Resistance = bärisch).
+        if strong:
+            side = "LONG" if m["imbalance"] > 0 else "SHORT"
+        else:
+            side = "LONG" if m["wall_side"] == "bid" else "SHORT"
         # Entprellung: nur bei Zustandswechsel melden (Imbalance-Vorzeichen / Wall-Seite)
-        side = "LONG" if m["imbalance"] > 0 else "SHORT"
         sig = f"{side if strong else ''}:{m['wall_side'] if m['has_wall'] else ''}"
         if self._state.get(coin) == sig:
             return None

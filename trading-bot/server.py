@@ -120,7 +120,7 @@ def paper_reset():
     from bot.paper import PaperBroker
 
     PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate).reset()
-    for name in ("history.jsonl", "trades.jsonl", "leader_perf.json"):
+    for name in ("history.jsonl", "trades.jsonl", "leader_perf.json", "risk_state.json"):
         (Path(__file__).parent / "runtime" / name).unlink(missing_ok=True)
     log.info("Paper-Konto und Verlaufsdaten zurückgesetzt")
     return {"ok": True}

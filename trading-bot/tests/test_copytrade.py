@@ -5,9 +5,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import tempfile
+
 from bot.config import AnalysisConfig, CopytradeConfig, RiskConfig
 from bot.copytrade.analyzer import analyze_fills
-from bot.copytrade.copier import compute_targets, plan_rebalance
+from bot.copytrade.copier import CopyTrader, compute_targets, plan_rebalance
 from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
 
 DAY = 86_400_000
@@ -148,6 +150,39 @@ def test_rebalance_short_target():
     assert len(orders) == 1
     assert not orders[0].is_buy
     assert abs(orders[0].delta_size + 0.04) < 1e-9  # 1000 long -> 3000 short = -4000 USD
+
+
+def _bare_copier(path):
+    ct = CopyTrader.__new__(CopyTrader)
+    ct._risk_state_path = path
+    ct.start_equity, ct.day, ct.day_start_equity, ct.halted = None, "", 0.0, False
+    ct.last_equity = None
+    return ct
+
+
+def test_risk_state_survives_restart():
+    """Bug-Fix: Drawdown-Baseline + Halt-Flag müssen Neustarts überleben."""
+    path = Path(tempfile.mkdtemp()) / "risk_state.json"
+    ct = _bare_copier(path)
+    ct.start_equity, ct.day, ct.day_start_equity, ct.halted = 10_000.0, "2026-06-25", 9_500.0, True
+    ct._save_risk_state()
+
+    fresh = _bare_copier(path)          # Neustart: lädt vom Datenträger
+    fresh._load_risk_state()
+    assert fresh.start_equity == 10_000.0, "Drawdown-Basis darf nicht re-baselinen"
+    assert fresh.halted is True, "ein gestoppter Bot bleibt nach Reboot gestoppt"
+    assert fresh.day == "2026-06-25" and fresh.day_start_equity == 9_500.0
+
+
+def test_resume_clears_halt_and_rebaselines():
+    path = Path(tempfile.mkdtemp()) / "risk_state.json"
+    ct = _bare_copier(path)
+    ct.halted, ct.last_equity = True, 9_000.0
+    ct.resume()
+    assert ct.halted is False and ct.start_equity == 9_000.0
+    reloaded = _bare_copier(path)
+    reloaded._load_risk_state()
+    assert reloaded.halted is False, "Resume wird persistiert"
 
 
 if __name__ == "__main__":

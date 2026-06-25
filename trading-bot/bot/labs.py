@@ -120,7 +120,7 @@ class FundingLab:
         apr_by_coin = {p.coin: p.funding_apr for p in pulses}
         mark_by_coin = {p.coin: p.mark for p in pulses}
 
-        # 1. Bestehende Positionen prüfen: Funding normalisiert, Stop oder Zeit?
+        # 1. Bestehende Positionen prüfen: Funding gutschreiben, dann Exit?
         exited: set[str] = set()
         for coin in list(self._entry):
             size = self.paper.sizes().get(coin, 0.0)
@@ -130,6 +130,13 @@ class FundingLab:
                 continue
             apr = apr_by_coin.get(coin, 0.0)
             ent = self._entry[coin]
+            # Funding buchen (der eigentliche Edge!): funding_pnl = -size*price*fh*h.
+            # Positiv für die kassierende Seite. Ohne das misst der Lab nur Kursrisiko.
+            elapsed_h = max(0.0, (now - ent.get("funding_t", now)) / 3600)
+            if elapsed_h > 0:
+                funding_hourly = apr / FUNDING_HOURLY_TO_APR
+                self.paper.credit(-size * price * funding_hourly * elapsed_h)
+            ent["funding_t"] = now
             still_collecting = self._collecting_side(apr) == (1 if size > 0 else -1) and abs(apr) >= self.cfg.exit_apr
             timed_out = (now - ent["t"]) >= self.cfg.max_hold_hours * 3600
             hit_stop = (size > 0 and price <= ent["stop"]) or (size < 0 and price >= ent["stop"])
@@ -162,7 +169,7 @@ class FundingLab:
                 continue
             self.paper.execute(coin, size, price)
             stop = price * (1 - direction * self.cfg.stop_frac)
-            self._entry[coin] = {"price": price, "t": now, "stop": stop}
+            self._entry[coin] = {"price": price, "t": now, "stop": stop, "funding_t": now}
             log.info("FundingLab %s: %s @ %.4f (Funding %+.0f%% p.a., kassiert)",
                      coin, "LONG" if direction > 0 else "SHORT", price, p.funding_apr * 100)
 

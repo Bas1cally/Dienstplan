@@ -17,7 +17,7 @@ import logging
 from dataclasses import dataclass
 
 from ..config import CopytradeConfig, RiskConfig
-from ..journal import Journal
+from ..journal import RUNTIME, Journal
 from ..paper import PaperBroker
 from ..risk import RiskManager
 from .tracker import LeaderSnapshot
@@ -106,6 +106,23 @@ def exempt_inventory(current: dict[str, float], exempt: dict[str, float]) -> dic
     return book
 
 
+def is_exposure_increase(target_notional: float, current_notional: float) -> bool:
+    """True, wenn die Order Exposure in einer Richtung NEU aufbaut oder vergrößert
+    - inklusive Richtungswechsel (Flip durch 0).
+
+    Wichtig: abs(target) < abs(current) reicht NICHT, weil ein Flip von +3000 auf
+    -1000 betragsmäßig kleiner ist, aber eine neue Short-Position eröffnet. Reine
+    Schließung (target=0), Reduktion in gleicher Richtung oder Teilschließung =
+    False; alles andere (Flip, Neueröffnung aus Flat, Aufstockung) = True.
+    """
+    if target_notional == 0:
+        return False  # reine Schließung
+    same_dir = current_notional != 0 and (target_notional > 0) == (current_notional > 0)
+    if not same_dir:
+        return True   # Flip oder Neueröffnung aus Flat -> echter Einstieg
+    return abs(target_notional) > abs(current_notional)
+
+
 def plan_rebalance(
     targets: dict[str, float],
     current: dict[str, float],     # coin -> signierte Größe in Coin
@@ -170,6 +187,11 @@ class CopyTrader:
         self.halted = False
         # Paper-Broker simuliert das Konto im Dry-Run (persistiert über Neustarts)
         self.paper = PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate) if cfg.dry_run else None
+        # Risiko-Baselines (Drawdown-Halt, Tagesverlust, Halt-Flag) MÜSSEN Neustarts
+        # überleben - sonst bekommt ein -9%-Konto eine frische 0%-Basis und ein per
+        # Circuit-Breaker gestoppter Bot handelt nach Reboot wieder los.
+        self._risk_state_path = RUNTIME / "risk_state.json"
+        self._load_risk_state()
 
     def tick(self) -> None:
         if self.halted:
@@ -185,14 +207,16 @@ class CopyTrader:
         self._roll_day(equity)
         if self.start_equity is None:
             self.start_equity = equity
+            self._save_risk_state()
         if self.risk.total_drawdown_exceeded(self.start_equity, equity):
             log.error("MAX-DRAWDOWN-HALT: %.1f%% vom Startkapital verloren. "
-                      "Schließe alles, Bot pausiert bis Neustart.",
+                      "Schließe alles, Bot pausiert (überlebt Neustart, /resume hebt auf).",
                       self.cfg.risk.max_total_drawdown * 100)
             self.journal.record("max_drawdown_halt", equity=round(equity, 2),
                                 start=round(self.start_equity, 2))
             self._flatten(prices)
             self.halted = True
+            self._save_risk_state()
             return
         if self.risk.daily_loss_exceeded(self.day_start_equity, equity):
             log.error("CIRCUIT BREAKER: Tagesverlust-Limit erreicht. Schließe alles, pausiere.")
@@ -200,6 +224,7 @@ class CopyTrader:
                                 day_start=round(self.day_start_equity, 2))
             self._flatten(prices)
             self.halted = True
+            self._save_risk_state()
             return
 
         # News-/Schock-Lage: RISK_OFF = alles glattstellen, CAUTION = nur reduzieren
@@ -234,8 +259,11 @@ class CopyTrader:
 
         orders = plan_rebalance(targets, self._book(), prices, equity, self.ct)
         if caution:
-            # Im Vorsichtsmodus nur Orders ausführen, die das Exposure senken
-            orders = [o for o in orders if abs(o.target_notional) < abs(o.current_notional)]
+            # Im Vorsichtsmodus nur Orders ausführen, die Exposure WIRKLICH senken
+            # (Reduktion/Schließung) - Flips bauen neue Gegenposition auf und sind
+            # damit Einstiege, die hier nicht durchrutschen dürfen.
+            orders = [o for o in orders
+                      if not is_exposure_increase(o.target_notional, o.current_notional)]
         orders = self._validate_orders(orders)
 
         for o in orders:
@@ -283,8 +311,9 @@ class CopyTrader:
         out = []
         seen: set[str] = set()
         for o in orders:
-            increases = abs(o.target_notional) > abs(o.current_notional)
-            if not increases:
+            # Flip (long->short) ist betragsmäßig evtl. kleiner, eröffnet aber eine
+            # neue Gegenposition -> muss durch den Validator, nicht ungeprüft durch.
+            if not is_exposure_increase(o.target_notional, o.current_notional):
                 out.append(o)
                 continue
             verdict = self.validator.check(o.coin, is_long=o.target_notional > 0)
@@ -350,6 +379,41 @@ class CopyTrader:
                 except Exception:
                     log.exception("Schließen von %s fehlgeschlagen", coin)
 
+    def _load_risk_state(self) -> None:
+        import json
+
+        try:
+            d = json.loads(self._risk_state_path.read_text())
+            self.start_equity = d.get("start_equity")
+            self.day = d.get("day", "")
+            self.day_start_equity = float(d.get("day_start_equity", 0.0))
+            self.halted = bool(d.get("halted", False))
+            if self.halted:
+                log.warning("Risiko-HALT aus vorherigem Lauf aktiv (risk_state.json) - "
+                            "Bot bleibt pausiert bis manueller Reset (resume()/Datei löschen).")
+        except (OSError, ValueError):
+            pass
+
+    def _save_risk_state(self) -> None:
+        import json
+
+        try:
+            RUNTIME.mkdir(exist_ok=True)
+            self._risk_state_path.write_text(json.dumps({
+                "start_equity": self.start_equity, "day": self.day,
+                "day_start_equity": self.day_start_equity, "halted": self.halted,
+            }))
+        except OSError:
+            log.debug("risk_state.json nicht schreibbar", exc_info=True)
+
+    def resume(self) -> None:
+        """Hebt einen Risiko-Halt manuell auf (Telegram /resume) und re-baselined."""
+        self.halted = False
+        self.start_equity = self.last_equity
+        self.day_start_equity = self.last_equity or 0.0
+        self._save_risk_state()
+        log.warning("Risiko-Halt manuell aufgehoben, Baselines neu gesetzt")
+
     def _equity(self, prices: dict[str, float] | None = None) -> float:
         if self.cfg.dry_run:
             return self.paper.equity(prices or self.last_prices)
@@ -362,4 +426,5 @@ class CopyTrader:
         if today != self.day:
             self.day = today
             self.day_start_equity = equity
+            self._save_risk_state()
             log.info("Neuer Handelstag %s, Start-Equity %.2f", today, equity)

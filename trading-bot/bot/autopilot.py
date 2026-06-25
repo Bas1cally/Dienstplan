@@ -164,6 +164,7 @@ class Autopilot:
             "/polymarket": self._cmd_polymarket,
             "/stop": self._cmd_stop,
             "/start": self._cmd_start,
+            "/resume": self._cmd_resume,
             "/help": self._cmd_help,
         })
 
@@ -173,7 +174,7 @@ class Autopilot:
         return ("<b>Befehle</b>\n/status – Zustand & Equity\n/report – Auswertung\n"
                 "/leaders – Leader + ROI\n/anomalies – HL-Scout-Funde\n"
                 "/orderbook – Mikrostruktur-Signale\n/twap – laufende Whale-TWAPs\n"
-                "/polymarket – Prediction-Market-Funde\n/stop /start – Autopilot steuern")
+                "/polymarket – Prediction-Market-Funde\n/stop /start /resume – Autopilot/Halt steuern")
 
     def _cmd_status(self) -> str:
         s = self.status()
@@ -267,6 +268,14 @@ class Autopilot:
             out.append(f"${f['bet_usdc']:,.0f} auf {f['outcome']} — „{f['market'][:40]}\" "
                        f"(PnL ${f['realized_pnl']:,.0f})")
         return "\n".join(out)
+
+    def _cmd_resume(self) -> str:
+        if not self.copier:
+            return "Kein Copier aktiv."
+        if not self.copier.halted:
+            return "Kein Risiko-Halt aktiv."
+        self.copier.resume()
+        return "✅ Risiko-Halt aufgehoben, Baselines neu gesetzt."
 
     def _cmd_stop(self) -> str:
         if not self.running:

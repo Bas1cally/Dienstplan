@@ -76,6 +76,12 @@ class PaperBroker:
             self.positions[coin] = pos
         self._save()
 
+    def credit(self, amount: float) -> None:
+        """Bucht einen Cash-Flow ohne Trade (z.B. eingesammeltes/gezahltes Funding)."""
+        if amount:
+            self.realized_pnl += amount
+            self._save()
+
     def flatten(self, prices: dict[str, float]) -> None:
         for coin in list(self.positions):
             price = prices.get(coin)

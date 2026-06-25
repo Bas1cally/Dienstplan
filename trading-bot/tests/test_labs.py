@@ -158,6 +158,31 @@ def test_funding_lab_hard_stop():
     assert lab.paper.sizes().get("BTC", 0) == 0
 
 
+def test_funding_lab_credits_carry():
+    """Bug-Fix: das eingesammelte Funding muss gutgeschrieben werden, sonst misst
+    der Lab nur Kursrisiko. Short bei +50% APR, Preis konstant -> positiver PnL."""
+    b = broker()
+    lab = FundingLab(FundingLabConfig(coins=["BTC"], entry_apr=0.3, exit_apr=0.1), b)
+    # Einstieg: +50% APR -> Short kassiert
+    lab.on_pulse([Pulse("BTC", 0.50, 30_000)], {"BTC": 30_000}, equity=10_000, now=0)
+    pnl_after_entry = b.realized_pnl
+    # 10h später, Funding noch extrem, Preis unverändert -> nur Funding fließt
+    lab.on_pulse([Pulse("BTC", 0.50, 30_000)], {"BTC": 30_000}, equity=10_000, now=10 * 3600)
+    assert b.realized_pnl > pnl_after_entry, "Carry muss gutgeschrieben werden"
+    # grobe Größenordnung: |size|*price*apr/(24*365)*10h, size~200/30000*... klein aber >0
+    assert b.realized_pnl - pnl_after_entry > 0
+
+
+def test_funding_lab_carry_sign_correct_for_long():
+    """Negatives Funding -> Long kassiert -> Gutschrift positiv."""
+    b = broker()
+    lab = FundingLab(FundingLabConfig(coins=["BTC"], entry_apr=0.3, exit_apr=0.1), b)
+    lab.on_pulse([Pulse("BTC", -0.50, 30_000)], {"BTC": 30_000}, equity=10_000, now=0)
+    before = b.realized_pnl
+    lab.on_pulse([Pulse("BTC", -0.50, 30_000)], {"BTC": 30_000}, equity=10_000, now=10 * 3600)
+    assert b.realized_pnl > before, "Long bei negativem Funding kassiert auch"
+
+
 def test_funding_lab_respects_max_positions():
     cfg = FundingLabConfig(coins=["BTC", "ETH", "SOL"], entry_apr=0.3, max_positions=2)
     lab = FundingLab(cfg, broker())

@@ -188,6 +188,41 @@ def test_veto_relogged_after_state_change():
     assert len(j.entries) == 2
 
 
+def test_flip_long_to_short_is_validated():
+    """Bug-Fix: Leader dreht +3000 long -> -1000 short. Betrag kleiner, aber neue
+    Gegenposition - MUSS durch den Validator (vorher rutschte das ungeprüft durch)."""
+    val = StubValidator(ok=False)
+    ct = make_copier(val)
+    out = ct._validate_orders([order("BTC", current=3000, target=-1000)])
+    assert out == [], "Flip muss geprüft und (hier) geblockt werden"
+    assert val.checked == [("BTC", False)], "als Short-Einstieg geprüft"
+
+
+def test_flip_short_to_long_validated():
+    val = StubValidator(ok=False)
+    ct = make_copier(val)
+    ct._validate_orders([order("BTC", current=-2000, target=500)])
+    assert val.checked == [("BTC", True)], "Flip auf long wird als Long-Einstieg geprüft"
+
+
+def test_pure_reduction_still_free():
+    val = StubValidator(ok=False)
+    ct = make_copier(val)
+    out = ct._validate_orders([order("BTC", current=3000, target=1000)])  # gleiche Richtung, kleiner
+    assert [o.coin for o in out] == ["BTC"], "Reduktion läuft weiter ungeprüft durch"
+    assert val.checked == []
+
+
+def test_exposure_increase_helper():
+    from bot.copytrade.copier import is_exposure_increase
+    assert is_exposure_increase(-1000, 3000) is True    # Flip long->short
+    assert is_exposure_increase(500, -2000) is True      # Flip short->long
+    assert is_exposure_increase(2000, 0) is True          # Neueröffnung aus flat
+    assert is_exposure_increase(3000, 1000) is True       # Aufstockung
+    assert is_exposure_increase(1000, 3000) is False      # Reduktion gleiche Richtung
+    assert is_exposure_increase(0, 3000) is False         # Schließung
+
+
 def test_veto_per_coin_independent():
     j = RecordingJournal()
     ct = make_copier(StubValidator(ok=False), journal=j)
