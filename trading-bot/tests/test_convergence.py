@@ -69,6 +69,34 @@ def test_vote_disabled_engine():
     assert eng.vote("BTC", 1.0).factor == 1.0
 
 
+def test_total_source_failure_not_cached():
+    """Bug-Fix: Fällt JEDE Quelle aus, darf das nicht als 'neutral' gecacht werden -
+    sonst bleibt die Konvergenz für cache_seconds blind statt es neu zu versuchen."""
+    class FlakySource:
+        name = "flaky"
+
+        def __init__(self):
+            self.calls = 0
+
+        def conviction(self, coin, period, timeout=10):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("Netz weg")
+            return 0.8  # zweiter Versuch klappt
+
+        def reset(self):
+            pass
+
+    eng = ConvergenceEngine(ConvergenceConfig(cache_seconds=300))
+    src = FlakySource()
+    eng.sources = [src]
+    avg, n = eng._external("BTC")
+    assert n == 0, "Total-Ausfall -> keine Daten"
+    avg2, n2 = eng._external("BTC")  # sofort erneut: darf NICHT aus dem Cache kommen
+    assert n2 == 1 and abs(avg2 - 0.8) < 1e-9, "muss neu versuchen, nicht 'neutral' cachen"
+    assert src.calls == 2
+
+
 # ---------- Konvergenz im Copier ----------
 
 def test_targets_boosted_on_agreement_but_capped():

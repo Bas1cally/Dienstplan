@@ -217,6 +217,10 @@ class Autopilot:
             lines.append(f"Maker-Quote: {s['maker_share']:.0%}")
         if paper:
             lines.append(f"PnL: {s.get('realized_pnl', 0):+,.2f} | Fees: {s.get('fees_paid', 0):,.2f}")
+        if self.labs and self.copier and self.copier.last_prices:
+            lines.append("<b>Spuren:</b>")
+            for name, st in self.labs.stats(self.copier.last_prices).items():
+                lines.append(f"  {name}: {st['realized_pnl']:+,.2f} ({st['trades']} Tr.)")
         return "\n".join(lines)
 
     def _cmd_leaders(self) -> str:
@@ -684,12 +688,25 @@ class Autopilot:
         vetoes = sum(1 for e in entries if e["kind"] == "veto")
         scalp_pnl = sum(float(e.get("pnl", 0)) for e in entries if e["kind"] == "scalp_close")
         delta = ""
+        bleed = ""
         if equity and self._digest_equity:
             pct = (equity / self._digest_equity - 1) * 100
             delta = f"\nEquity: {equity:,.2f} ({pct:+.2f}% 24h)"
-        msg = (f"📊 <b>Tagesbericht</b>{delta}\n"
+        # Kern-Edge: realisierter PnL des Copy-Buchs (nicht der Buchgewinn).
+        if self.copier and self.copier.paper:
+            rp = self.copier.paper.realized_pnl
+            bleed = f"\nCopy realisiert: {rp:+,.2f}"
+            if rp < -0.02 * self.cfg.backtest.initial_equity:
+                bleed += " ⚠️ blutet"
+        # Edge-Status je Strategie-Spur (das eigentliche Ziel des Digests)
+        tracks = ""
+        if self.labs and self.copier and self.copier.last_prices:
+            for name, st in self.labs.stats(self.copier.last_prices).items():
+                tracks += f"\n  {name}: {st['realized_pnl']:+,.2f} ({st['trades']} Tr.)"
+        msg = (f"📊 <b>Tagesbericht</b>{delta}{bleed}\n"
                f"Orders: {orders} | Vetos: {vetoes}"
                + (f" | Scalp-PnL: {scalp_pnl:+,.2f}" if scalp_pnl else "")
+               + (f"\n<b>Spuren:</b>{tracks}" if tracks else "")
                + f"\nRisiko: {self.guard.last_level.name if self.guard else 'NORMAL'}"
                + "\nAuswertung: python report.py")
         log.info("Tagesbericht: %d Orders, %d Vetos", orders, vetoes)

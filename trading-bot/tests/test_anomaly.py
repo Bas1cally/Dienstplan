@@ -101,6 +101,20 @@ def test_veteran_wallet_not_flagged():
     assert scout(info).scan() == []
 
 
+def test_only_taker_flagged_not_maker():
+    """Bug-Fix: nur der Taker (users[0]) wird geprüft, nicht der Maker (MM) auf
+    der Gegenseite eines großen Trades."""
+    info = FakeInfo(
+        trades={"SOL": [{"coin": "SOL", "px": "200", "sz": "1000",
+                         "users": ["0xtaker", "0xmaker_mm"]}]},
+        fills={"0xtaker": []},
+        states={"0xtaker": state(300_000, [("SOL", 1200, 250_000)])},
+    )
+    out = scout(info).scan()
+    assert [f["address"] for f in out] == ["0xtaker"]
+    assert not any(a == "0xmaker_mm" for k, a in info.calls), "Maker darf nicht geprüft werden"
+
+
 def test_small_trades_dont_trigger_checks():
     info = FakeInfo(trades={"SOL": [trade("SOL", 200, 10, ["0xsmall"])]})  # $2k
     assert scout(info).scan() == []

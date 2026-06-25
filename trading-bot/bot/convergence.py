@@ -128,8 +128,12 @@ class ConvergenceEngine:
                     votes.append(v)
             except Exception:
                 log.debug("Konvergenz-Quelle %s für %s nicht verfügbar", src.name, coin, exc_info=True)
-        avg = sum(votes) / len(votes) if votes else 0.0
+        if not votes:
+            # Total-Ausfall aller Quellen (Netz/Rate-Limit) NICHT cachen - sonst
+            # bleibt die Konvergenz für cache_seconds blind, statt es beim
+            # nächsten Tick erneut zu versuchen. (Echte Neutralität hätte votes.)
+            return 0.0, 0
+        avg = sum(votes) / len(votes)
         self._cache[coin] = (now, avg, len(votes))
-        if votes:
-            log.info("Konvergenz %s: extern %+.2f aus %d Quellen", coin, avg, len(votes))
+        log.info("Konvergenz %s: extern %+.2f aus %d Quellen", coin, avg, len(votes))
         return avg, len(votes)

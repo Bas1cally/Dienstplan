@@ -39,19 +39,29 @@ def load_jsonl(path: Path) -> list[dict]:
 
 
 def make_price_fn():
-    """Candle-basierter Preis-Lookup (1h-Auflösung) für die Veto-Outcome-Analyse."""
+    """1h-Preis-Lookup (langsame Signale: Vetos, Whale-Positionen)."""
     from bot.exchange import HyperliquidClient
 
-    client = HyperliquidClient(testnet=False, dexs="auto")
+    return _price_fn_factory(HyperliquidClient(testnet=False, dexs="auto"), "1h")
+
+
+_INTERVAL_MS = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000}
+
+
+def _price_fn_factory(client, interval: str, lookback_days: int = 0):
+    ms = _INTERVAL_MS[interval]
+    if not lookback_days:
+        lookback_days = 90 if interval == "1h" else 21  # feine Raster: kürzer (Candle-Limit)
     cache: dict[str, list] = {}
 
     def price_fn(coin: str, t_unix: float) -> float | None:
         try:
             if coin not in cache:
                 cache[coin] = client.market.candles_snapshot(
-                    coin, "1h", int((t_unix - 90 * 86_400) * 1000), int(__import__("time").time() * 1000))
+                    coin, interval, int((t_unix - lookback_days * 86_400) * 1000),
+                    int(__import__("time").time() * 1000))
             for c in cache[coin]:
-                if int(c["t"]) <= t_unix * 1000 < int(c["t"]) + 3_600_000:
+                if int(c["t"]) <= t_unix * 1000 < int(c["t"]) + ms:
                     return float(c["c"])
         except Exception:
             return None
@@ -63,8 +73,19 @@ def make_price_fn():
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--offline", action="store_true", help="keine Veto-Outcome-Analyse (kein Netz)")
-    p.add_argument("--horizon", type=float, default=24, help="Veto-Bewertung nach X Stunden")
+    p.add_argument("--horizon", type=float, default=24, help="Bewertung langsamer Signale nach X Stunden")
+    p.add_argument("--fast-horizon", type=float, default=1.0,
+                   help="Bewertung schneller Signale (Orderbuch/TWAP) nach X Stunden (feines 15m-Raster)")
     args = p.parse_args()
+
+    # Preis-Lookups einmal bauen: 1h-Raster für langsame, 15m für schnelle Signale
+    _slow_pf = _fast_pf = None
+    if not args.offline:
+        from bot.exchange import HyperliquidClient
+
+        _client = HyperliquidClient(testnet=False, dexs="auto")
+        _slow_pf = _price_fn_factory(_client, "1h")
+        _fast_pf = _price_fn_factory(_client, "15m")
 
     journal = load_jsonl(RUNTIME / "trades.jsonl")
     history = load_jsonl(RUNTIME / "history.jsonl")
@@ -100,7 +121,7 @@ def main() -> None:
     vetoes = [e for e in journal if e.get("kind") == "veto"]
     if vetoes and not args.offline:
         print("\n  Bewerte geblockte Trades (Veto-Outcome) ...")
-        veto_stats = veto_outcomes(vetoes, make_price_fn(), horizon_hours=args.horizon)
+        veto_stats = veto_outcomes(vetoes, _slow_pf, horizon_hours=args.horizon)
         if veto_stats["evaluated"]:
             print(f"  Veto-Outcome      {veto_stats['evaluated']} Episoden: im Schnitt "
                   f"{veto_stats['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h "
@@ -113,7 +134,7 @@ def main() -> None:
         if not args.offline:
             from bot.report import anomaly_outcomes
 
-            ao = anomaly_outcomes(anomalies, make_price_fn(), horizon_hours=args.horizon)
+            ao = anomaly_outcomes(anomalies, _slow_pf, horizon_hours=args.horizon)
             if ao["evaluated"]:
                 taugt = ao["significant"] and ao["avg_return_pct"] > 0
                 print(f"    Follow-through    {ao['evaluated']} Episoden: im Schnitt "
@@ -131,10 +152,10 @@ def main() -> None:
         if not args.offline:
             from bot.report import anomaly_outcomes
 
-            to = anomaly_outcomes(twaps, make_price_fn(), horizon_hours=args.horizon)
+            to = anomaly_outcomes(twaps, _fast_pf, horizon_hours=args.fast_horizon)
             if to["evaluated"]:
                 print(f"    Follow-through    {to['evaluated']} Episoden: im Schnitt "
-                      f"{to['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h in TWAP-Richtung "
+                      f"{to['avg_return_pct']:+.2f}% nach {args.fast_horizon:.1f}h in TWAP-Richtung "
                       f"(Trefferquote {to['win_share']:.0%}){_sig(to)}")
 
     # Orderbuch-Scout: hatte die Imbalance Vorhersagekraft? (grobes 1h-Raster)
@@ -144,10 +165,10 @@ def main() -> None:
         if not args.offline:
             from bot.report import anomaly_outcomes  # gleiche coin/side/price/t-Mechanik
 
-            bo = anomaly_outcomes(book, make_price_fn(), horizon_hours=args.horizon)
+            bo = anomaly_outcomes(book, _fast_pf, horizon_hours=args.fast_horizon)
             if bo["evaluated"]:
                 print(f"    Follow-through    {bo['evaluated']} Episoden: im Schnitt "
-                      f"{bo['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h in Imbalance-Richtung "
+                      f"{bo['avg_return_pct']:+.2f}% nach {args.fast_horizon:.1f}h in Imbalance-Richtung "
                       f"(Trefferquote {bo['win_share']:.0%}){_sig(bo)}")
 
     # Polymarket-Scout: erfahrenes Geld in Prediction Markets (read-only)

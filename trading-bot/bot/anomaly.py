@@ -87,8 +87,12 @@ class AnomalyScout:
                 notional = float(t.get("px", 0)) * float(t.get("sz", 0))
                 if notional < self.cfg.min_trade_notional:
                     continue
-                for user in t.get("users", []):
-                    out.setdefault(user, {"coin": coin, "notional": notional})
+                # Nur den TAKER (Aggressor) prüfen, nicht die passive Gegenseite.
+                # Hyperliquid liefert users als [taker, maker] - der Maker ist
+                # meist ein Market Maker, also das Gegenteil von "informed money".
+                users = t.get("users", [])
+                if users:
+                    out.setdefault(users[0], {"coin": coin, "notional": notional})
         return out
 
     # ---------- Prüfung: frisch + groß + konzentriert? ----------
