@@ -73,6 +73,7 @@ class FakeMarket:
 
 
 def scout(market, **ov):
+    ov.setdefault("min_signal_gap_s", 0)  # Cooldown im Helper aus (eigener Test deckt ihn ab)
     cfg = OrderBookConfig(coins=list(market.mids), throttle_s=0,
                           imbalance_threshold=0.35, wall_ratio=5.0, **ov)
     s = OrderBookScout(market, cfg, clock=lambda: NOW, sleep=lambda _: None)
@@ -105,6 +106,35 @@ def test_reflag_on_sign_flip():
     assert len(s.scan()) == 1                       # Bid-Übergewicht
     mkt.books["BTC"] = book([(99.9, 5)], [(100.1, 100)])  # dreht auf Ask-Übergewicht
     assert len(s.scan()) == 1, "Vorzeichenwechsel -> neuer Eintrag"
+
+
+def test_cooldown_suppresses_pendling():
+    """Cooldown: innerhalb min_signal_gap_s kein zweites Signal je Coin (gegen Pendeln)."""
+    flips = [book([(99.9, 100)], [(100.1, 5)]),    # LONG
+             book([(99.9, 5)], [(100.1, 100)]),    # SHORT
+             book([(99.9, 100)], [(100.1, 5)])]    # LONG
+    t = {"now": NOW}
+    seq = iter(flips)
+    cur = {"b": next(seq)}
+
+    class M:
+        mids = {"BTC": 100}
+
+        def all_mids(self):
+            return {"BTC": "100"}
+
+        def l2_snapshot(self, coin):
+            return {"levels": cur["b"]}
+
+    cfg = OrderBookConfig(coins=["BTC"], throttle_s=0, imbalance_threshold=0.35,
+                          min_signal_gap_s=900)
+    s = OrderBookScout(M(), cfg, clock=lambda: t["now"], sleep=lambda _: None)
+    s.path = Path(tempfile.mkdtemp()) / "ob.jsonl"
+    assert len(s.scan()) == 1                  # erstes Signal
+    cur["b"] = flips[1]; t["now"] += 60
+    assert s.scan() == [], "Flip innerhalb Cooldown -> unterdrückt"
+    cur["b"] = flips[2]; t["now"] += 1000       # > gap
+    assert len(s.scan()) == 1, "nach Cooldown wieder erlaubt"
 
 
 def test_l2_error_skips_coin_without_crash():

@@ -19,8 +19,11 @@ RUNTIME = Path(__file__).parent / "runtime"
 
 def _sig(st: dict) -> str:
     """Konfidenzintervall + Signifikanz-Urteil als Anhang an eine Outcome-Zeile."""
-    if not st.get("evaluated"):
+    n = st.get("evaluated", 0)
+    if not n:
         return ""
+    if n < 5:
+        return f" (n={n}, zu wenig für Signifikanz)"
     ci = f"[95% KI {st.get('ci_low_pct', 0):+.2f}..{st.get('ci_high_pct', 0):+.2f}%]"
     tag = "SIGNIFIKANT" if st.get("significant") else "nicht von 0 unterscheidbar"
     return f" {ci} → {tag}"
@@ -76,6 +79,8 @@ def main() -> None:
     p.add_argument("--horizon", type=float, default=24, help="Bewertung langsamer Signale nach X Stunden")
     p.add_argument("--fast-horizon", type=float, default=1.0,
                    help="Bewertung schneller Signale (Orderbuch/TWAP) nach X Stunden (feines 15m-Raster)")
+    p.add_argument("--veto-hold", type=float, default=2.0,
+                   help="Copier-treuer Veto-Horizont (~Leader-Haltedauer) für das Validator-Urteil")
     args = p.parse_args()
 
     # Preis-Lookups einmal bauen: 1h-Raster für langsame, 15m für schnelle Signale
@@ -121,11 +126,20 @@ def main() -> None:
     vetoes = [e for e in journal if e.get("kind") == "veto"]
     if vetoes and not args.offline:
         print("\n  Bewerte geblockte Trades (Veto-Outcome) ...")
-        veto_stats = veto_outcomes(vetoes, _slow_pf, horizon_hours=args.horizon)
+        # 24h-Naiv-Halt: methodisch falscher Maßstab für ein Reconciliation-Buch,
+        # das beim Leader-Exit schließt - nur zur Einordnung.
+        naive = veto_outcomes(vetoes, _slow_pf, horizon_hours=args.horizon)
+        if naive["evaluated"]:
+            print(f"  Veto 24h (naiv)   {naive['evaluated']} Ep.: {naive['avg_return_pct']:+.2f}% "
+                  f"(Treffer {naive['win_share']:.0%}){_sig(naive)}")
+        # COPIER-TREU: kurzer Horizont nahe der Leader-Haltedauer (Default 2h, feines
+        # Raster). Das ist der Maßstab, der zählt - er misst den Trade, den der Bot
+        # wirklich handelt, und speist daher das Validator-Urteil.
+        veto_stats = veto_outcomes(vetoes, _fast_pf, horizon_hours=args.veto_hold)
         if veto_stats["evaluated"]:
-            print(f"  Veto-Outcome      {veto_stats['evaluated']} Episoden: im Schnitt "
-                  f"{veto_stats['avg_return_pct']:+.2f}% nach {args.horizon:.0f}h "
-                  f"(Trefferquote {veto_stats['win_share']:.0%}){_sig(veto_stats)}")
+            print(f"  Veto {args.veto_hold:.0f}h (treu)  {veto_stats['evaluated']} Ep.: "
+                  f"{veto_stats['avg_return_pct']:+.2f}% (Treffer {veto_stats['win_share']:.0%})"
+                  f"{_sig(veto_stats)}  ← maßgeblich")
 
     # Anomalie-Scout: hatten die "verdächtigen" Wallets recht?
     anomalies = load_jsonl(RUNTIME / "anomalies.jsonl")
@@ -190,6 +204,10 @@ def main() -> None:
                 edge = (v["equity"] / init - 1) * 100 if init else 0
                 print(f"    {name:18s} {v['equity']:>10,.2f} $  ({edge:+.2f}%, {v['trades']} Trades, "
                       f"PnL {v['realized_pnl']:+,.2f}, {v['open_positions']} offen)")
+                # Signifikanz je Trade (sofern Per-Trade-Returns vorliegen)
+                rs = v.get("returns")
+                if rs and rs.get("evaluated"):
+                    print(f"      {'':16s}  je Trade {rs['avg_return_pct']:+.3f}%{_sig(rs)}")
 
     # Shadow-Varianten: welche Config hätte mehr gemacht?
     shadow_recs = []

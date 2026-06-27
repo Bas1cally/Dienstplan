@@ -70,9 +70,9 @@ copytrade:
   max_leaders: 6               # mehr Signalquellen fürs Paper-Trade = belastbarere Daten
   copy_ratio: 0.6              # Day-Trading-Profil: etwas aggressiver allokieren
   max_alloc_per_coin: 0.25     # max. 25% der Equity in einem Coin
-  rebalance_threshold: 0.02    # erst handeln ab 2% Equity Abweichung (gegen Fee-Churn)
+  rebalance_threshold: 0.035   # erst ab 3.5% Equity-Abweichung handeln (Fees fraßen 42%)
   min_notional: 10             # Hyperliquid-Mindestordergröße
-  poll_seconds: 10             # Day-Trading: schneller pollen (weniger Copy-Lag)
+  poll_seconds: 20             # Frequenz-Drossel gegen Churn (Copy-Lag bei >30min-Holds egal)
   analysis:
     days: 21                   # kürzeres Fenster - Day-Trader-Form ist schnelllebig
     min_account_value: 10000   # Mindest-Kontogröße der Kandidaten
@@ -194,9 +194,10 @@ orderbook:
   enabled: true
   notify: false             # KEIN Telegram-Spam - Daten landen still im Report
   coins: [BTC, ETH, SOL, HYPE]
-  poll_seconds: 60
+  poll_seconds: 300         # 1h UND 15min ohne Edge -> seltener pollen, weniger Last
   band_pct: 0.005           # nur Levels innerhalb 0.5% um den Mid zählen
-  imbalance_threshold: 0.5  # |Imbalance| ab hier melden (0.35 war zu laut: 5000+ Signale)
+  imbalance_threshold: 0.65 # |Imbalance| ab hier melden (0.5 erzeugte 10913 Signale = Rauschen)
+  min_signal_gap_s: 900     # min. 15min zwischen Signalen je Coin (gegen Pendeln)
   wall_ratio: 5.0           # Level >= 5x mittlere Größe = Wall
 
 # === Anomalie-Scout: "verdächtig gut informierte" Wallets aufspüren ===

@@ -86,6 +86,7 @@ class OrderBookScout:
         self.flagged: list[dict] = []
         self._last_scan = 0.0
         self._state: dict[str, str] = {}   # coin -> letzte Signal-Signatur (Entprellung)
+        self._last_emit: dict[str, float] = {}  # coin -> letztes Signal (Cooldown)
 
     def tick(self) -> None:
         if self.clock() - self._last_scan < self.cfg.poll_seconds:
@@ -136,7 +137,14 @@ class OrderBookScout:
         sig = f"{side if strong else ''}:{m['wall_side'] if m['has_wall'] else ''}"
         if self._state.get(coin) == sig:
             return None
+        # Cooldown gegen Pendeln um die Schwelle: pro Coin min. Abstand zwischen
+        # Signalen - ein anhaltendes Imbalance-Signal ist nicht alle 60s ein neues.
+        gap = getattr(self.cfg, "min_signal_gap_s", 0)
+        if gap and self.clock() - self._last_emit.get(coin, 0) < gap:
+            self._state[coin] = sig
+            return None
         self._state[coin] = sig
+        self._last_emit[coin] = self.clock()
         finding = {
             "coin": coin, "price": mid, "side": side,
             "imbalance": m["imbalance"], "wall": "",
@@ -150,7 +158,9 @@ class OrderBookScout:
     def _report(self, f: dict, strong: bool) -> None:
         log.info("Orderbuch %s: imbalance %+.2f%s", f["coin"], f["imbalance"],
                  f" | Wall {f['wall']}" if f["wall"] else "")
-        if self.journal:
+        # Nur starke Imbalance ins gemeinsame Journal (sonst verdrängen Wall-Toggles
+        # die Order/Veto-Einträge im report-tail). Eigene Datei behält alles.
+        if self.journal and strong:
             self.journal.record("orderbook", **f)
         try:
             RUNTIME.mkdir(exist_ok=True)

@@ -112,7 +112,26 @@ class FundingLab:
     def __init__(self, cfg, paper: PaperBroker):
         self.cfg = cfg                  # FundingLabConfig
         self.paper = paper
-        self._entry: dict[str, dict] = {}    # coin -> {"price", "t", "stop"}
+        self._entry: dict[str, dict] = {}    # coin -> {"price", "t", "stop", ...}
+        # Per-Episode-Returns für den Signifikanztest (KI im Report). Persistiert,
+        # damit die Stichprobe Neustarts überlebt.
+        self._returns_path = paper.path.parent / "lab_funding_returns.json"
+        self.closed_returns: list[float] = self._load_returns()
+
+    def _load_returns(self) -> list[float]:
+        import json
+        try:
+            return list(json.loads(self._returns_path.read_text()))
+        except (OSError, ValueError):
+            return []
+
+    def _save_returns(self) -> None:
+        import json
+        try:
+            self._returns_path.parent.mkdir(exist_ok=True)
+            self._returns_path.write_text(json.dumps(self.closed_returns[-2000:]))
+        except OSError:
+            pass
 
     def on_pulse(self, pulses: list, prices: dict[str, float], equity: float,
                  now: float | None = None) -> None:
@@ -144,6 +163,12 @@ class FundingLab:
                 self.paper.execute(coin, -size, price)
                 self._entry.pop(coin, None)
                 exited.add(coin)  # nicht im selben Tick neu eröffnen
+                # Episode-Return (Funding + Kurs - Fees) als % vom Einstiegs-Notional
+                notional = ent.get("notional", 0.0)
+                if notional:
+                    ep_pnl = self.paper.realized_pnl - ent.get("start_realized", 0.0)
+                    self.closed_returns.append(ep_pnl / notional)
+                    self._save_returns()
                 reason = "Stop" if hit_stop else "Zeitlimit" if timed_out else "Funding normalisiert"
                 log.info("FundingLab %s: Exit (%s) @ %.4f", coin, reason, price)
 
@@ -169,7 +194,9 @@ class FundingLab:
                 continue
             self.paper.execute(coin, size, price)
             stop = price * (1 - direction * self.cfg.stop_frac)
-            self._entry[coin] = {"price": price, "t": now, "stop": stop, "funding_t": now}
+            self._entry[coin] = {"price": price, "t": now, "stop": stop, "funding_t": now,
+                                 "start_realized": self.paper.realized_pnl,
+                                 "notional": abs(size) * price}
             log.info("FundingLab %s: %s @ %.4f (Funding %+.0f%% p.a., kassiert)",
                      coin, "LONG" if direction > 0 else "SHORT", price, p.funding_apr * 100)
 
@@ -247,6 +274,12 @@ class LabFleet:
                 "fees_paid": round(b.fees_paid, 2),
                 "open_positions": len(b.positions),
             }
+            # Signifikanz je Spur: braucht Per-Trade-Returns (aktuell FundingLab).
+            returns = getattr(lab, "closed_returns", None)
+            if returns:
+                from .report import _return_stats
+
+                out[lab.name]["returns"] = _return_stats(returns, 0)
         return out
 
     def persist_stats(self, prices: dict[str, float]) -> None:

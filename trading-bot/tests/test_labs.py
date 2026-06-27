@@ -173,6 +173,18 @@ def test_funding_lab_credits_carry():
     assert b.realized_pnl - pnl_after_entry > 0
 
 
+def test_funding_lab_records_per_trade_returns():
+    """Per-Trade-Returns für den Signifikanztest werden beim Exit erfasst."""
+    b = broker()
+    lab = FundingLab(FundingLabConfig(coins=["BTC"], entry_apr=0.3, exit_apr=0.1), b)
+    lab.on_pulse([Pulse("BTC", 0.50, 30_000)], {"BTC": 30_000}, equity=10_000, now=0)
+    assert lab.closed_returns == [], "noch offen -> kein Return"
+    # Funding normalisiert -> Exit -> ein Return-Datensatz
+    lab.on_pulse([Pulse("BTC", 0.05, 30_000)], {"BTC": 30_000}, equity=10_000, now=5 * 3600)
+    assert len(lab.closed_returns) == 1
+    assert isinstance(lab.closed_returns[0], float)
+
+
 def test_funding_lab_carry_sign_correct_for_long():
     """Negatives Funding -> Long kassiert -> Gutschrift positiv."""
     b = broker()

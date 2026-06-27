@@ -190,10 +190,11 @@ class OrderBookConfig:
     enabled: bool = True
     notify: bool = False             # Telegram-Push (Default aus - sonst Spam)
     coins: list = None  # type: ignore[assignment]
-    poll_seconds: int = 60
+    poll_seconds: int = 300
     band_pct: float = 0.005          # nur Levels innerhalb 0.5% um den Mid zählen
-    imbalance_threshold: float = 0.35  # |Imbalance| ab hier melden
+    imbalance_threshold: float = 0.6  # |Imbalance| ab hier melden
     wall_ratio: float = 5.0          # Level >= 5x mittlere Größe = Wall
+    min_signal_gap_s: int = 900      # min. Abstand zwischen Signalen je Coin (gegen Pendeln)
     throttle_s: float = 0.5          # Pause zwischen Coin-Abfragen (Rate-Limit)
 
     def __post_init__(self):
