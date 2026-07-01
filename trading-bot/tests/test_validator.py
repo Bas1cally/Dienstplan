@@ -165,6 +165,20 @@ def test_no_validator_passthrough():
     assert len(out) == 1
 
 
+def test_crash_only_ignores_trend_block_keeps_rsi():
+    """crash_only lässt Trend-Score-Blockaden durch, blockt nur harte RSI-Vetos."""
+    from bot.validator import TradeValidator
+
+    v = TradeValidator.__new__(TradeValidator)
+    # reiner Trend-Score-Block (teure Komponente) -> crash_only lässt durch
+    v.check = lambda c, is_long: Verdict(ok=False, score=1, max_score=3,
+                                         reasons=["15m-Trend (ab) gegen Long", "Momentum passt"])
+    assert v.crash_only("BTC", True) is True
+    # harter RSI-Veto (Crash-Versicherung) -> crash_only blockt
+    v.check = lambda c, is_long: Verdict(ok=False, reasons=["VETO: RSI 80 überkauft (15m)"])
+    assert v.crash_only("BTC", True) is False
+
+
 def test_veto_debounced_across_ticks():
     """Dasselbe Veto darf nicht bei jedem Tick neu ins Journal - nur bei Wechsel."""
     j = RecordingJournal()

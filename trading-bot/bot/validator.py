@@ -100,6 +100,18 @@ class TradeValidator:
         self._cache[key] = (time.time(), verdict)
         return verdict
 
+    def crash_only(self, coin: str, is_long: bool) -> bool:
+        """Nur die harte Crash-Versicherung: blockt AUSSCHLIESSLICH bei RSI-Extrem
+        (fallendes Messer), ignoriert die Trend-Score-Blockade.
+
+        Hintergrund: Die teure Komponente ist der Score (EMA-Trend-Alignment), der
+        Gegen-Trend-Einstiege von Mean-Reversion-Leadern blockt. Die harten
+        RSI-Vetos sind die billige Versicherung, die man behalten will. Diese
+        Methode isoliert genau das - für die Shadow-Variante validator_crash_only.
+        Nutzt den gecachten check() (keine Extra-API-Calls)."""
+        v = self.check(coin, is_long)
+        return not any(r.startswith("VETO: RSI") for r in v.reasons)
+
     # ---------- Ebene 1: deterministische Technik ----------
 
     def _technical(self, coin: str, is_long: bool) -> Verdict:

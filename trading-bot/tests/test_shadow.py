@@ -16,11 +16,16 @@ PRICES = {"BTC": 100_000.0, "ETH": 3_500.0}
 
 
 class StubValidator:
-    """Liefert feste Scores je Coin (BTC stark, ETH schwach)."""
+    """Liefert feste Scores je Coin (BTC stark, ETH schwach). ETH zusätzlich
+    RSI-überkauft (harter Veto), damit crash_only ETH blockt, BTC durchlässt."""
 
     def check(self, coin, is_long):
         score = {"BTC": 3, "ETH": 0}.get(coin, 0)
-        return Verdict(ok=score >= 2, score=score, max_score=3)
+        reasons = ["VETO: RSI 80 überkauft (15m)"] if coin == "ETH" else []
+        return Verdict(ok=score >= 2, score=score, max_score=3, reasons=reasons)
+
+    def crash_only(self, coin, is_long):
+        return not any(r.startswith("VETO: RSI") for r in self.check(coin, is_long).reasons)
 
 
 def fleet(tmp, validator=None):
@@ -40,11 +45,23 @@ def test_no_validator_variant_follows_targets_exactly():
 def test_loose_variant_filters_weak_scores():
     with tempfile.TemporaryDirectory() as tmp:
         f = fleet(tmp, validator=StubValidator())
-        assert len(f.variants) == 2
+        assert len(f.variants) == 3  # ohne_validator, validator_locker, validator_crash_only
         f.tick({"BTC": 2_000.0, "ETH": -1_500.0}, PRICES)
         loose = next(v for v in f.variants if v.name == "validator_locker").broker
         assert "BTC" in loose.sizes(), "Score 3 >= 1 muss durch"
         assert "ETH" not in loose.sizes(), "Score 0 < 1 muss geblockt bleiben"
+
+
+def test_crash_only_variant_keeps_rsi_veto_drops_trend_block():
+    with tempfile.TemporaryDirectory() as tmp:
+        f = fleet(tmp, validator=StubValidator())
+        f.tick({"BTC": 2_000.0, "ETH": -1_500.0}, PRICES)
+        crash = next(v for v in f.variants if v.name == "validator_crash_only").broker
+        # BTC: Score-Block würde beim vollen Validator NICHT feuern (Score 3), aber
+        # selbst schwacher Score wäre bei crash_only egal - nur RSI zählt. BTC durch.
+        assert "BTC" in crash.sizes(), "kein RSI-Veto -> crash_only lässt durch (Trend-Block ignoriert)"
+        # ETH: harter RSI-Veto -> auch crash_only blockt (Versicherung bleibt)
+        assert "ETH" not in crash.sizes(), "RSI-Veto muss auch bei crash_only blocken"
 
 
 def test_variants_reconcile_their_own_book():

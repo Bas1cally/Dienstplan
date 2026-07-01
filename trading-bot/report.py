@@ -204,10 +204,11 @@ def main() -> None:
                 edge = (v["equity"] / init - 1) * 100 if init else 0
                 print(f"    {name:18s} {v['equity']:>10,.2f} $  ({edge:+.2f}%, {v['trades']} Trades, "
                       f"PnL {v['realized_pnl']:+,.2f}, {v['open_positions']} offen)")
-                # Signifikanz je Trade (sofern Per-Trade-Returns vorliegen)
+                # Signifikanz je Episode (Fills != Episoden: eine Episode = open+close)
                 rs = v.get("returns")
                 if rs and rs.get("evaluated"):
-                    print(f"      {'':16s}  je Trade {rs['avg_return_pct']:+.3f}%{_sig(rs)}")
+                    print(f"      {'':16s}  {rs['evaluated']} Episoden, je Episode "
+                          f"{rs['avg_return_pct']:+.3f}%{_sig(rs)}")
 
     # Shadow-Varianten: welche Config hätte mehr gemacht?
     shadow_recs = []
