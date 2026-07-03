@@ -115,8 +115,9 @@ def main() -> None:
     if s["veto_reasons"]:
         print(f"    Gründe          {s['veto_reasons']}")
     if paper:
+        per_day = f", {s['fees_per_day']:.2f}/Tag" if s.get("fees_per_day") is not None else ""
         print(f"  Realisierter PnL  {s['realized_pnl']:+,.2f} USD  |  Fees {s['fees_paid']:,.2f} "
-              f"({s['fee_share_pct']:.0f}% vom Brutto)")
+              f"({s['fee_share_pct']:.0f}% vom Brutto{per_day})")
     if s["scalp_trades"]:
         print(f"  Scalps            {s['scalp_trades']}  PnL {s['scalp_pnl']:+,.2f} USD")
     if s["risk_events"]:
@@ -233,7 +234,14 @@ def main() -> None:
                            if "ohne_validator" not in r and "validator_locker" not in r]
 
     print("\n=== Empfehlungen ===\n")
-    for r in recommendations(s, veto_stats, shadow_stats) + shadow_recs:
+    from bot.config import load_config
+    try:
+        _cfg = load_config()
+        cfg_hint = {"rebalance_threshold": _cfg.copytrade.rebalance_threshold,
+                    "poll_seconds": _cfg.copytrade.poll_seconds}
+    except Exception:
+        cfg_hint = None
+    for r in recommendations(s, veto_stats, shadow_stats, cfg_hint) + shadow_recs:
         print(f"  • {r}")
     print()
 

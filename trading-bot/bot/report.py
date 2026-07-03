@@ -112,6 +112,8 @@ def summarize(journal: list[dict], history: list[dict], paper: dict | None) -> d
         out["realized_pnl"] = round(float(paper.get("realized_pnl", 0)), 2)
         gross = abs(out["realized_pnl"]) + out["fees_paid"]
         out["fee_share_pct"] = round(out["fees_paid"] / gross * 100, 1) if gross > 0 else 0.0
+        if out.get("days"):
+            out["fees_per_day"] = round(out["fees_paid"] / out["days"], 2)
     return out
 
 
@@ -224,7 +226,8 @@ def _validator_verdict(summary: dict, veto_stats: dict | None,
 
 
 def recommendations(summary: dict, veto_stats: dict | None = None,
-                    shadow_stats: dict | None = None) -> list[str]:
+                    shadow_stats: dict | None = None,
+                    cfg_hint: dict | None = None) -> list[str]:
     """Konkrete Stellschrauben-Vorschläge - die Antwort auf '+1$ nach 4 Wochen'."""
     recs: list[str] = []
     orders = summary.get("orders", 0)
@@ -253,9 +256,18 @@ def recommendations(summary: dict, veto_stats: dict | None = None,
                     f"Taker-Fallback): execution.maker_timeout_s erhöhen (20 -> 40).")
 
     if summary.get("fee_share_pct", 0) > 40 and orders > 10:
-        recs.append(f"Fees fressen {summary['fee_share_pct']:.0f}% des Brutto-PnL: "
-                    f"rebalance_threshold erhöhen (0.02 -> 0.03) und poll_seconds 10 -> 15, "
-                    f"um Rebalance-Churn zu senken.")
+        thr = (cfg_hint or {}).get("rebalance_threshold")
+        if thr is not None and thr >= 0.03:
+            # Drossel ist schon aktiv - dann ist die Quote meist ein Artefakt eines
+            # kleinen Brutto-PnL, keine Handlungsaufforderung.
+            fees_day = summary.get("fees_per_day")
+            recs.append(f"Fee-Quote {summary['fee_share_pct']:.0f}% ist bei kleinem Brutto-PnL "
+                        f"verzerrt - Churn-Drossel ist bereits aktiv (threshold {thr}). "
+                        + (f"Ehrlichere Zahl: {fees_day:.2f} USD Fees/Tag." if fees_day is not None else ""))
+        else:
+            recs.append(f"Fees fressen {summary['fee_share_pct']:.0f}% des Brutto-PnL: "
+                        f"rebalance_threshold erhöhen (z.B. auf 0.035) und poll_seconds auf 20, "
+                        f"um Rebalance-Churn zu senken.")
 
     if summary.get("scalp_trades", 0) >= 5 and summary.get("scalp_pnl", 0) < 0:
         recs.append(f"Scalper nach {summary['scalp_trades']} Trades negativ "

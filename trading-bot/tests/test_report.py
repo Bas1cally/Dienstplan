@@ -177,6 +177,17 @@ def test_recommends_fee_reduction():
     assert any("rebalance_threshold" in r for r in recommendations(s))
 
 
+def test_fee_rec_config_aware_when_throttle_active():
+    """Drossel schon aktiv (threshold >= 0.03): keine 'erhöhen'-Empfehlung mehr,
+    sondern Hinweis auf die verzerrte Quote + Fees/Tag als ehrliche Zahl."""
+    journal = [order(i) for i in range(20)]
+    s = summarize(journal, history(7, 10_000, 10_010), {"fees_paid": 50.0, "realized_pnl": 10.0})
+    recs = recommendations(s, cfg_hint={"rebalance_threshold": 0.035, "poll_seconds": 20})
+    assert not any("rebalance_threshold erhöhen" in r for r in recs)
+    assert any("verzerrt" in r and "Fees/Tag" in r for r in recs)
+    assert s["fees_per_day"] == round(50.0 / s["days"], 2)
+
+
 def test_recommends_disabling_losing_scalper():
     journal = [order(1)] + [{"t": i, "kind": "scalp_close", "pnl": -5.0} for i in range(6)]
     s = summarize(journal, history(3), None)
