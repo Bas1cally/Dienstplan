@@ -33,7 +33,12 @@ class PaperBroker:
         self.realized_pnl = 0.0                # inkl. Fees
         self.fees_paid = 0.0
         self.trades = 0
+        self.created_t = int(time.time())      # für faire Lebenszeit-Vergleiche
         self._load()
+
+    @property
+    def age_days(self) -> float:
+        return max(0.0, (time.time() - self.created_t) / 86_400)
 
     # ---------- Ausführung ----------
 
@@ -129,6 +134,7 @@ class PaperBroker:
             self.path.parent.mkdir(exist_ok=True)
             self.path.write_text(json.dumps({
                 "updated": int(time.time()), "initial_equity": self.initial_equity,
+                "created_t": self.created_t,
                 "positions": self.positions, "realized_pnl": round(self.realized_pnl, 6),
                 "fees_paid": round(self.fees_paid, 6), "trades": self.trades,
             }, indent=2))
@@ -142,6 +148,7 @@ class PaperBroker:
             self.realized_pnl = float(data.get("realized_pnl", 0))
             self.fees_paid = float(data.get("fees_paid", 0))
             self.trades = int(data.get("trades", 0))
+            self.created_t = int(data.get("created_t", self.created_t))
             if self.positions or self.trades:
                 log.info("Paper-Konto geladen: %d Trades, PnL %.2f, %d offene Positionen",
                          self.trades, self.realized_pnl, len(self.positions))

@@ -96,6 +96,9 @@ class ShadowFleet:
                 "equity": round(v.broker.equity(prices), 2),
                 "trades": v.broker.trades,
                 "realized_pnl": round(v.broker.realized_pnl, 2),
+                "age_days": round(v.broker.age_days, 1),
+                # Rendite seit EIGENEM Start - fair unabhängig von der Lebenszeit
+                "return_pct": round((v.broker.equity(prices) / v.broker.initial_equity - 1) * 100, 2),
             }
         return out
 
@@ -109,22 +112,41 @@ class ShadowFleet:
 
 
 def shadow_recommendations(baseline_equity: float, shadows: dict[str, dict],
-                           min_trades: int = 10, min_edge_pct: float = 1.0) -> list[str]:
-    """Vergleicht Varianten gegen das Haupt-Buch und formuliert Konsequenzen."""
+                           min_trades: int = 10, min_edge_pct: float = 1.0,
+                           baseline_age_days: float | None = None,
+                           min_age_days: float = 14.0) -> list[str]:
+    """Vergleicht Varianten gegen das Haupt-Buch und formuliert Konsequenzen.
+
+    Alters-bewusst: eine Variante, die erst wenige Tage läuft, gegen ein
+    langlebiges Haupt-Buch zu vergleichen mischt Zeiträume - der Vorsprung ist
+    dann teils Artefakt (die Variante hat frühe Verluste nie mitgemacht). Solche
+    Varianten bekommen keine Handlungs-Empfehlung, nur einen Warte-Hinweis.
+    """
     recs = []
     for name, s in shadows.items():
         if s["trades"] < min_trades or not baseline_equity:
             continue
         edge = (s["equity"] / baseline_equity - 1) * 100
+        age = s.get("age_days")
+        too_young = age is not None and (age < min_age_days or
+                    (baseline_age_days and age < 0.7 * baseline_age_days))
         if edge >= min_edge_pct:
-            action = {
-                "ohne_validator": "validation.enabled: false erwägen (aber Crash-Schutz geht verloren)",
-                "validator_crash_only": "validation.mode: crash_only erwägen (Trend-Block raus, RSI-Versicherung bleibt)",
-                "validator_locker": "validation.min_score 2 -> 1 setzen",
-            }.get(name, "Filter dieser Variante übernehmen")
-            recs.append(f"Shadow '{name}' liegt {edge:+.1f}% vor dem Haupt-Buch "
-                        f"({s['trades']} Trades): {action}.")
-        elif edge <= -min_edge_pct:
+            if too_young:
+                bl = f" (Haupt-Buch ~{baseline_age_days:.0f})" if baseline_age_days else ""
+                recs.append(f"Shadow '{name}' liegt SCHEINBAR {edge:+.1f}% vorn, läuft aber erst "
+                            f"{age:.0f} Tage{bl} - der Vergleich mischt Lebenszeiten. Erst gleiche "
+                            f"Laufzeit (>= {min_age_days:.0f} Tage inkl. Stresstag) abwarten, DANN "
+                            f"entscheiden. Seit eigenem Start: {s.get('return_pct', 0):+.2f}%.")
+            else:
+                action = {
+                    "ohne_validator": "validation.enabled: false erwägen (aber Crash-Schutz geht verloren)",
+                    "validator_crash_only": "validation.mode: crash_only erwägen (Trend-Block raus, RSI-Versicherung bleibt)",
+                    "validator_locker": "validation.min_score 2 -> 1 setzen",
+                }.get(name, "Filter dieser Variante übernehmen")
+                age_str = f", {age:.0f} Tage" if age is not None else ""
+                recs.append(f"Shadow '{name}' liegt {edge:+.1f}% vor dem Haupt-Buch "
+                            f"({s['trades']} Trades{age_str}): {action}.")
+        elif edge <= -min_edge_pct and not too_young:
             recs.append(f"Shadow '{name}' liegt {edge:+.1f}% HINTER dem Haupt-Buch: "
                         f"aktuelle Filter behalten.")
     return recs

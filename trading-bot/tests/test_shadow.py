@@ -104,7 +104,8 @@ def test_stats_shape_and_persistence():
         f.tick({"BTC": 2_000.0}, PRICES)
         stats = f.stats(PRICES)
         v = stats["ohne_validator"]
-        assert set(v) == {"equity", "trades", "realized_pnl"} and v["trades"] == 1
+        assert {"equity", "trades", "realized_pnl", "age_days", "return_pct"} <= set(v)
+        assert v["trades"] == 1
         # Neustart: gleicher State
         f2 = fleet(tmp)
         assert f2.variants[0].broker.trades == 1
@@ -121,6 +122,20 @@ def test_shadow_recommendations():
     recs = shadow_recommendations(10_000, {"ohne_validator": {"equity": 9_700, "trades": 25,
                                                               "realized_pnl": -300}})
     assert any("behalten" in r for r in recs)
+
+
+def test_shadow_recommendations_age_aware():
+    """Junge Variante gegen langlebiges Haupt-Buch: nur Warte-Hinweis, keine Aktion."""
+    young = {"validator_crash_only": {"equity": 10_110, "trades": 284, "realized_pnl": 110,
+                                      "age_days": 7.0, "return_pct": 1.1}}
+    recs = shadow_recommendations(10_000, young, baseline_age_days=28.0)
+    assert any("SCHEINBAR" in r and "erst 7 Tage" in r for r in recs)
+    assert not any("crash_only erwägen" in r for r in recs), "keine Aktion bei zu junger Variante"
+    # gleiche Laufzeit -> echte Empfehlung
+    mature = {"validator_crash_only": {"equity": 10_300, "trades": 284, "realized_pnl": 300,
+                                       "age_days": 20.0, "return_pct": 3.0}}
+    recs2 = shadow_recommendations(10_000, mature, baseline_age_days=25.0)
+    assert any("crash_only erwägen" in r for r in recs2)
 
 
 if __name__ == "__main__":

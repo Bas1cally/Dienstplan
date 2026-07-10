@@ -30,8 +30,10 @@ def _dedup_episodes(entries: list[dict], horizon_hours: float) -> list[dict]:
     window = horizon_hours * 3600
     kept, last_t = [], {}
     for e in sorted(entries, key=lambda e: e.get("t", 0)):
-        key = (e.get("coin"), e.get("side"),
-               e.get("address") or round(float(e.get("price") or 0), 6))
+        # Kein Preis im Key: dieselbe Blockade/Imbalance wird je Tick zu leicht
+        # anderem Mid neu geloggt - mit Preis im Key würde sie NICHT zusammen-
+        # gefasst (serielle Korrelation). Adresse (Anomalie/TWAP) bleibt im Key.
+        key = (e.get("coin"), e.get("side"), e.get("address") or "")
         t = e.get("t", 0)
         prev = last_t.get(key)
         if prev is not None and t - prev < window:
@@ -145,10 +147,12 @@ def veto_outcomes(vetoes: list[dict], price_fn, horizon_hours: float = 24,
     Richtungsfrage "war das Veto richtig?", nicht um exakte Trade-Simulation.
     """
     returns: list[float] = []
-    # Erst Episoden deduplizieren (gegen Pseudo-Replikation), dann ältester
-    # zuerst bewerten: nur ausgereifte Einträge (t + Horizont in der
-    # Vergangenheit) liefern einen Zukunftspreis.
-    for v in _dedup_episodes(vetoes, horizon_hours):
+    ts: list[int] = []
+    # NEUESTE gereifte Episoden zuerst: sonst bewertet das Fenster für immer die
+    # ältesten 60 Episoden vom Journal-Anfang - die Zahlen ändern sich zwischen
+    # Reports nie (genau das Symptom). Unreife Einträge (Zukunftspreis fehlt)
+    # werden übersprungen und verbrauchen kein Budget.
+    for v in reversed(_dedup_episodes(vetoes, horizon_hours)):
         if len(returns) >= max_samples:
             break
         coin, side, t0 = v.get("coin"), v.get("side"), v.get("t")
@@ -158,7 +162,13 @@ def veto_outcomes(vetoes: list[dict], price_fn, horizon_hours: float = 24,
             continue
         direction = 1 if side == "LONG" else -1
         returns.append(direction * (p1 / p0 - 1))
-    return _return_stats(returns, horizon_hours)
+        if t0:
+            ts.append(int(t0))
+    st = _return_stats(returns, horizon_hours)
+    if ts:
+        # Fenster-Zeitraum ausweisen, damit eine eingefrorene Messung auffällt
+        st["window_from"], st["window_to"] = min(ts), max(ts)
+    return st
 
 
 def anomaly_outcomes(anomalies: list[dict], price_fn, horizon_hours: float = 24,

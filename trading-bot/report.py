@@ -141,6 +141,11 @@ def main() -> None:
             print(f"  Veto {args.veto_hold:.0f}h (treu)  {veto_stats['evaluated']} Ep.: "
                   f"{veto_stats['avg_return_pct']:+.2f}% (Treffer {veto_stats['win_share']:.0%})"
                   f"{_sig(veto_stats)}  ← maßgeblich")
+            if veto_stats.get("window_from"):
+                import datetime as _dt
+                a = _dt.datetime.utcfromtimestamp(veto_stats["window_from"]).strftime("%d.%m")
+                b = _dt.datetime.utcfromtimestamp(veto_stats["window_to"]).strftime("%d.%m")
+                print(f"                    Fenster: {a}–{b} (rollt mit; ändert es sich nie, klemmt die Messung)")
 
     # Anomalie-Scout: hatten die "verdächtigen" Wallets recht?
     anomalies = load_jsonl(RUNTIME / "anomalies.jsonl")
@@ -220,17 +225,21 @@ def main() -> None:
 
         shadows = json.loads(shadows_file.read_text()).get("variants", {})
         baseline = s.get("equity_end") or (10_000 + s.get("realized_pnl", 0))
+        baseline_age = s.get("days")
         if shadows:
             print("\n  Shadow-Varianten (gleiche Daten, andere Filter):")
             for name, v in shadows.items():
                 edge = (v["equity"] / baseline - 1) * 100 if baseline else 0
+                age = v.get("age_days")
+                # Junge Variante: fairer ist die Rendite seit EIGENEM Start
+                young = age is not None and baseline_age and age < 0.7 * baseline_age
+                tag = (f"  ⚠ erst {age:.0f}T, seit Start {v.get('return_pct', 0):+.2f}%"
+                       if young else f", {age:.0f}T" if age is not None else "")
                 print(f"    {name:20s} {v['equity']:>10,.2f} $  ({edge:+.2f}% vs. Haupt-Buch, "
-                      f"{v['trades']} Trades)")
+                      f"{v['trades']} Trades{tag})")
             shadow_stats = {"baseline": baseline, "variants": shadows}
-            # Validator-Urteil besitzt recommendations() (sieht beide Signale);
-            # hier nur Shadow-Hinweise zu NICHT-Validator-Varianten anhängen,
-            # damit kein Selbstwiderspruch entsteht.
-            shadow_recs = [r for r in shadow_recommendations(baseline, shadows)
+            shadow_recs = [r for r in shadow_recommendations(baseline, shadows,
+                               baseline_age_days=baseline_age)
                            if "ohne_validator" not in r and "validator_locker" not in r]
 
     print("\n=== Empfehlungen ===\n")

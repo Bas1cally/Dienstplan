@@ -159,6 +159,29 @@ def test_return_stats_significance():
     assert not noisy["significant"]
 
 
+def test_veto_window_rolls_to_newest():
+    """Regression gegen eingefrorene Zahlen: das Fenster nimmt die NEUESTEN
+    gereiften Episoden, nicht für immer die ältesten vom Journal-Anfang."""
+    H = 24 * 3600
+    now = 10_000_000
+    old = [veto(now - (60 - 3 * i) * H, side="LONG", price=90.0) for i in range(8)]   # alt, Einstieg 90
+    new = [veto(now - (24 - 3 * i) * H, side="LONG", price=110.0) for i in range(8)]  # neu, Einstieg 110
+    price_fn = lambda coin, t: 100.0 if t <= now else None
+    stats = veto_outcomes(old + new, price_fn, horizon_hours=24, max_samples=5)
+    assert stats["avg_return_pct"] < 0, "rollendes Fenster -> neueste (Einstieg 110, LONG) dominieren"
+    assert stats["window_to"] > stats["window_from"]
+
+
+def test_dedup_veto_collapses_despite_price_jitter():
+    """Dieselbe Blockade wird je Tick zu leicht anderem Mid geloggt - sie darf
+    trotzdem als EINE Episode zählen (Preis nicht mehr im Dedup-Key)."""
+    from bot.report import _dedup_episodes
+    base = 1_000_000
+    jitter = [{"coin": "BTC", "side": "LONG", "price": 100 + i * 0.01, "t": base + i * 120}
+              for i in range(20)]
+    assert len(_dedup_episodes(jitter, 24)) == 1
+
+
 def test_dedup_collapses_repeated_episodes():
     from bot.report import _dedup_episodes
     H = 24
