@@ -17,7 +17,15 @@ XHR-URL und trage sie hier ein - dann Probe erneut laufen lassen.
 
 import argparse
 import json
+import re
 import sys
+
+_ANSI = re.compile(r"\033\[[0-9;]*m")
+
+
+def _plain(s: str) -> str:
+    """ANSI-Farbcodes strippen (für Telegram/Logs)."""
+    return _ANSI.sub("", s)
 
 # ------------------------------------------------------------------ CONFIG ---
 # Kandidaten-Endpunkte je Venue. `sample` = eine Trader-Kennung zum Testen des
@@ -133,6 +141,25 @@ def verdict(r: dict) -> str:
     if r["leaderboard"][0] == OK:
         return "→ Leaderboard offen, aber Positionen nicht - Endpunkt im Network-Tab prüfen"
     return "→ (noch) nicht nutzbar - echte Endpunkte/Sample-ID eintragen und erneut proben"
+
+
+def summarize(only: str | None = None, fetch=_http) -> str:
+    """Kompakte, Telegram-taugliche Matrix (ohne ANSI). Für den /probe-Befehl."""
+    lines = ["🔍 <b>Multi-DEX-Probe</b> (read-only)"]
+    usable = []
+    for name, cfg in VENUES.items():
+        if only and name != only:
+            continue
+        r = probe_venue(name, cfg, fetch=fetch)
+        rc, lb = _plain(r["reachable"][0]), _plain(r["leaderboard"][0])
+        fp, fpn = _plain(r["foreign_positions"][0]), r["foreign_positions"][1]
+        lines.append(f"\n<b>{name}</b>: API {rc} | Leaderboard {lb} | Positionen {fp} ({fpn})")
+        lines.append(f"  {verdict(r)}")
+        if r["foreign_positions"][0] == OK:
+            usable.append(name)
+    lines.append("\n" + ("✓ scanbar: " + ", ".join(usable) if usable
+                         else "Keine Venue offen scanbar - echte Endpunkte/Sample-IDs nötig."))
+    return "\n".join(lines)
 
 
 def main() -> None:

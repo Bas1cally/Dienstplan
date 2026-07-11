@@ -171,6 +171,7 @@ class Autopilot:
             "/start": self._cmd_start,
             "/resume": self._cmd_resume,
             "/update": self._cmd_update,
+            "/probe": self._cmd_probe,
             "/help": self._cmd_help,
         })
 
@@ -182,7 +183,9 @@ class Autopilot:
                 "/orderbook – Mikrostruktur-Signale\n/twap – laufende Whale-TWAPs\n"
                 "/sprint – Sprint-Buch (1000$ x10, Ziel +100$)\n"
                 "/polymarket – Prediction-Market-Funde\n"
-                "/update – Update ziehen + neu starten\n/stop /start /resume – Autopilot/Halt steuern")
+                "/update – Update ziehen + neu starten\n"
+                "/probe – Multi-DEX-Scan-Probe (Extended/Lighter/…)\n"
+                "/stop /start /resume – Autopilot/Halt steuern")
 
     def _cmd_status(self) -> str:
         s = self.status()
@@ -331,6 +334,25 @@ class Autopilot:
             out.append(f"${f['bet_usdc']:,.0f} auf {f['outcome']} — „{f['market'][:40]}\" "
                        f"(PnL ${f['realized_pnl']:,.0f})")
         return "\n".join(out)
+
+    def _cmd_probe(self) -> str:
+        """Multi-DEX-Scan-Probe vom Handy: prüft, welche Perp-DEXs fremde Trader
+        hergeben. Läuft im Hintergrund (Netz-Calls), Ergebnis kommt per Push -
+        so bleibt der Bot währenddessen antwortbereit."""
+        if not (self.notifier and self.notifier.enabled):
+            return "Probe braucht Telegram-Push (Ergebnis wird gesendet)."
+
+        def run():
+            try:
+                import probe_dexs
+
+                msg = probe_dexs.summarize()
+            except Exception as e:
+                msg = f"⚠️ Probe fehlgeschlagen: {str(e)[:250]}"
+            self.notifier.send(msg)
+
+        threading.Thread(target=run, daemon=True, name="probe").start()
+        return "🔍 Probe läuft (bis ~1 Min bei Timeouts) … Ergebnis kommt gleich als Nachricht."
 
     def _cmd_update(self) -> str:
         """Zieht das neueste Update (git pull) und startet neu - per Telegram vom

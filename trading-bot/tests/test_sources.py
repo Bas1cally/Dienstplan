@@ -115,6 +115,26 @@ def test_probe_open_but_no_position_fields_is_warn():
     assert "keine pos-Felder" in r["foreign_positions"][1]
 
 
+def test_summarize_telegram_text():
+    fetch = _fetch_map({
+        "info": (200, {"assetPositions": [{"position": {}}], "marginSummary": {}}),
+        "leaderboard": (200, [{"a": 1}]),
+    })
+    txt = probe_dexs.summarize(only="hyperliquid", fetch=fetch)
+    assert "\033" not in txt, "keine ANSI-Codes im Telegram-Text"
+    assert "hyperliquid" in txt and "scanbar: hyperliquid" in txt
+    assert "<b>" in txt  # HTML-Formatierung für Telegram
+
+
+def test_probe_command_registered():
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+    ap = Autopilot(load_config())
+    assert "/probe" in ap.commander.dispatch("/help")
+    # ohne Telegram-Push (Testumgebung) antwortet der Befehl sauber statt zu crashen
+    assert isinstance(ap.commander.dispatch("/probe"), str)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
