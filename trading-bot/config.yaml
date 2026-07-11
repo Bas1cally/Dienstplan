@@ -141,6 +141,20 @@ scalp:
   max_holding_minutes: 30   # Zeit-Stop - ein Scalp wird nie eine Dauerposition
   max_notional_frac: 0.15   # max. 15% Equity Notional
 
+# === Sprint-Buch: 1000$ x10 auf den BESTEN Leader, Ziel +100$ je Zyklus ===
+# Eigenes Paper-Konto: spiegelt die Positionen des jeweils besten Leaders der
+# laufenden Rotation mit 10x Exposure. Bei +100$ (10%) Take-Profit -> Gewinn
+# gebucht ("banked"), Konto auf 1000 zurückgesetzt, nächster Zyklus. Fällt die
+# Equity unter bust_frac, gilt der Zyklus als liquidiert (10x-Realität) und
+# startet ebenfalls neu. RISK_OFF stellt auch dieses Buch glatt.
+sprint:
+  enabled: true
+  equity: 1000
+  leverage: 10
+  target_profit: 100
+  bust_frac: 0.05           # Liquidations-Modell: unter 5% Rest ist der Zyklus geplatzt
+  rebalance_threshold: 0.02
+
 # === Strategie-Labor: eigene Signale parallel im Paper-Schatten messen ===
 # Der Copy-Bot folgt fremden Tradern (kein originäres Alpha). Hier laufen EIGENE
 # Strategien mit Spielgeld parallel mit, damit der Report (python report.py)

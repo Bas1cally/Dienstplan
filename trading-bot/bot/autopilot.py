@@ -143,6 +143,7 @@ class Autopilot:
         self.book_scout = None
         self.twap_scout = None
         self.labs = None
+        self.sprint = None
         self.scalper = None
         self.feed = None
         self._last_watch_poll = 0.0
@@ -164,6 +165,7 @@ class Autopilot:
             "/anomalies": self._cmd_anomalies,
             "/orderbook": self._cmd_orderbook,
             "/twap": self._cmd_twap,
+            "/sprint": self._cmd_sprint,
             "/polymarket": self._cmd_polymarket,
             "/stop": self._cmd_stop,
             "/start": self._cmd_start,
@@ -178,6 +180,7 @@ class Autopilot:
         return ("<b>Befehle</b>\n/status – Zustand & Equity\n/report – Auswertung\n"
                 "/positions – offene Positionen + PnL\n/leaders – Leader + ROI\n/anomalies – HL-Scout-Funde\n"
                 "/orderbook – Mikrostruktur-Signale\n/twap – laufende Whale-TWAPs\n"
+                "/sprint – Sprint-Buch (1000$ x10, Ziel +100$)\n"
                 "/polymarket – Prediction-Market-Funde\n"
                 "/update – Update ziehen + neu starten\n/stop /start /resume – Autopilot/Halt steuern")
 
@@ -287,6 +290,17 @@ class Autopilot:
             out.append(f"{f['coin']}: Imbalance {f['imbalance']:+.2f}"
                        + (f" | Wall {f['wall']}" if f.get("wall") else ""))
         return "\n".join(out)
+
+    def _cmd_sprint(self) -> str:
+        if not self.sprint:
+            return "Sprint-Buch nicht aktiv (sprint.enabled / dry_run prüfen)."
+        s = self.sprint.stats(self.copier.last_prices if self.copier else {})
+        lead = f"<code>{s['leader'][:10]}…</code>" if s.get("leader") else "n/a"
+        return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']})\n"
+                f"Equity: {s['equity']:,.2f} / Ziel {s['target']:,.0f} "
+                f"({s['progress_pct']:+.0f}% des Wegs)\n"
+                f"Bilanz: {s['won']}✅ {s['busted']}💥 | banked {s['banked']:+,.2f} $\n"
+                f"Bester Leader: {lead} | Trades: {s['trades']}")
 
     def _cmd_twap(self) -> str:
         flagged = self.twap_scout.flagged[-6:] if self.twap_scout else []
@@ -431,6 +445,12 @@ class Autopilot:
                 if self.labs and self.copier:
                     self.labs.tick(self.copier.last_prices)
                     self.labs.persist_stats(self.copier.last_prices)
+                if self.sprint and self.copier and self.copier.last_snapshots:
+                    from .news.guard import RiskLevel
+
+                    off = bool(self.guard and self.guard.last_level == RiskLevel.RISK_OFF)
+                    self.sprint.tick(self.leaders, self.copier.last_snapshots,
+                                     self.copier.last_prices, risk_off=off)
                 self._maybe_digest()
                 self._maybe_watchdog()
                 self._publish()
@@ -562,6 +582,16 @@ class Autopilot:
                                  self.cfg.backtest.initial_equity, self.cfg.backtest.fee_rate)
             log.info("Strategie-Labor aktiv: %s (Paper, eigene Signale zur Messung)",
                      ", ".join(l.name for l in self.labs.labs))
+        # Sprint-Buch: 1000$ x Hebel auf den besten Leader, Ziel +100$ je Zyklus
+        self.sprint = None
+        if self.cfg.dry_run and self.cfg.sprint.enabled:
+            from .sprint import SprintBook
+
+            self.sprint = SprintBook(self.cfg.sprint, self.cfg.backtest.fee_rate,
+                                     notifier=self.notifier, journal=self.journal)
+            log.info("Sprint-Buch aktiv: %.0f$ x%.0f auf den besten Leader, Ziel +%.0f$/Zyklus",
+                     self.cfg.sprint.equity, self.cfg.sprint.leverage,
+                     self.cfg.sprint.target_profit)
         self.scalper = None
         if self.cfg.scalp.enabled:
             from .scalper import VolScalper
@@ -700,6 +730,8 @@ class Autopilot:
             polymarket=list(self.poly_scout.flagged[-5:]) if self.poly_scout else [],
             labs=(self.labs.stats(self.copier.last_prices)
                   if self.labs and self.copier and self.copier.last_prices else None),
+            sprint=(self.sprint.stats(self.copier.last_prices)
+                    if self.sprint and self.copier and self.copier.last_prices else None),
             equity=equity,
             positions=positions or [],
             paper=paper_stats,

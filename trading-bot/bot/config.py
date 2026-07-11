@@ -328,6 +328,22 @@ class LabsConfig:
 
 
 @dataclass
+class SprintConfig:
+    """Sprint-Buch: kleines Konto mit vollem Hebel auf den BESTEN Leader.
+
+    Ziel +target_profit je Zyklus, dann Reset; unter bust_frac gilt der Zyklus
+    als liquidiert (10x-Realität). Reiner Paper-Track, eigenes Konto.
+    """
+    enabled: bool = True
+    equity: float = 1000.0          # frisches Kapital je Zyklus
+    leverage: float = 10.0          # Exposure-Multiplikator auf den besten Leader
+    target_profit: float = 100.0    # Take-Profit je Zyklus (+10%)
+    bust_frac: float = 0.05         # Liquidations-Modell: darunter ist der Zyklus geplatzt
+    rebalance_threshold: float = 0.02
+    min_notional: float = 10.0
+
+
+@dataclass
 class Config:
     network: str
     dry_run: bool
@@ -350,6 +366,7 @@ class Config:
     twap: TwapConfig
     polymarket: PolymarketConfig
     labs: LabsConfig
+    sprint: SprintConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -385,6 +402,7 @@ def load_config(path: Path | None = None) -> Config:
         twap=TwapConfig(**raw.get("twap", {})),
         polymarket=PolymarketConfig(**raw.get("polymarket", {})),
         labs=labs,
+        sprint=SprintConfig(**raw.get("sprint", {})),
     )
     _validate(cfg)
     return cfg
@@ -420,6 +438,13 @@ def _validate(cfg: Config) -> None:
         raise ValueError("copy_ratio muss zwischen 0 und 1 liegen")
     if not 0 < ct.max_alloc_per_coin <= 0.5:
         raise ValueError("max_alloc_per_coin muss zwischen 0 und 50% liegen")
+    sp = cfg.sprint
+    if not 1 <= sp.leverage <= 25:
+        raise ValueError("sprint.leverage muss zwischen 1 und 25 liegen")
+    if sp.target_profit <= 0 or sp.equity <= 0:
+        raise ValueError("sprint.equity und sprint.target_profit müssen positiv sein")
+    if not 0 < sp.bust_frac < 0.5:
+        raise ValueError("sprint.bust_frac muss zwischen 0 und 0.5 liegen")
 
 
 def load_credentials() -> tuple[str, str]:

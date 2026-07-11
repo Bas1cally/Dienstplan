@@ -216,6 +216,20 @@ def main() -> None:
                     print(f"      {'':16s}  {rs['evaluated']} Episoden, je Episode "
                           f"{rs['avg_return_pct']:+.3f}%{_sig(rs)}")
 
+    # Sprint-Buch: 1000$ x Hebel auf den besten Leader, Ziel +100$ je Zyklus
+    sprint_state = RUNTIME / "sprint_cycles.json"
+    sprint_book = RUNTIME / "sprint_book.json"
+    if sprint_state.exists() or sprint_book.exists():
+        st = json.loads(sprint_state.read_text()) if sprint_state.exists() else {}
+        bk = json.loads(sprint_book.read_text()) if sprint_book.exists() else {}
+        won, busted = int(st.get("won", 0)), int(st.get("busted", 0))
+        eq_real = float(bk.get("initial_equity", 1000)) + float(bk.get("realized_pnl", 0))
+        print("\n  Sprint-Buch (x10 auf besten Leader, Ziel +100$/Zyklus):")
+        print(f"    Zyklus {won + busted + 1} läuft: Equity {eq_real:,.2f} (realisiert, "
+              f"{int(bk.get('trades', 0))} Trades)")
+        print(f"    Bilanz: {won}x Ziel erreicht, {busted}x geplatzt, "
+              f"banked {float(st.get('banked', 0)):+,.2f} $")
+
     # Shadow-Varianten: welche Config hätte mehr gemacht?
     shadow_recs = []
     shadow_stats = None
