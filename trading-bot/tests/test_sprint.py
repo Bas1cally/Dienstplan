@@ -180,6 +180,48 @@ def test_restart_keeps_ride_and_rebaselines():
         assert fresh.paper.sizes() == {}
 
 
+def test_scans_all_leaders_not_just_best():
+    """Der Beste pausiert, die Nr. 2 liefert das frische Signal -> Einstieg.
+    (Vorher verharrte das Buch stur auf dem Besten - 'sonst passiert garnix'.)"""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        two = leaders(("0xbest", 90), ("0xsecond", 50))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)   # Baselines
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000, ETH=300)], P)
+        assert b.paper.sizes().get("ETH", 0) > 0, "Signal der Nr. 2 wird genommen"
+        assert b.ride_leader == "0xsecond"
+
+
+def test_simultaneous_signals_highest_score_wins():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        two = leaders(("0xbest", 90), ("0xsecond", 50))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000, BTC=400), snap("0xsecond", 50_000, ETH=300)], P)
+        sizes = b.paper.sizes()
+        assert "BTC" in sizes and "ETH" not in sizes, "höchster Score gewinnt"
+        assert b.ride_leader == "0xbest"
+
+
+def test_other_leader_ignored_while_riding_no_stale_entry_after():
+    """Im Ritt zählen fremde Signale nicht - und nach dem Ritt gelten sie als
+    LAUFENDE Trades (Baseline lief mit), nicht als frisch."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        two = leaders(("0xbest", 90), ("0xsecond", 50))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000, BTC=400), snap("0xsecond", 50_000)], P)
+        assert b.ride_leader == "0xbest"
+        # Während des Ritts eröffnet die Nr. 2 ETH -> ignoriert, Baseline läuft mit
+        b.tick(two, [snap("0xbest", 50_000, BTC=400), snap("0xsecond", 50_000, ETH=300)], P)
+        assert "ETH" not in b.paper.sizes()
+        # Ritt endet (Leader-Exit) -> flach; ETH der Nr. 2 läuft längst -> KEIN Einstieg
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000, ETH=300)], P)
+        assert b.paper.sizes() == {}
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000, ETH=300)], P)
+        assert b.paper.sizes() == {}, "laufender Trade der Nr. 2 bleibt tabu"
+
+
 def test_v1_migration_resets_churned_book():
     with tempfile.TemporaryDirectory() as tmp:
         rt = Path(tmp)

@@ -3,12 +3,14 @@
 Zustandsmaschine statt Dauer-Reconciliation (v1 hat mit plan_rebalance je Tick
 139 Trades produziert - bei 10x Hebel frisst das Fees):
 
-  FLACH   - beobachtet den AKTUELL besten Leader der Rotation (LARP-gefiltert).
-            Dessen BESTEHENDE Positionen zählen NICHT (nie in laufende Trades
-            einsteigen) - beim ersten Blick wird sein Buch nur als Baseline
-            gespeichert. Erst ein Übergang 0 -> Position ist ein frisches
-            Signal: Einstieg mit leverage-fachem Exposure, Leader wird für
-            diesen Ritt fixiert.
+  FLACH   - scannt ALLE Leader der Rotation (LARP-gefiltert), nicht nur den
+            besten - sonst passiert tagelang nichts, wenn genau der eine
+            gerade pausiert. Bestehende Positionen zählen NICHT (nie in
+            laufende Trades einsteigen) - jeder Leader bekommt beim ersten
+            Blick eine eigene Baseline. Erst ein Übergang 0 -> Position ist
+            ein frisches Signal; melden mehrere Leader gleichzeitig, gewinnt
+            der mit dem höchsten Score. Einstieg mit leverage-fachem
+            Exposure, dieser Leader ist für den Ritt fixiert.
   IM RITT - kein Rebalancing. Exits NUR wenn: der Leader den Coin komplett
             schließt oder flippt (mitgehen - sein Edge ist das Exit-Timing),
             der Leader aus der Rotation fällt (wir wären blind), RISK_OFF,
@@ -47,8 +49,11 @@ class SprintBook:
         self.busted = 0
         self.total_trades = 0            # über alle abgeschlossenen Zyklen
         self.ride_leader = ""            # fixiert, solange Positionen offen sind
-        self._watched = ""               # aktuell beobachteter Leader (flach)
-        self._leader_prev: dict[str, float] | None = None  # dessen Buch (Baseline)
+        # Baseline je Leader (addr -> coin -> signierte Größe): nur Übergänge
+        # 0 -> Position NACH der Baseline sind frische Signale. Läuft für ALLE
+        # Rotations-Leader mit (auch während eines Ritts), damit nach dem Ritt
+        # keine längst laufenden Positionen fälschlich als "frisch" gelten.
+        self._baselines: dict[str, dict[str, float]] = {}
         self._migrate_v1_or_load()
 
     # ---------- Tick (Zustandsmaschine) ----------
@@ -81,30 +86,34 @@ class SprintBook:
             self._tick_riding(snapshots, prices)
         else:
             self._tick_waiting(leaders, snapshots, prices)
+        # Baselines ALLER Rotations-Leader aktuell halten (auch während eines
+        # Ritts) und Ausgeschiedene vergessen - sonst gelten deren während des
+        # Ritts eröffnete Positionen später fälschlich als "frisch".
+        self._refresh_baselines(leaders, snapshots)
 
-    # ---------- FLACH: auf frisches Signal des besten Leaders warten ----------
+    # ---------- FLACH: alle Leader auf frische Signale scannen ----------
 
     def _tick_waiting(self, leaders: list[dict], snapshots: list,
                       prices: dict[str, float]) -> None:
-        best = max(leaders, key=lambda l: float(l.get("score", 0)))
-        snap = next((s for s in snapshots
-                     if s.address.lower() == str(best.get("address", "")).lower()), None)
-        if snap is None:
-            return
-        book = self._book_of(snap)
-        # Erster Blick auf diesen Leader (oder Neustart): nur Baseline, kein Signal -
-        # seine bestehenden Positionen sind laufende Trades, in die wir NIE einsteigen.
-        if self._watched != snap.address or self._leader_prev is None:
-            self._watched = snap.address
-            self._leader_prev = book
-            return
-        fresh = [c for c, sz in book.items()
-                 if sz != 0 and self._leader_prev.get(c, 0.0) == 0.0]
-        for coin in fresh:
-            self._enter(coin, snap, prices)
-        self._leader_prev = book
+        by_addr = {s.address.lower(): s for s in snapshots}
+        # Höchster Score zuerst: melden mehrere Leader gleichzeitig, gewinnt der Beste
+        for l in sorted(leaders, key=lambda l: float(l.get("score", 0)), reverse=True):
+            snap = by_addr.get(str(l.get("address", "")).lower())
+            if snap is None:
+                continue
+            prev = self._baselines.get(snap.address.lower())
+            if prev is None:
+                continue  # erster Blick: _refresh_baselines legt die Baseline an
+            book = self._book_of(snap)
+            fresh = [c for c, sz in book.items() if sz != 0 and prev.get(c, 0.0) == 0.0]
+            if not fresh:
+                continue
+            for coin in fresh:
+                self._enter(coin, snap, prices)
+            if self.paper.sizes():
+                return  # eingestiegen: dieser Leader ist der Ritt
 
-    # ---------- IM RITT: halten, nur Leader-Exits folgen ----------
+    # ---------- IM RITT: halten, nur dem Ride-Leader folgen ----------
 
     def _tick_riding(self, snapshots: list, prices: dict[str, float]) -> None:
         snap = next((s for s in snapshots
@@ -117,11 +126,10 @@ class SprintBook:
             for coin in list(self.paper.sizes()):
                 self._close_coin(coin, prices, "leader_rotated")
             self.ride_leader = ""
-            self._watched, self._leader_prev = "", None
             self._save_state()
             return
         book = self._book_of(snap)
-        baseline_only = self._watched != snap.address or self._leader_prev is None
+        prev = self._baselines.get(snap.address.lower())
 
         # Exit-Folge: Leader hat den Coin komplett geschlossen oder geflippt
         for coin, our_size in list(self.paper.sizes().items()):
@@ -133,19 +141,28 @@ class SprintBook:
                 # (die Frisch-Erkennung sieht einen Flip nicht als 0 -> Position)
                 self._close_coin(coin, prices, "leader_flip")
                 self._enter(coin, snap, prices)
-        # Weitere frische Einstiege desselben Leaders mitnehmen (nicht beim Baseline-Tick)
-        if not baseline_only:
+        # Weitere frische Einstiege desselben Leaders mitnehmen (nicht ohne Baseline,
+        # z.B. direkt nach Neustart - dann erst re-baselinen, kein Fehl-Einstieg)
+        if prev is not None:
             fresh = [c for c, sz in book.items()
-                     if sz != 0 and self._leader_prev.get(c, 0.0) == 0.0
+                     if sz != 0 and prev.get(c, 0.0) == 0.0
                      and c not in self.paper.sizes()]
             for coin in fresh:
                 self._enter(coin, snap, prices)
-        self._watched = snap.address
-        self._leader_prev = book
 
         if not self.paper.sizes():
             self.ride_leader = ""   # alle Ritte beendet -> zurück auf FLACH
             self._save_state()
+
+    def _refresh_baselines(self, leaders: list[dict], snapshots: list) -> None:
+        keep = {str(l.get("address", "")).lower() for l in leaders}
+        keep.add(self.ride_leader.lower())
+        for s in snapshots:
+            if s.address.lower() in keep:
+                self._baselines[s.address.lower()] = self._book_of(s)
+        for addr in list(self._baselines):
+            if addr not in keep:
+                self._baselines.pop(addr, None)
 
     # ---------- Ein-/Ausstieg ----------
 
@@ -213,7 +230,7 @@ class SprintBook:
         if self.journal:
             self.journal.record(kind, cycle=cycle, pnl=round(pnl, 2),
                                 banked=round(self.banked, 2),
-                                leader=self.ride_leader or self._watched)
+                                leader=self.ride_leader)
         if self.notifier:
             head = "🏁 <b>Sprint-Zyklus {c}: Ziel erreicht</b>" if won else \
                    "💥 <b>Sprint-Zyklus {c}: geplatzt</b> (10x-Liquidations-Modell)"
@@ -224,7 +241,7 @@ class SprintBook:
             )
         self.paper.reset()
         self.ride_leader = ""
-        self._watched, self._leader_prev = "", None
+        self._baselines.clear()
         self._save_state()
 
     # ---------- Status & Persistenz ----------
@@ -248,7 +265,7 @@ class SprintBook:
             "trades": self.paper.trades,
             "avg_trades_per_cycle": round((self.total_trades + self.paper.trades)
                                           / max(1, cycles_done + 1), 1),
-            "leader": self.ride_leader or self._watched,
+            "leader": self.ride_leader,
         }
 
     def _migrate_v1_or_load(self) -> None:
