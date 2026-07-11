@@ -120,9 +120,17 @@ def paper_reset():
     from bot.paper import PaperBroker
 
     PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate).reset()
-    for name in ("history.jsonl", "trades.jsonl", "leader_perf.json", "risk_state.json"):
+    # ALLE Bücher und Messdaten zurücksetzen - sonst behalten Shadows/Labs/Sprint
+    # ihre alte Historie und jeder A/B-Vergleich gegen das frische Haupt-Buch
+    # wäre ein Äpfel-Birnen-Vergleich (unterschiedliche Lebenszeiten).
+    for name in ("history.jsonl", "trades.jsonl", "leader_perf.json", "risk_state.json",
+                 "shadows.json", "shadow_ohne_validator.json", "shadow_validator_locker.json",
+                 "shadow_validator_crash_only.json", "labs.json", "lab_trend.json",
+                 "lab_funding.json", "lab_funding_returns.json", "sprint_book.json",
+                 "sprint_cycles.json", "anomalies.jsonl", "orderbook.jsonl", "twap.jsonl",
+                 "polymarket.jsonl", "signals.jsonl"):
         (Path(__file__).parent / "runtime" / name).unlink(missing_ok=True)
-    log.info("Paper-Konto und Verlaufsdaten zurückgesetzt")
+    log.info("Alle Paper-Bücher (Haupt/Shadows/Labs/Sprint) und Verlaufsdaten zurückgesetzt")
     return {"ok": True}
 
 

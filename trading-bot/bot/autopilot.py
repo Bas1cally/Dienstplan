@@ -259,6 +259,14 @@ class Autopilot:
                         side = "LONG" if r["size"] > 0 else "SHORT"
                         out.append(f"{side} {r['coin']}: {abs(r['size']):.4f} @ {r['entry']:.4f} "
                                    f"(PnL {r['unrealized_pnl']:+,.2f})")
+        if self.sprint:
+            srows = self.sprint.paper.position_rows(prices)
+            if srows:
+                out.append("<b>Sprint-Buch (x10)</b>")
+                for r in srows:
+                    side = "LONG" if r["size"] > 0 else "SHORT"
+                    out.append(f"{side} {r['coin']}: {abs(r['size']):.4f} @ {r['entry']:.4f} "
+                               f"(PnL {r['unrealized_pnl']:+,.2f})")
         return "\n".join(out) if out else "Aktuell keine offenen Positionen."
 
     def _cmd_leaders(self) -> str:
@@ -793,6 +801,11 @@ class Autopilot:
         if self.labs and self.copier and self.copier.last_prices:
             for name, st in self.labs.stats(self.copier.last_prices).items():
                 tracks += f"\n  {name}: {st['realized_pnl']:+,.2f} ({st['trades']} Tr.)"
+        if self.sprint:
+            sp = self.sprint.stats(self.copier.last_prices if self.copier else {})
+            tracks += (f"\n  sprint: Zyklus {sp['cycle']} {sp['state']} "
+                       f"({sp['cycle_pnl']:+,.2f}$), banked {sp['banked']:+,.2f}$ "
+                       f"[{sp['won']}✅/{sp['busted']}💥]")
         msg = (f"📊 <b>Tagesbericht</b>{delta}{bleed}\n"
                f"Orders: {orders} | Vetos: {vetoes}"
                + (f" | Scalp-PnL: {scalp_pnl:+,.2f}" if scalp_pnl else "")
