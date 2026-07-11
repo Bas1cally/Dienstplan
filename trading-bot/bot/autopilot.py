@@ -304,18 +304,27 @@ class Autopilot:
                        + (f" | Wall {f['wall']}" if f.get("wall") else ""))
         return "\n".join(out)
 
-    def _cmd_sprint(self) -> str:
+    def _cmd_sprint(self, arg: str = "") -> str:
         if not self.sprint:
             return "Sprint-Buch nicht aktiv (sprint.enabled / dry_run prüfen)."
-        s = self.sprint.stats(self.copier.last_prices if self.copier else {})
+        prices = self.copier.last_prices if self.copier else {}
+        if arg.lower().strip() == "close":
+            n = self.sprint.close(prices)
+            return (f"⏹ Sprint-Ritt geschlossen ({n} Position(en)) - kein Strike, "
+                    "Zyklus läuft weiter." if n else "Sprint-Buch hält gerade nichts.")
+        s = self.sprint.stats(prices)
         lead = f"<code>{s['leader'][:10]}…</code>" if s.get("leader") else "n/a"
         pos = ", ".join(s["held"]) if s.get("held") else "-"
+        strikes = ", ".join(f"{a}:{n}" for a, n in s.get("strikes", {}).items()) or "-"
+        banned = ", ".join(s.get("banned", [])) or "-"
         return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']}): {s['state']}\n"
                 f"Positionen: {pos}\n"
                 f"Equity: {s['equity']:,.2f} / Ziel {s['target']:,.0f} "
                 f"(Zyklus-PnL {s['cycle_pnl']:+,.2f} $)\n"
                 f"Bilanz: {s['won']}✅ {s['busted']}💥 | banked {s['banked']:+,.2f} $\n"
-                f"Leader: {lead} | Trades: {s['trades']} (Ø {s['avg_trades_per_cycle']}/Zyklus)")
+                f"Strikes: {strikes} | 🚫 gesperrt: {banned}\n"
+                f"Leader: {lead} | Trades: {s['trades']} (Ø {s['avg_trades_per_cycle']}/Zyklus)\n"
+                f"<i>/sprint close = Ritt manuell schließen</i>")
 
     def _cmd_twap(self) -> str:
         flagged = self.twap_scout.flagged[-6:] if self.twap_scout else []

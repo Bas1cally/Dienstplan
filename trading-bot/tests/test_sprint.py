@@ -72,6 +72,76 @@ def _entered(tmp):
     return b
 
 
+def test_partial_scaleout_triggers_exit():
+    """Leader baut >=75% ab (500 -> 100) -> wir gehen mit (Scale-out = Ausstieg)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)   # Einstieg bei Leader-Größe 500
+        b.tick(LED, [snap("0xbest", 50_000, BTC=120)], P)   # 76% abgebaut -> raus
+        assert b.paper.sizes() == {}, "Scale-out >= partial_exit_frac schließt"
+
+
+def test_small_reduction_still_holds():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)
+        t0 = b.paper.trades
+        b.tick(LED, [snap("0xbest", 50_000, BTC=300)], P)   # nur 40% ab -> halten
+        assert b.paper.sizes() and b.paper.trades == t0
+
+
+def test_losing_ride_strikes_leader_two_bans():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        led = leaders(("0xbad", 80))
+        # Ritt 1: Einstieg long, Preis fällt, Leader exit -> Verlust -> Strike 1
+        b.tick(led, [snap("0xbad", 50_000)], P)
+        b.tick(led, [snap("0xbad", 50_000, BTC=500)], P)
+        b.tick(led, [snap("0xbad", 50_000)], {"BTC": 99.0, "ETH": 100.0})  # exit im Minus
+        assert b.strikes.get("0xbad") == 1 and "0xbad" not in b.banned
+        # Ritt 2: erneut Verlust -> Strike 2 -> Ban
+        b.tick(led, [snap("0xbad", 50_000, BTC=500)], {"BTC": 99.0, "ETH": 100.0})
+        b.tick(led, [snap("0xbad", 50_000)], {"BTC": 98.0, "ETH": 100.0})
+        assert b.strikes.get("0xbad") == 2 and "0xbad" in b.banned
+
+
+def test_banned_leader_skipped_in_scan():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.banned.add("0xbad")
+        led = leaders(("0xbad", 99))
+        b.tick(led, [snap("0xbad", 50_000)], P)
+        b.tick(led, [snap("0xbad", 50_000, BTC=500)], P)   # frisches Signal, aber gesperrt
+        assert b.paper.sizes() == {}, "gesperrter Leader wird nicht kopiert"
+
+
+def test_winning_ride_heals_strike():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.strikes["0xok"] = 1
+        led = leaders(("0xok", 80))
+        b.tick(led, [snap("0xok", 50_000)], P)
+        b.tick(led, [snap("0xok", 50_000, BTC=500)], P)
+        b.tick(led, [snap("0xok", 50_000)], {"BTC": 101.0, "ETH": 100.0})  # Gewinn-Exit
+        assert b.strikes.get("0xok") == 0, "profitabler Ritt heilt einen Strike"
+
+
+def test_manual_close_no_strike():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)
+        n = b.close({"BTC": 99.0, "ETH": 100.0})   # im Minus, aber manuell
+        assert n == 1 and b.paper.sizes() == {}
+        assert b.strikes == {}, "manueller Ausstieg strikt niemanden"
+
+
+def test_strikes_survive_restart():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.strikes["0xbad"] = 1
+        b.banned.add("0xzzz")
+        b._save_state()
+        fresh = book(tmp)
+        assert fresh.strikes.get("0xbad") == 1 and "0xzzz" in fresh.banned
+
+
 def test_leader_full_exit_closes_partial_reduce_holds():
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)

@@ -341,6 +341,12 @@ class SprintConfig:
     bust_frac: float = 0.05         # Liquidations-Modell: darunter ist der Zyklus geplatzt
     rebalance_threshold: float = 0.02
     min_notional: float = 10.0
+    # Teil-Exit-Folge: hat der Leader >= partial_exit_frac seiner Einstiegsgröße
+    # abgebaut, steigen wir aus (Scalper skalieren gestaffelt raus).
+    partial_exit_frac: float = 0.75
+    # LARP-Strikes: Verlust-Ritt -> Strike +1, Gewinn-Ritt -> Strike -1 (min 0).
+    # Bei strike_ban Strikes wird der Leader fürs Sprint-Buch gesperrt.
+    strike_ban: int = 2
 
 
 @dataclass
@@ -352,10 +358,21 @@ class LighterConfig:
     """
     enabled: bool = False
     base_url: str = "https://mainnet.zklighter.elliot.ai"
-    accounts: list = None  # type: ignore[assignment]  # Indizes/0x-Adressen
+    accounts: list = None  # type: ignore[assignment]  # optionale manuelle Seed-Indizes/0x
     coins: list = None     # type: ignore[assignment]  # HL-handelbare Whitelist, None=alle
     poll_seconds: int = 120
     copy_ratio: float = 0.5
+    # Automatische Discovery: aktive Konten aus dem öffentlichen Trade-Strom ziehen,
+    # bewerten (LARP/Score) und die Besten im Paper-Schatten messen. Kein manuelles
+    # Wallet-Durchgehen nötig.
+    auto_discover: bool = True
+    trades_url: str = "https://mainnet.zklighter.elliot.ai/api/v1/recentTrades"
+    scan_seconds: int = 300
+    max_candidates: int = 40      # API-Budget je Scan (Snapshot je Kandidat)
+    min_equity: float = 5_000     # Wegwerf-Konten aussortieren
+    min_positions: int = 1        # muss aktuell handeln
+    max_leaders: int = 5          # so viele Beste werden gemessen
+    initial_equity: float = 10_000  # Paper-Konto der Lighter-Messung
 
     def __post_init__(self):
         if self.accounts is None:

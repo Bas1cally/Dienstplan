@@ -49,6 +49,10 @@ class SprintBook:
         self.busted = 0
         self.total_trades = 0            # über alle abgeschlossenen Zyklen
         self.ride_leader = ""            # fixiert, solange Positionen offen sind
+        self.strikes: dict[str, int] = {}   # addr -> aktive Strikes (LARP-Enttarnung)
+        self.banned: set[str] = set()       # fürs Sprint-Buch gesperrte Leader
+        self._ride_start_equity: float | None = None  # Equity bei Ritt-Beginn (PnL-Attribution)
+        self._ride_entry_sizes: dict[str, float] = {}  # coin -> |Leader-Größe| beim Einstieg
         # Baseline je Leader (addr -> coin -> signierte Größe): nur Übergänge
         # 0 -> Position NACH der Baseline sind frische Signale. Läuft für ALLE
         # Rotations-Leader mit (auch während eines Ritts), damit nach dem Ritt
@@ -76,7 +80,10 @@ class SprintBook:
                 log.warning("Sprint: RISK_OFF - stelle glatt (Zyklus läuft weiter)")
                 for coin in list(self.paper.sizes()):
                     self._close_coin(coin, prices, "risk_off")
+                # Markt-Event, nicht Leader-Schuld -> kein Strike, nur zurücksetzen
                 self.ride_leader = ""
+                self._ride_start_equity = None
+                self._ride_entry_sizes.clear()
                 self._save_state()
             return
         if not leaders or not snapshots:
@@ -98,7 +105,10 @@ class SprintBook:
         by_addr = {s.address.lower(): s for s in snapshots}
         # Höchster Score zuerst: melden mehrere Leader gleichzeitig, gewinnt der Beste
         for l in sorted(leaders, key=lambda l: float(l.get("score", 0)), reverse=True):
-            snap = by_addr.get(str(l.get("address", "")).lower())
+            addr = str(l.get("address", "")).lower()
+            if addr in self.banned:
+                continue  # LARP-enttarnt: seine frischen Signale zählen nicht mehr
+            snap = by_addr.get(addr)
             if snap is None:
                 continue
             prev = self._baselines.get(snap.address.lower())
@@ -125,22 +135,24 @@ class SprintBook:
                         self.ride_leader[:10])
             for coin in list(self.paper.sizes()):
                 self._close_coin(coin, prices, "leader_rotated")
-            self.ride_leader = ""
-            self._save_state()
+            self._settle_ride(prices)
             return
         book = self._book_of(snap)
         prev = self._baselines.get(snap.address.lower())
 
-        # Exit-Folge: Leader hat den Coin komplett geschlossen oder geflippt
+        # Exit-Folge: Leader komplett raus / geflippt / >= partial_exit_frac abgebaut
         for coin, our_size in list(self.paper.sizes().items()):
             leader_sz = book.get(coin, 0.0)
+            entry_sz = self._ride_entry_sizes.get(coin, abs(leader_sz))
             if leader_sz == 0.0:
                 self._close_coin(coin, prices, "leader_exit")
             elif (leader_sz > 0) != (our_size > 0):
                 # Flip = mitgehen: alte Richtung schließen UND die neue eröffnen
-                # (die Frisch-Erkennung sieht einen Flip nicht als 0 -> Position)
                 self._close_coin(coin, prices, "leader_flip")
                 self._enter(coin, snap, prices)
+            elif abs(leader_sz) <= (1 - self.cfg.partial_exit_frac) * entry_sz:
+                # Scale-out: Leader hat den Großteil abgebaut -> wir gehen mit
+                self._close_coin(coin, prices, "leader_scaleout")
         # Weitere frische Einstiege desselben Leaders mitnehmen (nicht ohne Baseline,
         # z.B. direkt nach Neustart - dann erst re-baselinen, kein Fehl-Einstieg)
         if prev is not None:
@@ -151,8 +163,7 @@ class SprintBook:
                 self._enter(coin, snap, prices)
 
         if not self.paper.sizes():
-            self.ride_leader = ""   # alle Ritte beendet -> zurück auf FLACH
-            self._save_state()
+            self._settle_ride(prices)   # alle Ritte beendet -> abrechnen + FLACH
 
     def _refresh_baselines(self, leaders: list[dict], snapshots: list) -> None:
         keep = {str(l.get("address", "")).lower() for l in leaders}
@@ -178,8 +189,11 @@ class SprintBook:
         notional = max(-headroom, min(headroom, target))
         if abs(notional) < self.cfg.min_notional:
             return
+        if self._ride_start_equity is None:
+            self._ride_start_equity = equity   # erster Einstieg des Ritts -> PnL-Basis
         self.paper.execute(coin, notional / price, price)
         self.ride_leader = snap.address
+        self._ride_entry_sizes[coin] = abs(self._book_of(snap).get(coin, 0.0))
         side = "LONG" if notional > 0 else "SHORT"
         cycle = self.won + self.busted + 1
         log.info("Sprint: %s %s $%.0f (frisches Signal von %s, Zyklus %d)",
@@ -192,6 +206,40 @@ class SprintBook:
             self.notifier.send(f"🟢 <b>Sprint-Einstieg</b>: {side} {coin} "
                                f"${abs(notional):,.0f}\nLeader <code>{snap.address[:10]}…</code> "
                                f"| Zyklus {cycle}")
+        self._save_state()
+
+    def _settle_ride(self, prices: dict[str, float]) -> None:
+        """Ritt beendet (flach): PnL dem Ride-Leader zuschreiben - Verlust = Strike,
+        Gewinn heilt einen Strike. 2 Strikes -> LARP-enttarnt, gesperrt."""
+        leader = self.ride_leader
+        start = self._ride_start_equity
+        self.ride_leader = ""
+        self._ride_entry_sizes.clear()
+        self._ride_start_equity = None
+        if leader and start is not None:
+            ride_pnl = self.paper.equity(prices) - start
+            key = leader.lower()
+            if ride_pnl < 0:
+                self.strikes[key] = self.strikes.get(key, 0) + 1
+                n = self.strikes[key]
+                log.warning("Sprint: Verlust-Ritt %+.2f -> Strike %d für %s",
+                            ride_pnl, n, leader[:10])
+                if self.journal:
+                    self.journal.record("sprint_strike", leader=leader, strikes=n,
+                                        ride_pnl=round(ride_pnl, 2))
+                if n >= self.cfg.strike_ban and key not in self.banned:
+                    self.banned.add(key)
+                    if self.journal:
+                        self.journal.record("sprint_ban", leader=leader)
+                    if self.notifier:
+                        self.notifier.send(
+                            f"🚫 <b>Leader enttarnt</b> <code>{leader[:10]}…</code>\n"
+                            f"{n} Verlust-Ritte in Folge - fürs Sprint-Buch gesperrt.")
+                elif self.notifier:
+                    self.notifier.send(f"⚠️ Strike {n}/{self.cfg.strike_ban} für "
+                                       f"<code>{leader[:10]}…</code> (Verlust-Ritt {ride_pnl:+,.2f}$)")
+            elif ride_pnl > 0 and self.strikes.get(key):
+                self.strikes[key] = max(0, self.strikes[key] - 1)  # profitabel heilt
         self._save_state()
 
     def _close_coin(self, coin: str, prices: dict[str, float], reason: str) -> None:
@@ -241,8 +289,22 @@ class SprintBook:
             )
         self.paper.reset()
         self.ride_leader = ""
+        self._ride_start_equity = None
+        self._ride_entry_sizes.clear()
         self._baselines.clear()
         self._save_state()
+
+    def close(self, prices: dict[str, float]) -> int:
+        """Manueller Not-Ausstieg (/sprint close): Ritt zu, Zyklus läuft weiter,
+        KEIN Strike (war deine Entscheidung, nicht der Leader). Gibt Anzahl zu."""
+        n = len(self.paper.sizes())
+        for coin in list(self.paper.sizes()):
+            self._close_coin(coin, prices, "manual")
+        self.ride_leader = ""
+        self._ride_start_equity = None
+        self._ride_entry_sizes.clear()
+        self._save_state()
+        return n
 
     # ---------- Status & Persistenz ----------
 
@@ -266,6 +328,8 @@ class SprintBook:
             "avg_trades_per_cycle": round((self.total_trades + self.paper.trades)
                                           / max(1, cycles_done + 1), 1),
             "leader": self.ride_leader,
+            "strikes": {a[:10]: n for a, n in self.strikes.items() if n > 0},
+            "banned": [a[:10] for a in self.banned],
         }
 
     def _migrate_v1_or_load(self) -> None:
@@ -280,6 +344,8 @@ class SprintBook:
             self.busted = int(raw.get("busted", 0))
             self.total_trades = int(raw.get("total_trades", 0))
             self.ride_leader = str(raw.get("ride_leader", ""))
+            self.strikes = {str(k): int(v) for k, v in (raw.get("strikes") or {}).items()}
+            self.banned = {str(a).lower() for a in (raw.get("banned") or [])}
         # v1-Migration: altes Buch hat mit Dauer-Reconciliation gechurnt (139 Trades)
         # -> Buch einmalig sauber neu starten, Bilanz (banked/won/busted) behalten.
         v1_state = raw is not None and "ride_leader" not in raw
@@ -298,6 +364,7 @@ class SprintBook:
                 "updated": int(self.clock()), "banked": round(self.banked, 2),
                 "won": self.won, "busted": self.busted,
                 "total_trades": self.total_trades, "ride_leader": self.ride_leader,
+                "strikes": self.strikes, "banned": sorted(self.banned),
             }))
         except OSError:
             log.exception("sprint_cycles.json nicht schreibbar")
