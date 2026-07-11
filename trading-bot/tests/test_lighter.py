@@ -81,6 +81,68 @@ def test_tolerates_response_shapes():
         assert snap.equity == 9000 and "BTC" in snap.positions
 
 
+def test_discover_extracts_account_ids_from_trades():
+    from bot.sources.lighter import _account_ids
+    t = {"market_id": 1, "maker_account_id": 7, "taker_account_index": 12, "price": "100"}
+    ids = _account_ids(t)
+    assert set(ids) == {"7", "12"}, "nur account-Felder, market_id nicht"
+
+
+def test_discover_includes_seeds_and_budget():
+    trades = [{"maker_account_id": i} for i in range(100)]
+    cfg = LighterConfig(accounts=[999], auto_discover=True, max_candidates=10)
+    client = LighterClient(http=lambda url, params: {"trades": trades})
+    src = LighterSource(cfg, client)
+    cands = src.discover_active()
+    assert cands[0] == "999", "Seeds zuerst"
+    assert len(set(cands)) == len(cands), "dedupliziert"
+
+
+def test_rank_filters_and_tops():
+    # Konten: 5 mit Positionen/Equity, eins zu klein, eins flach
+    accounts = {
+        "1": acct(20_000, pos("BTC", 1, 1, 60_000), pos("ETH", -1, 5, 15_000)),
+        "2": acct(9_000, pos("SOL", 1, 10, 1_400)),
+        "3": acct(1_000, pos("BTC", 1, 1, 60_000)),   # < min_equity -> raus
+        "4": acct(50_000),                             # flach -> raus
+    }
+
+    def http(url, params):
+        if "recentTrades" in url or "trades" in url:
+            return {"trades": [{"maker_account_id": int(k)} for k in accounts]}
+        return accounts[params["value"]]
+
+    cfg = LighterConfig(auto_discover=True, min_equity=5000, min_positions=1,
+                        max_leaders=2, coins=["BTC", "ETH", "SOL"])
+    src = LighterSource(cfg, LighterClient(http=http))
+    top = src.rank()
+    addrs = [s.address for s in top]
+    assert "1" in addrs and "2" in addrs, "qualifizierte drin"
+    assert "3" not in addrs and "4" not in addrs, "zu klein/flach raus"
+    assert addrs[0] == "1", "aktivstes Konto zuerst (Equity x Positionen)"
+
+
+def test_lighter_shadow_reconciles_and_persists():
+    import tempfile
+    accounts = {"1": acct(20_000, pos("BTC", 1, 1, 60_000))}
+
+    def http(url, params):
+        if "account" in url:
+            return accounts[params["value"]]
+        return {"trades": [{"maker_account_id": 1}]}
+
+    from bot.sources.lighter import LighterShadow
+    cfg = LighterConfig(auto_discover=True, min_equity=5000, coins=["BTC"], initial_equity=10_000)
+    src = LighterSource(cfg, LighterClient(http=http))
+    with tempfile.TemporaryDirectory() as tmp:
+        sh = LighterShadow(cfg, 0.00045, source=src, runtime_dir=Path(tmp))
+        sh.tick({"BTC": 60_000.0})
+        assert sh.paper.sizes(), "kopiert die Lighter-Position auf HL-Preisen"
+        assert "BTC" in sh.paper.sizes()
+        st = sh.stats({"BTC": 60_000.0})
+        assert st["trades"] >= 1 and "1" in st["leaders"]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

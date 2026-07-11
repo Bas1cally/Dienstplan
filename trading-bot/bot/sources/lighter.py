@@ -11,9 +11,12 @@ Trotzdem defensiv geparst - erst am echten Konto per /lighter verifizieren,
 dann darauf messen. Ausführung bleibt IMMER Hyperliquid.
 """
 
+import json
 import logging
+import time
 
 from ..copytrade.tracker import LeaderPosition, LeaderSnapshot
+from ..journal import RUNTIME
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +74,16 @@ class LighterClient:
         return _first_account(self._http(f"{self.base}/api/v1/account",
                                          {"by": by, "value": str(ref)}))
 
+    def recent_trades(self, url: str, limit: int = 200) -> list:
+        """Öffentlicher Trade-Strom (für Discovery). Toleriert mehrere Response-Formen."""
+        data = self._http(url, {"limit": limit})
+        if isinstance(data, dict):
+            for k in ("trades", "recentTrades", "data", "result"):
+                if isinstance(data.get(k), list):
+                    return data[k]
+            return []
+        return data if isinstance(data, list) else []
+
     def snapshot(self, ref: str, map_coin=None) -> LeaderSnapshot:
         acc = self.raw_account(ref)
         equity = float(acc.get("collateral") or acc.get("available_balance") or 0)
@@ -117,3 +130,123 @@ class LighterSource:
         if self._hl_coins is not None and sym not in self._hl_coins:
             return None
         return sym or None
+
+    # ---------- Auto-Discovery: aktive Konten aus dem Trade-Strom ----------
+
+    def discover_active(self) -> list[str]:
+        """Zieht Kandidaten-Konten aus dem öffentlichen Trade-Strom + Seeds."""
+        cands: list[str] = [str(a) for a in (self.cfg.accounts or [])]  # Seeds zuerst
+        if getattr(self.cfg, "auto_discover", False):
+            try:
+                trades = self.client.recent_trades(self.cfg.trades_url)
+            except Exception as e:
+                log.warning("Lighter recent_trades nicht abrufbar: %s", str(e)[:80])
+                trades = []
+            seen = set(cands)
+            for t in trades:
+                for idx in _account_ids(t):
+                    if idx not in seen:
+                        seen.add(idx)
+                        cands.append(idx)
+        return cands
+
+    def rank(self) -> list[LeaderSnapshot]:
+        """Discovery -> Snapshot -> Filter -> Top-N nach Aktivität (Equity x Positionen).
+        Lighter hat kein PnL-Ranking-API; das ist der pragmatische Aktivitäts-Proxy."""
+        cands = self.discover_active()[: self.cfg.max_candidates]
+        scored: list[tuple[float, LeaderSnapshot]] = []
+        for ref in cands:
+            try:
+                snap = self.snapshot(ref)
+            except Exception:
+                continue
+            if snap.equity < self.cfg.min_equity or len(snap.positions) < self.cfg.min_positions:
+                continue
+            activity = snap.equity * len(snap.positions)
+            scored.append((activity, snap))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = [s for _, s in scored[: self.cfg.max_leaders]]
+        try:
+            RUNTIME.mkdir(exist_ok=True)
+            (RUNTIME / "lighter_leaders.json").write_text(json.dumps(
+                {"t": int(time.time()), "leaders": [s.address for s in top],
+                 "scanned": len(cands), "qualified": len(scored)}, indent=2))
+        except OSError:
+            pass
+        return top
+
+
+def _account_ids(trade: dict) -> list[str]:
+    """Defensiv: alle int-artigen Werte unter Keys, die 'account' enthalten."""
+    out = []
+    for k, v in trade.items():
+        if "account" in k.lower():
+            try:
+                out.append(str(int(v)))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+class LighterShadow:
+    """Misst 'Lighter-Signale, auf HL ausgeführt': kopiert die per rank() ermittelten
+    Top-Lighter-Trader gleichgewichtet in ein eigenes Paper-Buch, gepreist mit
+    HL-Preisen. Reine Mess-Spur (dry_run) - kein Einfluss aufs Haupt-Buch."""
+
+    def __init__(self, cfg, fee_rate: float, source: LighterSource | None = None,
+                 runtime_dir=None, clock=time.time):
+        from ..config import AnalysisConfig, CopytradeConfig, RiskConfig
+        from ..paper import PaperBroker
+
+        runtime = runtime_dir or RUNTIME
+        self.cfg = cfg
+        self.clock = clock
+        self.source = source or LighterSource(cfg)
+        self.paper = PaperBroker(cfg.initial_equity, fee_rate, path=runtime / "lighter_shadow.json")
+        self._ct = CopytradeConfig(analysis=AnalysisConfig(), copy_ratio=cfg.copy_ratio,
+                                   max_alloc_per_coin=0.25, rebalance_threshold=0.03,
+                                   min_notional=10)
+        self._risk = RiskConfig(risk_per_trade=0.01, atr_stop_mult=2.0, take_profit_r=2.0,
+                                max_leverage=4, max_daily_loss=1.0, slippage=0.005,
+                                max_total_drawdown=0.5)
+        self._last_scan = 0.0
+        self._leaders: list = []
+
+    def tick(self, hl_prices: dict[str, float]) -> None:
+        if not hl_prices:
+            return
+        # Discovery/Ranking gedrosselt (teuer: Snapshot je Kandidat)
+        if self.clock() - self._last_scan >= self.cfg.scan_seconds or not self._leaders:
+            self._last_scan = self.clock()
+            try:
+                self._leaders = self.source.rank()
+            except Exception as e:
+                log.warning("Lighter-Ranking fehlgeschlagen: %s", str(e)[:80])
+        if not self._leaders:
+            return
+        # Nur Coins mit HL-Preis behalten (auf HL handelbar + bepreisbar)
+        snaps = []
+        for snap in self._leaders:
+            pos = {c: p for c, p in snap.positions.items() if hl_prices.get(c)}
+            if pos:
+                snaps.append(LeaderSnapshot(snap.address, snap.equity, pos))
+        if not snaps:
+            return
+        from ..copytrade.copier import compute_targets, plan_rebalance
+
+        weights = {s.address: 1.0 / len(snaps) for s in snaps}
+        equity = self.paper.equity(hl_prices)
+        targets = compute_targets(snaps, weights, equity, self._ct, self._risk)
+        for o in plan_rebalance(targets, self.paper.sizes(), hl_prices, equity, self._ct):
+            self.paper.execute(o.coin, o.delta_size, o.price)
+
+    def stats(self, hl_prices: dict[str, float]) -> dict:
+        eq = self.paper.equity(hl_prices) if hl_prices else self.cfg.initial_equity + self.paper.realized_pnl
+        return {
+            "equity": round(eq, 2),
+            "return_pct": round((eq / self.cfg.initial_equity - 1) * 100, 2),
+            "trades": self.paper.trades,
+            "realized_pnl": round(self.paper.realized_pnl, 2),
+            "leaders": [s.address for s in self._leaders],
+            "open_positions": len(self.paper.positions),
+        }

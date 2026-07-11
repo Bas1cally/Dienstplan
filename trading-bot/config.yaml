@@ -154,6 +154,23 @@ sprint:
   target_profit: 100
   bust_frac: 0.05           # Liquidations-Modell: unter 5% Rest ist der Zyklus geplatzt
   rebalance_threshold: 0.02
+  partial_exit_frac: 0.75   # Leader baut >=75% ab -> wir gehen mit raus (Scale-out)
+  strike_ban: 2             # 2 Verlust-Ritte -> Leader fürs Sprint-Buch gesperrt
+
+# === Lighter (zkLighter): fremde Trader auto-entdecken + auf HL messen ===
+# Probe hat bestätigt: Lighter gibt fremde Positionen öffentlich her. Der Bot
+# findet aktive Konten selbst (Trade-Strom), bewertet sie und kopiert die Top-N
+# gleichgewichtet in ein PAPER-Buch, gepreist mit HL-Preisen - reine Messung,
+# kein Einfluss aufs Haupt-Buch. Read-only, Ausführung bleibt Hyperliquid.
+lighter:
+  enabled: true
+  auto_discover: true
+  coins: [BTC, ETH, SOL, HYPE, DOGE, AVAX, LINK, ARB]  # nur auf HL handelbare
+  scan_seconds: 300
+  max_candidates: 40
+  min_equity: 5000
+  max_leaders: 5
+  copy_ratio: 0.5
 
 # === Strategie-Labor: eigene Signale parallel im Paper-Schatten messen ===
 # Der Copy-Bot folgt fremden Tradern (kein originäres Alpha). Hier laufen EIGENE

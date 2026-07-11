@@ -144,6 +144,7 @@ class Autopilot:
         self.twap_scout = None
         self.labs = None
         self.sprint = None
+        self.lighter = None
         self.scalper = None
         self.feed = None
         self._last_watch_poll = 0.0
@@ -374,9 +375,16 @@ class Autopilot:
 
         cfg = load_config().lighter
         if not arg:
-            accts = cfg.accounts or []
+            if self.lighter and self.copier:
+                s = self.lighter.stats(self.copier.last_prices)
+                leaders = ", ".join(a[:8] for a in s.get("leaders", [])) or "sucht…"
+                return (f"<b>Lighter-Schatten</b> (Auto-Discovery)\n"
+                        f"Equity: {s['equity']:,.2f} ({s['return_pct']:+.2f}%) | "
+                        f"{s['trades']} Trades, {s['open_positions']} offen\n"
+                        f"Aktuelle Top-Konten: {leaders}\n"
+                        f"Einzeltest: <code>/lighter &lt;index&gt;</code>")
             return (f"<b>Lighter</b> ({'aktiv' if cfg.enabled else 'aus'})\n"
-                    f"Watchlist: {len(accts)} Konten\n"
+                    f"Auto-Discovery: {cfg.auto_discover}\n"
                     f"Test: <code>/lighter &lt;index oder 0x-adresse&gt;</code>")
         try:
             src = LighterSource(cfg, LighterClient(cfg.base_url))
@@ -523,6 +531,8 @@ class Autopilot:
                     off = bool(self.guard and self.guard.last_level == RiskLevel.RISK_OFF)
                     self.sprint.tick(self.leaders, self.copier.last_snapshots,
                                      self.copier.last_prices, risk_off=off)
+                if self.lighter and self.copier:
+                    self.lighter.tick(self.copier.last_prices)
                 self._maybe_digest()
                 self._maybe_watchdog()
                 self._publish()
@@ -664,6 +674,14 @@ class Autopilot:
             log.info("Sprint-Buch aktiv: %.0f$ x%.0f auf den besten Leader, Ziel +%.0f$/Zyklus",
                      self.cfg.sprint.equity, self.cfg.sprint.leverage,
                      self.cfg.sprint.target_profit)
+        # Lighter-Schatten: fremde Lighter-Trader auto-entdecken + auf HL messen
+        self.lighter = None
+        if self.cfg.dry_run and self.cfg.lighter.enabled:
+            from .sources.lighter import LighterShadow
+
+            self.lighter = LighterShadow(self.cfg.lighter, self.cfg.backtest.fee_rate)
+            log.info("Lighter-Schatten aktiv (Auto-Discovery=%s, Copy auf HL-Preisen)",
+                     self.cfg.lighter.auto_discover)
         self.scalper = None
         if self.cfg.scalp.enabled:
             from .scalper import VolScalper
@@ -804,6 +822,8 @@ class Autopilot:
                   if self.labs and self.copier and self.copier.last_prices else None),
             sprint=(self.sprint.stats(self.copier.last_prices)
                     if self.sprint and self.copier and self.copier.last_prices else None),
+            lighter=(self.lighter.stats(self.copier.last_prices)
+                     if self.lighter and self.copier and self.copier.last_prices else None),
             equity=equity,
             positions=positions or [],
             paper=paper_stats,
@@ -868,6 +888,10 @@ class Autopilot:
             tracks += (f"\n  sprint: Zyklus {sp['cycle']} {sp['state']} "
                        f"({sp['cycle_pnl']:+,.2f}$), banked {sp['banked']:+,.2f}$ "
                        f"[{sp['won']}✅/{sp['busted']}💥]")
+        if self.lighter and self.copier and self.copier.last_prices:
+            li = self.lighter.stats(self.copier.last_prices)
+            tracks += (f"\n  lighter-schatten: {li['realized_pnl']:+,.2f} "
+                       f"({li['trades']} Tr., {li['return_pct']:+.2f}%)")
         msg = (f"📊 <b>Tagesbericht</b>{delta}{bleed}\n"
                f"Orders: {orders} | Vetos: {vetoes}"
                + (f" | Scalp-PnL: {scalp_pnl:+,.2f}" if scalp_pnl else "")

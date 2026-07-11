@@ -232,6 +232,21 @@ def main() -> None:
         print(f"    Bilanz: {won}x Ziel erreicht, {busted}x geplatzt, "
               f"banked {float(st.get('banked', 0)):+,.2f} $ | Ø {avg:.1f} Trades/Zyklus "
               f"(Churn-Frühwarnung: einstellig = gesund)")
+        strikes = st.get("strikes") or {}
+        if strikes or st.get("banned"):
+            print(f"    LARP: Strikes {strikes} | gesperrt {st.get('banned', [])}")
+
+    # Lighter-Schatten: fremde Lighter-Trader auf HL kopiert (Auto-Discovery)
+    li_book = RUNTIME / "lighter_shadow.json"
+    li_lead = RUNTIME / "lighter_leaders.json"
+    if li_book.exists():
+        bk = json.loads(li_book.read_text())
+        init = float(bk.get("initial_equity", 10_000))
+        eq = init + float(bk.get("realized_pnl", 0))
+        disc = json.loads(li_lead.read_text()) if li_lead.exists() else {}
+        print("\n  Lighter-Schatten (fremde Lighter-Trader auf HL, Paper):")
+        print(f"    Equity {eq:,.2f} ({(eq / init - 1) * 100:+.2f}%, {int(bk.get('trades', 0))} Trades) "
+              f"| {len(disc.get('leaders', []))} Top-Konten aus {disc.get('scanned', 0)} gescannt")
 
     # Shadow-Varianten: welche Config hätte mehr gemacht?
     shadow_recs = []
