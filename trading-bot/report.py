@@ -224,11 +224,14 @@ def main() -> None:
         bk = json.loads(sprint_book.read_text()) if sprint_book.exists() else {}
         won, busted = int(st.get("won", 0)), int(st.get("busted", 0))
         eq_real = float(bk.get("initial_equity", 1000)) + float(bk.get("realized_pnl", 0))
+        cur_trades = int(bk.get("trades", 0))
+        avg = (int(st.get("total_trades", 0)) + cur_trades) / max(1, won + busted + 1)
         print("\n  Sprint-Buch (x10 auf besten Leader, Ziel +100$/Zyklus):")
         print(f"    Zyklus {won + busted + 1} läuft: Equity {eq_real:,.2f} (realisiert, "
-              f"{int(bk.get('trades', 0))} Trades)")
+              f"{cur_trades} Trades)")
         print(f"    Bilanz: {won}x Ziel erreicht, {busted}x geplatzt, "
-              f"banked {float(st.get('banked', 0)):+,.2f} $")
+              f"banked {float(st.get('banked', 0)):+,.2f} $ | Ø {avg:.1f} Trades/Zyklus "
+              f"(Churn-Frühwarnung: einstellig = gesund)")
 
     # Shadow-Varianten: welche Config hätte mehr gemacht?
     shadow_recs = []

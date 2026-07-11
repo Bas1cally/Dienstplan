@@ -1,26 +1,31 @@
-"""Sprint-Buch: 1000$ mit 10x Hebel auf den BESTEN Leader, Ziel +100$ je Zyklus.
+"""Sprint-Buch v2: frisches Leader-Signal -> einsteigen -> HALTEN -> +100$ TP.
 
-Mechanik je Zyklus:
-  1. Bester Leader = höchster Score der aktuellen Rotation (bestehendes System)
-  2. Dessen Positionen werden mit `leverage`-fachem Exposure gespiegelt
-     (compute_targets mit copy_ratio = leverage, Gross-Cap = leverage)
-  3. Take-Profit: Equity >= equity + target_profit  -> alles glattstellen,
-     Gewinn gebucht ("banked"), Konto auf equity zurückgesetzt, nächster Zyklus
-     folgt wieder dem dann besten Leader (Rotation läuft normal weiter)
-  4. Liquidations-Modell: fällt die Equity unter bust_frac (Default 5%),
-     ist der Zyklus geplatzt (auf 10x wäre das reale Konto liquidiert) -
-     Verlust gebucht, Konto zurückgesetzt, nächster Zyklus.
+Zustandsmaschine statt Dauer-Reconciliation (v1 hat mit plan_rebalance je Tick
+139 Trades produziert - bei 10x Hebel frisst das Fees):
 
-RISK_OFF (News/Schock) stellt auch das Sprint-Buch glatt, beendet aber keinen
-Zyklus. Läuft nur im Paper-Modus; Fees = Taker (konservativ, kein Maker-Bonus).
+  FLACH   - beobachtet den AKTUELL besten Leader der Rotation (LARP-gefiltert).
+            Dessen BESTEHENDE Positionen zählen NICHT (nie in laufende Trades
+            einsteigen) - beim ersten Blick wird sein Buch nur als Baseline
+            gespeichert. Erst ein Übergang 0 -> Position ist ein frisches
+            Signal: Einstieg mit leverage-fachem Exposure, Leader wird für
+            diesen Ritt fixiert.
+  IM RITT - kein Rebalancing. Exits NUR wenn: der Leader den Coin komplett
+            schließt oder flippt (mitgehen - sein Edge ist das Exit-Timing),
+            der Leader aus der Rotation fällt (wir wären blind), RISK_OFF,
+            oder das Zyklus-Ziel/Bust greift. Größenänderungen: ignorieren.
+
+Zyklus: startet mit 1000$; Ziel-PnL kumuliert über beliebig viele Ritte.
+  Equity >= 1100 -> Take-Profit, Gewinn "banked", Konto-Reset, nächster Zyklus
+  beobachtet den DANN besten Leader (Rotation je Zyklus).
+  Equity <= 5%   -> Zyklus geplatzt (10x-Liquidations-Modell), ebenso Reset.
+
+Nur Paper-Modus; Fees konservativ als Taker.
 """
 
 import json
 import logging
 import time
 
-from .config import AnalysisConfig, CopytradeConfig, RiskConfig
-from .copytrade.copier import compute_targets, plan_rebalance
 from .journal import RUNTIME
 from .paper import PaperBroker
 
@@ -40,49 +45,154 @@ class SprintBook:
         self.banked = 0.0
         self.won = 0
         self.busted = 0
-        self.best_address = ""
-        self._load_state()
-        # Volle Hebel-Kopie EINES Leaders: copy_ratio = Hebel, Gross-Cap = Hebel,
-        # Coin-Cap praktisch offen (der Gross-Cap deckelt).
-        self._ct = CopytradeConfig(
-            analysis=AnalysisConfig(), max_leaders=1,
-            copy_ratio=float(cfg.leverage), max_alloc_per_coin=float(cfg.leverage),
-            rebalance_threshold=cfg.rebalance_threshold, min_notional=cfg.min_notional,
-        )
-        self._risk = RiskConfig(risk_per_trade=0.01, atr_stop_mult=2.0, take_profit_r=2.0,
-                                max_leverage=int(cfg.leverage), max_daily_loss=1.0,
-                                slippage=0.005, max_total_drawdown=0.5)
+        self.total_trades = 0            # über alle abgeschlossenen Zyklen
+        self.ride_leader = ""            # fixiert, solange Positionen offen sind
+        self._watched = ""               # aktuell beobachteter Leader (flach)
+        self._leader_prev: dict[str, float] | None = None  # dessen Buch (Baseline)
+        self._migrate_v1_or_load()
 
-    # ---------- Tick ----------
+    # ---------- Tick (Zustandsmaschine) ----------
 
     def tick(self, leaders: list[dict], snapshots: list, prices: dict[str, float],
              risk_off: bool = False) -> None:
         if not prices:
             return
+        # 1. Zyklus-Ende hat Vorrang (auch flach möglich: kumulierte Ritte >= Ziel)
+        eq = self.paper.equity(prices)
+        if eq >= self.cfg.equity + self.cfg.target_profit:
+            self._end_cycle(prices, won=True)
+            return
+        if eq <= self.cfg.equity * self.cfg.bust_frac:
+            self._end_cycle(prices, won=False)
+            return
+        # 2. Markt-Schutz: glattstellen, Zyklus läuft weiter (kein Wiederspiegeln)
         if risk_off:
             if self.paper.sizes():
                 log.warning("Sprint: RISK_OFF - stelle glatt (Zyklus läuft weiter)")
-                self.paper.flatten(prices)
+                for coin in list(self.paper.sizes()):
+                    self._close_coin(coin, prices, "risk_off")
+                self.ride_leader = ""
+                self._save_state()
             return
         if not leaders or not snapshots:
             return
+
+        if self.paper.sizes():
+            self._tick_riding(snapshots, prices)
+        else:
+            self._tick_waiting(leaders, snapshots, prices)
+
+    # ---------- FLACH: auf frisches Signal des besten Leaders warten ----------
+
+    def _tick_waiting(self, leaders: list[dict], snapshots: list,
+                      prices: dict[str, float]) -> None:
         best = max(leaders, key=lambda l: float(l.get("score", 0)))
         snap = next((s for s in snapshots
                      if s.address.lower() == str(best.get("address", "")).lower()), None)
         if snap is None:
             return
-        self.best_address = snap.address
+        book = self._book_of(snap)
+        # Erster Blick auf diesen Leader (oder Neustart): nur Baseline, kein Signal -
+        # seine bestehenden Positionen sind laufende Trades, in die wir NIE einsteigen.
+        if self._watched != snap.address or self._leader_prev is None:
+            self._watched = snap.address
+            self._leader_prev = book
+            return
+        fresh = [c for c, sz in book.items()
+                 if sz != 0 and self._leader_prev.get(c, 0.0) == 0.0]
+        for coin in fresh:
+            self._enter(coin, snap, prices)
+        self._leader_prev = book
 
+    # ---------- IM RITT: halten, nur Leader-Exits folgen ----------
+
+    def _tick_riding(self, snapshots: list, prices: dict[str, float]) -> None:
+        snap = next((s for s in snapshots
+                     if s.address.lower() == self.ride_leader.lower()), None)
+        if snap is None:
+            # Leader aus der Rotation gefallen: wir wären blind -> schließen,
+            # zurück auf FLACH (Zyklus-PnL bleibt stehen, nächster Tick wartet neu)
+            log.warning("Sprint: Ride-Leader %s aus der Rotation - schließe Positionen",
+                        self.ride_leader[:10])
+            for coin in list(self.paper.sizes()):
+                self._close_coin(coin, prices, "leader_rotated")
+            self.ride_leader = ""
+            self._watched, self._leader_prev = "", None
+            self._save_state()
+            return
+        book = self._book_of(snap)
+        baseline_only = self._watched != snap.address or self._leader_prev is None
+
+        # Exit-Folge: Leader hat den Coin komplett geschlossen oder geflippt
+        for coin, our_size in list(self.paper.sizes().items()):
+            leader_sz = book.get(coin, 0.0)
+            if leader_sz == 0.0:
+                self._close_coin(coin, prices, "leader_exit")
+            elif (leader_sz > 0) != (our_size > 0):
+                # Flip = mitgehen: alte Richtung schließen UND die neue eröffnen
+                # (die Frisch-Erkennung sieht einen Flip nicht als 0 -> Position)
+                self._close_coin(coin, prices, "leader_flip")
+                self._enter(coin, snap, prices)
+        # Weitere frische Einstiege desselben Leaders mitnehmen (nicht beim Baseline-Tick)
+        if not baseline_only:
+            fresh = [c for c, sz in book.items()
+                     if sz != 0 and self._leader_prev.get(c, 0.0) == 0.0
+                     and c not in self.paper.sizes()]
+            for coin in fresh:
+                self._enter(coin, snap, prices)
+        self._watched = snap.address
+        self._leader_prev = book
+
+        if not self.paper.sizes():
+            self.ride_leader = ""   # alle Ritte beendet -> zurück auf FLACH
+            self._save_state()
+
+    # ---------- Ein-/Ausstieg ----------
+
+    def _enter(self, coin: str, snap, prices: dict[str, float]) -> None:
+        price = prices.get(coin)
+        if not price or price <= 0:
+            return
         equity = self.paper.equity(prices)
-        targets = compute_targets([snap], {snap.address: 1.0}, equity, self._ct, self._risk)
-        for o in plan_rebalance(targets, self.paper.sizes(), prices, equity, self._ct):
-            self.paper.execute(o.coin, o.delta_size, o.price)
+        target = snap.exposure(coin) * self.cfg.leverage * equity
+        # Gross-Cap: Gesamtbuch bleibt unter leverage x Equity
+        gross = sum(abs(s) * prices.get(c, 0.0) for c, s in self.paper.sizes().items())
+        headroom = max(0.0, self.cfg.leverage * equity - gross)
+        notional = max(-headroom, min(headroom, target))
+        if abs(notional) < self.cfg.min_notional:
+            return
+        self.paper.execute(coin, notional / price, price)
+        self.ride_leader = snap.address
+        side = "LONG" if notional > 0 else "SHORT"
+        cycle = self.won + self.busted + 1
+        log.info("Sprint: %s %s $%.0f (frisches Signal von %s, Zyklus %d)",
+                 side, coin, abs(notional), snap.address[:10], cycle)
+        if self.journal:
+            self.journal.record("sprint_entry", coin=coin, side=side,
+                                notional=round(abs(notional), 0),
+                                leader=snap.address, cycle=cycle)
+        if self.notifier:
+            self.notifier.send(f"🟢 <b>Sprint-Einstieg</b>: {side} {coin} "
+                               f"${abs(notional):,.0f}\nLeader <code>{snap.address[:10]}…</code> "
+                               f"| Zyklus {cycle}")
+        self._save_state()
 
-        eq = self.paper.equity(prices)
-        if eq >= self.cfg.equity + self.cfg.target_profit:
-            self._end_cycle(prices, won=True)
-        elif eq <= self.cfg.equity * self.cfg.bust_frac:
-            self._end_cycle(prices, won=False)
+    def _close_coin(self, coin: str, prices: dict[str, float], reason: str) -> None:
+        size = self.paper.sizes().get(coin, 0.0)
+        price = prices.get(coin)
+        if size == 0.0 or not price:
+            return
+        self.paper.execute(coin, -size, price)
+        cycle_pnl = self.paper.equity(prices) - self.cfg.equity
+        reason_txt = {"leader_exit": "Leader raus", "leader_flip": "Leader gedreht",
+                      "leader_rotated": "Leader rotiert", "risk_off": "RISK_OFF"}.get(reason, reason)
+        log.info("Sprint: Exit %s (%s), Zyklus-PnL %+.2f", coin, reason_txt, cycle_pnl)
+        if self.journal:
+            self.journal.record("sprint_exit", coin=coin, reason=reason,
+                                cycle_pnl=round(cycle_pnl, 2))
+        if self.notifier:
+            self.notifier.send(f"🔴 <b>Sprint-Exit</b> {coin}: {reason_txt}\n"
+                               f"Zyklus-PnL {cycle_pnl:+,.2f} $")
 
     # ---------- Zyklus-Ende ----------
 
@@ -92,6 +202,7 @@ class SprintBook:
         pnl = final - self.cfg.equity
         cycle = self.won + self.busted + 1
         self.banked += pnl
+        self.total_trades += self.paper.trades
         if won:
             self.won += 1
         else:
@@ -101,47 +212,67 @@ class SprintBook:
                     cycle, "ZIEL ERREICHT" if won else "GEPLATZT", pnl, self.banked)
         if self.journal:
             self.journal.record(kind, cycle=cycle, pnl=round(pnl, 2),
-                                banked=round(self.banked, 2), leader=self.best_address)
+                                banked=round(self.banked, 2),
+                                leader=self.ride_leader or self._watched)
         if self.notifier:
-            if won:
-                self.notifier.send(
-                    f"🏁 <b>Sprint-Zyklus {cycle}: Ziel erreicht</b>\n"
-                    f"PnL {pnl:+,.2f} $ | Bilanz: {self.won}✅ {self.busted}💥 "
-                    f"| banked {self.banked:+,.2f} $\nNeuer Zyklus startet."
-                )
-            else:
-                self.notifier.send(
-                    f"💥 <b>Sprint-Zyklus {cycle}: geplatzt</b> (10x-Liquidations-Modell)\n"
-                    f"PnL {pnl:+,.2f} $ | Bilanz: {self.won}✅ {self.busted}💥 "
-                    f"| banked {self.banked:+,.2f} $\nNeuer Zyklus startet."
-                )
+            head = "🏁 <b>Sprint-Zyklus {c}: Ziel erreicht</b>" if won else \
+                   "💥 <b>Sprint-Zyklus {c}: geplatzt</b> (10x-Liquidations-Modell)"
+            self.notifier.send(
+                head.format(c=cycle) + f"\nPnL {pnl:+,.2f} $ | Bilanz: {self.won}✅ "
+                f"{self.busted}💥 | banked {self.banked:+,.2f} $\nNeuer Zyklus wartet "
+                f"auf frisches Signal des besten Leaders."
+            )
         self.paper.reset()
+        self.ride_leader = ""
+        self._watched, self._leader_prev = "", None
         self._save_state()
 
     # ---------- Status & Persistenz ----------
 
     def stats(self, prices: dict[str, float]) -> dict:
         eq = self.paper.equity(prices) if prices else self.cfg.equity + self.paper.realized_pnl
+        sizes = self.paper.sizes()
+        held = [f"{c} {'LONG' if s > 0 else 'SHORT'}" for c, s in sizes.items()]
+        cycles_done = self.won + self.busted
         return {
             "equity": round(eq, 2),
-            "cycle": self.won + self.busted + 1,
+            "cycle": cycles_done + 1,
+            "cycle_pnl": round(eq - self.cfg.equity, 2),
             "target": round(self.cfg.equity + self.cfg.target_profit, 2),
             "progress_pct": round((eq - self.cfg.equity) / self.cfg.target_profit * 100, 1),
+            "state": "hält" if sizes else "wartet auf frisches Signal",
+            "held": held,
             "banked": round(self.banked, 2),
             "won": self.won,
             "busted": self.busted,
             "trades": self.paper.trades,
-            "leader": self.best_address,
+            "avg_trades_per_cycle": round((self.total_trades + self.paper.trades)
+                                          / max(1, cycles_done + 1), 1),
+            "leader": self.ride_leader or self._watched,
         }
 
-    def _load_state(self) -> None:
+    def _migrate_v1_or_load(self) -> None:
+        raw = None
         try:
-            d = json.loads(self.state_path.read_text())
-            self.banked = float(d.get("banked", 0.0))
-            self.won = int(d.get("won", 0))
-            self.busted = int(d.get("busted", 0))
+            raw = json.loads(self.state_path.read_text())
         except (OSError, ValueError):
             pass
+        if raw is not None:
+            self.banked = float(raw.get("banked", 0.0))
+            self.won = int(raw.get("won", 0))
+            self.busted = int(raw.get("busted", 0))
+            self.total_trades = int(raw.get("total_trades", 0))
+            self.ride_leader = str(raw.get("ride_leader", ""))
+        # v1-Migration: altes Buch hat mit Dauer-Reconciliation gechurnt (139 Trades)
+        # -> Buch einmalig sauber neu starten, Bilanz (banked/won/busted) behalten.
+        v1_state = raw is not None and "ride_leader" not in raw
+        v1_dirty_book = raw is None and self.paper.trades > 0
+        if v1_state or v1_dirty_book:
+            log.warning("Sprint v1 -> v2: setze verchurntes Buch zurück (%d Trades), "
+                        "Bilanz bleibt", self.paper.trades)
+            self.paper.reset()
+            self.ride_leader = ""
+            self._save_state()
 
     def _save_state(self) -> None:
         try:
@@ -149,6 +280,11 @@ class SprintBook:
             self.state_path.write_text(json.dumps({
                 "updated": int(self.clock()), "banked": round(self.banked, 2),
                 "won": self.won, "busted": self.busted,
+                "total_trades": self.total_trades, "ride_leader": self.ride_leader,
             }))
         except OSError:
             log.exception("sprint_cycles.json nicht schreibbar")
+
+    @staticmethod
+    def _book_of(snap) -> dict[str, float]:
+        return {c: float(p.size) for c, p in snap.positions.items() if float(p.size) != 0.0}

@@ -296,11 +296,13 @@ class Autopilot:
             return "Sprint-Buch nicht aktiv (sprint.enabled / dry_run prüfen)."
         s = self.sprint.stats(self.copier.last_prices if self.copier else {})
         lead = f"<code>{s['leader'][:10]}…</code>" if s.get("leader") else "n/a"
-        return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']})\n"
+        pos = ", ".join(s["held"]) if s.get("held") else "-"
+        return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']}): {s['state']}\n"
+                f"Positionen: {pos}\n"
                 f"Equity: {s['equity']:,.2f} / Ziel {s['target']:,.0f} "
-                f"({s['progress_pct']:+.0f}% des Wegs)\n"
+                f"(Zyklus-PnL {s['cycle_pnl']:+,.2f} $)\n"
                 f"Bilanz: {s['won']}✅ {s['busted']}💥 | banked {s['banked']:+,.2f} $\n"
-                f"Bester Leader: {lead} | Trades: {s['trades']}")
+                f"Leader: {lead} | Trades: {s['trades']} (Ø {s['avg_trades_per_cycle']}/Zyklus)")
 
     def _cmd_twap(self) -> str:
         flagged = self.twap_scout.flagged[-6:] if self.twap_scout else []
