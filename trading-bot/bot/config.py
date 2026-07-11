@@ -344,6 +344,25 @@ class SprintConfig:
 
 
 @dataclass
+class LighterConfig:
+    """Lighter (zkLighter) als zusätzliche Trader-Quelle (read-only, Copy auf HL).
+
+    Kein Ranking-API -> Watchlist: Account-Indizes oder L1-Adressen aus dem
+    Lighter-Web-Leaderboard. Erst per /lighter <ref> verifizieren, dann messen.
+    """
+    enabled: bool = False
+    base_url: str = "https://mainnet.zklighter.elliot.ai"
+    accounts: list = None  # type: ignore[assignment]  # Indizes/0x-Adressen
+    coins: list = None     # type: ignore[assignment]  # HL-handelbare Whitelist, None=alle
+    poll_seconds: int = 120
+    copy_ratio: float = 0.5
+
+    def __post_init__(self):
+        if self.accounts is None:
+            self.accounts = []
+
+
+@dataclass
 class Config:
     network: str
     dry_run: bool
@@ -367,6 +386,7 @@ class Config:
     polymarket: PolymarketConfig
     labs: LabsConfig
     sprint: SprintConfig
+    lighter: LighterConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -403,6 +423,7 @@ def load_config(path: Path | None = None) -> Config:
         polymarket=PolymarketConfig(**raw.get("polymarket", {})),
         labs=labs,
         sprint=SprintConfig(**raw.get("sprint", {})),
+        lighter=LighterConfig(**raw.get("lighter", {})),
     )
     _validate(cfg)
     return cfg

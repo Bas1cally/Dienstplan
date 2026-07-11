@@ -172,6 +172,7 @@ class Autopilot:
             "/resume": self._cmd_resume,
             "/update": self._cmd_update,
             "/probe": self._cmd_probe,
+            "/lighter": self._cmd_lighter,
             "/help": self._cmd_help,
         })
 
@@ -185,6 +186,7 @@ class Autopilot:
                 "/polymarket – Prediction-Market-Funde\n"
                 "/update – Update ziehen + neu starten\n"
                 "/probe – Multi-DEX-Scan-Probe (Extended/Lighter/…)\n"
+                "/lighter &lt;ref&gt; – Lighter-Konto prüfen (Verifikation)\n"
                 "/stop /start /resume – Autopilot/Halt steuern")
 
     def _cmd_status(self) -> str:
@@ -353,6 +355,35 @@ class Autopilot:
 
         threading.Thread(target=run, daemon=True, name="probe").start()
         return "🔍 Probe läuft (bis ~1 Min bei Timeouts) … Ergebnis kommt gleich als Nachricht."
+
+    def _cmd_lighter(self, arg: str = "") -> str:
+        """/lighter <index|0x-adresse>: liest ein echtes Lighter-Konto und zeigt
+        das geparste Snapshot - zum Verifizieren, ob Long/Short/Größe stimmen,
+        bevor wir darauf messen. Ohne Argument: Watchlist-Status."""
+        from .config import load_config
+        from .sources.lighter import LighterClient, LighterSource
+
+        cfg = load_config().lighter
+        if not arg:
+            accts = cfg.accounts or []
+            return (f"<b>Lighter</b> ({'aktiv' if cfg.enabled else 'aus'})\n"
+                    f"Watchlist: {len(accts)} Konten\n"
+                    f"Test: <code>/lighter &lt;index oder 0x-adresse&gt;</code>")
+        try:
+            src = LighterSource(cfg, LighterClient(cfg.base_url))
+            snap = src.snapshot(arg)
+        except Exception as e:
+            return f"⚠️ Lighter-Abruf fehlgeschlagen: {str(e)[:200]}"
+        if not snap.positions:
+            return (f"<b>Lighter {arg[:14]}</b>\nEquity ${snap.equity:,.0f} | "
+                    f"keine offenen (auf HL handelbaren) Positionen")
+        lines = [f"<b>Lighter {arg[:14]}</b> — Equity ${snap.equity:,.0f}"]
+        for coin, p in snap.positions.items():
+            side = "LONG" if p.size > 0 else "SHORT"
+            lines.append(f"{side} {coin}: ${p.position_value:,.0f} @ {p.entry:.4f} "
+                         f"({snap.exposure(coin) * 100:+.0f}% der Equity)")
+        lines.append("\n✅ Stimmen Richtung/Größe? Dann können wir darauf messen.")
+        return "\n".join(lines)
 
     def _cmd_update(self) -> str:
         """Zieht das neueste Update (git pull) und startet neu - per Telegram vom

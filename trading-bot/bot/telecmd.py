@@ -53,11 +53,18 @@ class TelegramCommander:
 
     def dispatch(self, text: str) -> str | None:
         """Mappt eine Nachricht auf eine Antwort. None = ignorieren."""
-        cmd = text.strip().split()[0].lower() if text.strip() else ""
+        parts = text.strip().split()
+        cmd = parts[0].lower() if parts else ""
         cmd = cmd.split("@")[0]  # /status@meinbot -> /status
+        arg = " ".join(parts[1:]).strip()
         if cmd in self.handlers:
             try:
-                return self.handlers[cmd]()
+                handler = self.handlers[cmd]
+                # Befehle mit Argument bekommen es übergeben, sonst argumentlos
+                import inspect
+                if arg and len(inspect.signature(handler).parameters) >= 1:
+                    return handler(arg)
+                return handler()
             except Exception as e:
                 log.exception("Befehl %s fehlgeschlagen", cmd)
                 return f"⚠️ {cmd} fehlgeschlagen: {str(e)[:120]}"
