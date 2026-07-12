@@ -134,6 +134,11 @@ def test_manual_close_no_strike():
         n = b.close({"BTC": 99.0, "ETH": 100.0})   # im Minus, aber manuell
         assert n == 1 and b.paper.sizes() == {}
         assert b.strikes == {}, "manueller Ausstieg strikt niemanden"
+        # v3: Zyklus = Ritt - manueller Close verbucht SOFORT (Nutzer-Anforderung:
+        # "ich hab den btc Trade geschlossen heißt auf der Bank liegen X$").
+        assert b.busted == 1 and b.won == 0, "Verlust wird trotzdem sofort verbucht"
+        assert b.banked < 0
+        assert abs(b.paper.equity({}) - 1000.0) < 1e-6, "Konto sofort auf 1000 zurück"
 
 
 def test_strikes_survive_restart():
@@ -155,7 +160,11 @@ def test_leader_full_exit_closes_partial_reduce_holds():
         b.tick(LED, [snap("0xbest", 50_000)], P)             # komplett raus -> mitgehen
         assert b.paper.sizes() == {}
         assert b.ride_leader == "", "nach Exit zurück auf FLACH"
-        assert b.won == 0 and b.busted == 0, "kein Zyklus-Ende durch Leader-Exit"
+        # v3: Zyklus = Ritt - Leader-Exit beendet und verbucht SOFORT (hier ein
+        # Fee-only-Verlust, da Preis unverändert bei P blieb).
+        assert b.busted == 1 and b.won == 0, "Leader-Exit beendet den Zyklus sofort"
+        assert b.banked < 0 and abs(b.paper.equity(P) - 1000.0) < 1e-6, \
+            "sofort verbucht und auf 1000 zurückgesetzt"
 
 
 def test_leader_flip_closes_and_reenters():
@@ -170,41 +179,41 @@ def test_leader_flip_closes_and_reenters():
         assert sizes.get("BTC", 0) < 0, "neue Richtung wird gefolgt"
 
 
-def test_tp_accumulates_over_two_rides():
-    """Ritt 1 endet +60 via Leader-Exit; Ritt 2 bringt den Zyklus über +100 -> TP."""
+def test_each_ride_is_its_own_cycle_banked_immediately():
+    """v3-Kernverhalten (Nutzer-Spec): 'Zyklus = 1 Trade, sei es geschlossen oder
+    nicht'. Ritt 1 endet per Leader-Exit mit +60 -> SOFORT gebankt, Konto SOFORT
+    zurück auf 1000. Ritt 2 (unabhängiger, neuer Zyklus) trifft das +100-Ziel ->
+    wieder sofort gebankt. banked = Summe BEIDER separater Zyklen."""
     with tempfile.TemporaryDirectory() as tmp:
-        b = _entered(tmp)                                     # long ~10k Notional @100
-        b.tick(LED, [snap("0xbest", 50_000)], {"BTC": 100.65, "ETH": 100.0})  # Exit ~+60
-        assert b.paper.sizes() == {} and b.won == 0
-        pnl_after_ride1 = b.paper.equity(P) - 1000.0
-        assert 40 < pnl_after_ride1 < 100, f"Zwischen-PnL bleibt stehen ({pnl_after_ride1:.2f})"
-        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], P)     # frisches Signal Ritt 2
-        assert "ETH" in b.paper.sizes()
-        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], {"BTC": 100.0, "ETH": 101.0})
-        assert b.won == 1, "kumuliert >= +100 -> Take-Profit"
-        assert b.banked > 100
-        assert b.paper.sizes() == {} and abs(b.paper.equity({}) - 1000.0) < 1e-9
-
-
-def test_ride_pnl_separate_from_cycle_pnl():
-    """Regression: der Nutzer sah nur die Zyklus-Summe, nicht die PnL des
-    AKTUELLEN Ritts allein - ride_pnl muss bei einem neuen Ritt bei 0 starten,
-    auch wenn der Zyklus schon Gewinn aus einem vorherigen Ritt mitbringt."""
-    with tempfile.TemporaryDirectory() as tmp:
-        b = _entered(tmp)                                     # Ritt 1: long ~10k @100
+        b = _entered(tmp)                                     # Zyklus 1: long ~10k @100
         b.tick(LED, [snap("0xbest", 50_000)], {"BTC": 100.65, "ETH": 100.0})  # Exit ~+60
         assert b.paper.sizes() == {}
-        s0 = b.stats(P)
-        assert s0["cycle_pnl"] > 40 and s0["ride_pnl"] is None, "kein Ritt offen -> None"
-        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], P)     # Ritt 2 beginnt
-        s1 = b.stats(P)
-        # Direkt nach Einstieg: nur die Eintritts-Fee (leicht negativ), NICHT die
-        # +60 aus Ritt 1 - das ist der eigentliche Beweis der Trennung.
-        assert -20 < s1["ride_pnl"] < 0, "frischer Ritt zeigt nur seine eigene (Fee-)PnL"
-        assert s1["cycle_pnl"] > 40, "Zyklus-Summe bleibt (Ritt 1 + Ritt 2 zusammen)"
-        # Preis bewegt sich zugunsten des Ritts -> ride_pnl wächst SEPARAT
-        s2 = b.stats({"BTC": 100.65, "ETH": 103.0})
-        assert s2["ride_pnl"] > s1["ride_pnl"], "Ritt-PnL reagiert auf den Ritt, nicht nur Zyklus"
+        assert b.won == 1 and b.busted == 0, "positiver Ritt zählt als gewonnen"
+        banked_after_cycle1 = b.banked
+        assert 40 < banked_after_cycle1 < 100, f"Ritt-1-PnL sofort gebankt ({banked_after_cycle1:.2f})"
+        assert abs(b.paper.equity(P) - 1000.0) < 1e-6, "Konto sofort zurück auf 1000"
+        assert b.stats(P)["cycle"] == 2, "Zyklus-Zähler ist schon beim zweiten"
+
+        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], P)     # Zyklus 2: frisches Signal
+        assert "ETH" in b.paper.sizes()
+        s_fresh = b.stats(P)
+        assert -20 < s_fresh["cycle_pnl"] < 0, "neuer Zyklus startet bei ~0, NICHT bei +60"
+        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], {"BTC": 100.0, "ETH": 110.0})
+        assert b.won == 2, "Zyklus 2 trifft eigenständig das +100-Ziel"
+        assert b.banked > banked_after_cycle1 + 90, "beide Zyklen zusammen gebankt"
+        assert b.paper.sizes() == {} and abs(b.paper.equity({}) - 1000.0) < 1e-6
+
+
+def test_new_cycle_pnl_resets_regardless_of_previous_outcome():
+    """cycle_pnl startet nach JEDEM Ritt-Ende wieder nahe 0 - unabhängig davon,
+    ob der vorherige Zyklus gewann oder verlor (kein Zwischenstand-Mitschleppen)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)
+        b.tick(LED, [snap("0xbest", 50_000)], {"BTC": 100.65, "ETH": 100.0})  # Gewinn-Exit
+        assert b.won == 1
+        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], P)     # Zyklus 2 startet
+        s = b.stats(P)
+        assert -20 < s["cycle_pnl"] < 20, "Zyklus 2 kennt Zyklus 1s Gewinn nicht mehr"
 
 
 def test_stats_immune_to_concurrent_close_race():
@@ -262,7 +271,12 @@ def test_risk_off_flattens_no_remirror():
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)
         b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P, risk_off=True)
-        assert b.paper.sizes() == {} and b.won == 0 and b.busted == 0
+        assert b.paper.sizes() == {}
+        # RISK_OFF beendet den Ritt sofort als eigenen Zyklus (v3), aber ohne Strike
+        # fuers Leader-Konto (RISK_OFF ist nicht die Schuld des Leaders).
+        assert b.busted == 1 and b.won == 0
+        assert b.strikes == {}, "RISK_OFF ist strike-befreit"
+        assert abs(b.paper.equity(P) - 1000.0) < 1e-6, "Zyklus-Equity resettet"
         # Entwarnung: Leader hält BTC weiter -> das ist jetzt ein LAUFENDER Trade,
         # kein Wiedereinstieg. (Position lief während RISK_OFF weiter = nicht frisch
         # relativ zur letzten Baseline? Doch - Baseline hat BTC=500. Kein Einstieg.)
@@ -295,11 +309,11 @@ def test_no_mid_ride_leader_switch_but_rotation_while_flat():
 def test_ride_leader_rotated_out_closes():
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)
-        pnl_before = b.paper.equity(P) - 1000.0
         b.tick(leaders(("0xnew", 90)), [snap("0xnew", 50_000, ETH=400)], P)
         assert b.paper.sizes() == {}, "Ride-Leader weg -> blind -> schließen"
-        assert b.won == 0 and b.busted == 0
-        assert abs((b.paper.equity(P) - 1000.0) - pnl_before) < 10, "Zyklus-PnL bleibt"
+        # v3: auch Leader-Rotation beendet den Ritt sofort als eigenen Zyklus
+        assert b.won == 1 or b.busted == 1, "Ritt wurde als Zyklus verbucht"
+        assert abs(b.paper.equity(P) - 1000.0) < 1e-6, "Zyklus-Equity resettet"
 
 
 def test_restart_keeps_ride_and_rebaselines():

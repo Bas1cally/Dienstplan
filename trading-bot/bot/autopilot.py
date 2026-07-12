@@ -311,21 +311,22 @@ class Autopilot:
         prices = self.copier.last_prices if self.copier else {}
         if arg.lower().strip() == "close":
             n = self.sprint.close(prices)
-            return (f"⏹ Sprint-Ritt geschlossen ({n} Position(en)) - kein Strike, "
-                    "Zyklus läuft weiter." if n else "Sprint-Buch hält gerade nichts.")
+            return (f"⏹ Sprint-Zyklus manuell beendet ({n} Position(en)) - sofort "
+                    "verbucht, kein Strike. Nächster Zyklus wartet auf frisches Signal."
+                    if n else "Sprint-Buch hält gerade nichts.")
         s = self.sprint.stats(prices)
         lead = f"<code>{s['leader'][:10]}…</code>" if s.get("leader") else "n/a"
         strikes = ", ".join(f"{a}:{n}" for a, n in s.get("strikes", {}).items()) or "-"
         banned = ", ".join(s.get("banned", [])) or "-"
         # Einzelne Positionen mit Entry + eigenem unrealisiertem PnL (nicht nur
-        # 'LONG HYPE' ohne Zahlen) + die Ritt-PnL getrennt von der Zyklus-Summe.
+        # 'LONG HYPE' ohne Zahlen). Zyklus = Ritt (v3): keine separate Ritt-PnL
+        # mehr nötig, cycle_pnl IST die PnL des laufenden Ritts.
         if s.get("positions"):
             pos_lines = "\n".join(
                 f"  {'LONG' if p['size'] > 0 else 'SHORT'} {p['coin']}: "
                 f"{abs(p['size']):.4f} @ {p['entry']:.4f} (PnL {p['unrealized_pnl']:+,.2f} $)"
                 for p in s["positions"])
-            ride = f" | Ritt-PnL {s['ride_pnl']:+,.2f} $" if s.get("ride_pnl") is not None else ""
-            pos_block = f"Positionen:\n{pos_lines}{ride}"
+            pos_block = f"Positionen:\n{pos_lines}"
         else:
             pos_block = "Positionen: -"
         return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']}): {s['state']}\n"

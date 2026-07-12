@@ -1,4 +1,4 @@
-"""Sprint-Buch v2: frisches Leader-Signal -> einsteigen -> HALTEN -> +100$ TP.
+"""Sprint-Buch v3: frisches Leader-Signal -> einsteigen -> HALTEN -> abrechnen.
 
 Zustandsmaschine statt Dauer-Reconciliation (v1 hat mit plan_rebalance je Tick
 139 Trades produziert - bei 10x Hebel frisst das Fees):
@@ -14,12 +14,20 @@ Zustandsmaschine statt Dauer-Reconciliation (v1 hat mit plan_rebalance je Tick
   IM RITT - kein Rebalancing. Exits NUR wenn: der Leader den Coin komplett
             schließt oder flippt (mitgehen - sein Edge ist das Exit-Timing),
             der Leader aus der Rotation fällt (wir wären blind), RISK_OFF,
-            oder das Zyklus-Ziel/Bust greift. Größenänderungen: ignorieren.
+            oder das eigene Ziel/Bust greift. Größenänderungen: ignorieren.
 
-Zyklus: startet mit 1000$; Ziel-PnL kumuliert über beliebig viele Ritte.
-  Equity >= 1100 -> Take-Profit, Gewinn "banked", Konto-Reset, nächster Zyklus
-  beobachtet den DANN besten Leader (Rotation je Zyklus).
-  Equity <= 5%   -> Zyklus geplatzt (10x-Liquidations-Modell), ebenso Reset.
+ZYKLUS = RITT (v3, vorher: mehrere Ritte akkumulierten in einem Zyklus).
+  Jeder beendete Ritt - egal ob durch Leader-Exit/-Flip/-Scaleout, Rotation,
+  RISK_OFF, manuellen Close ODER das eigene +100$/5%-Ziel - wird SOFORT
+  verbucht (banked += PnL, won/busted je nach Vorzeichen) und das Konto sofort
+  wieder auf equity (1000$) zurückgesetzt. Der nächste Ritt ist ein neuer,
+  unabhängiger Zyklus. Kein "Zwischenstand mitschleppen" mehr - jeder Trade
+  steht für sich, einfacher für Dashboard/Historie nachzuvollziehen.
+
+  LARP-Strikes bleiben ritt-scharf: Verlust-Ritt -> Strike +1, Gewinn-Ritt
+  heilt einen Strike (min 0); 2 Strikes -> Leader fürs Sprint-Buch gesperrt.
+  Ausnahme: manueller Close und RISK_OFF sind nicht die Entscheidung/Schuld
+  des Leaders - kein Strike, PnL wird trotzdem sofort verbucht.
 
 Nur Paper-Modus; Fees konservativ als Taker.
 """
@@ -32,6 +40,14 @@ from .journal import RUNTIME
 from .paper import PaperBroker
 
 log = logging.getLogger(__name__)
+
+_REASON_TXT = {
+    "tp": "Ziel erreicht", "bust": "geplatzt (10x-Liquidation)",
+    "leader_exit": "Leader raus", "leader_flip": "Leader gedreht",
+    "leader_scaleout": "Leader hat abgebaut", "leader_rotated": "Leader rotiert",
+    "manual": "manuell geschlossen", "risk_off": "RISK_OFF",
+}
+_STRIKE_EXEMPT = {"manual", "risk_off"}  # nicht die Entscheidung/Schuld des Leaders
 
 
 class SprintBook:
@@ -66,25 +82,21 @@ class SprintBook:
              risk_off: bool = False) -> None:
         if not prices:
             return
-        # 1. Zyklus-Ende hat Vorrang (auch flach möglich: kumulierte Ritte >= Ziel)
+        # 1. Ziel/Bust hat Vorrang - Zyklus=Ritt, also sofort abrechnen+resetten
         eq = self.paper.equity(prices)
         if eq >= self.cfg.equity + self.cfg.target_profit:
-            self._end_cycle(prices, won=True)
+            self._settle_ride(prices, "tp")
             return
         if eq <= self.cfg.equity * self.cfg.bust_frac:
-            self._end_cycle(prices, won=False)
+            self._settle_ride(prices, "bust")
             return
-        # 2. Markt-Schutz: glattstellen, Zyklus läuft weiter (kein Wiederspiegeln)
+        # 2. Markt-Schutz: glattstellen, Ritt (=Zyklus) endet sofort, nicht weiter warten
         if risk_off:
             if self.paper.sizes():
-                log.warning("Sprint: RISK_OFF - stelle glatt (Zyklus läuft weiter)")
+                log.warning("Sprint: RISK_OFF - stelle glatt")
                 for coin in list(self.paper.sizes()):
                     self._close_coin(coin, prices, "risk_off")
-                # Markt-Event, nicht Leader-Schuld -> kein Strike, nur zurücksetzen
-                self.ride_leader = ""
-                self._ride_start_equity = None
-                self._ride_entry_sizes.clear()
-                self._save_state()
+                self._settle_ride(prices, "risk_off")
             return
         if not leaders or not snapshots:
             return
@@ -129,30 +141,33 @@ class SprintBook:
         snap = next((s for s in snapshots
                      if s.address.lower() == self.ride_leader.lower()), None)
         if snap is None:
-            # Leader aus der Rotation gefallen: wir wären blind -> schließen,
-            # zurück auf FLACH (Zyklus-PnL bleibt stehen, nächster Tick wartet neu)
+            # Leader aus der Rotation gefallen: wir wären blind -> schließen + abrechnen
             log.warning("Sprint: Ride-Leader %s aus der Rotation - schließe Positionen",
                         self.ride_leader[:10])
             for coin in list(self.paper.sizes()):
                 self._close_coin(coin, prices, "leader_rotated")
-            self._settle_ride(prices)
+            self._settle_ride(prices, "leader_rotated")
             return
         book = self._book_of(snap)
         prev = self._baselines.get(snap.address.lower())
 
         # Exit-Folge: Leader komplett raus / geflippt / >= partial_exit_frac abgebaut
+        last_reason = None
         for coin, our_size in list(self.paper.sizes().items()):
             leader_sz = book.get(coin, 0.0)
             entry_sz = self._ride_entry_sizes.get(coin, abs(leader_sz))
             if leader_sz == 0.0:
                 self._close_coin(coin, prices, "leader_exit")
+                last_reason = "leader_exit"
             elif (leader_sz > 0) != (our_size > 0):
                 # Flip = mitgehen: alte Richtung schließen UND die neue eröffnen
                 self._close_coin(coin, prices, "leader_flip")
+                last_reason = "leader_flip"
                 self._enter(coin, snap, prices)
             elif abs(leader_sz) <= (1 - self.cfg.partial_exit_frac) * entry_sz:
                 # Scale-out: Leader hat den Großteil abgebaut -> wir gehen mit
                 self._close_coin(coin, prices, "leader_scaleout")
+                last_reason = "leader_scaleout"
         # Weitere frische Einstiege desselben Leaders mitnehmen (nicht ohne Baseline,
         # z.B. direkt nach Neustart - dann erst re-baselinen, kein Fehl-Einstieg)
         if prev is not None:
@@ -163,7 +178,7 @@ class SprintBook:
                 self._enter(coin, snap, prices)
 
         if not self.paper.sizes():
-            self._settle_ride(prices)   # alle Ritte beendet -> abrechnen + FLACH
+            self._settle_ride(prices, last_reason or "leader_exit")
 
     def _refresh_baselines(self, leaders: list[dict], snapshots: list) -> None:
         keep = {str(l.get("address", "")).lower() for l in leaders}
@@ -210,25 +225,65 @@ class SprintBook:
                                f"| Zyklus {cycle}")
         self._save_state()
 
-    def _settle_ride(self, prices: dict[str, float]) -> None:
-        """Ritt beendet (flach): PnL dem Ride-Leader zuschreiben - Verlust = Strike,
-        Gewinn heilt einen Strike. 2 Strikes -> LARP-enttarnt, gesperrt."""
+    def _close_coin(self, coin: str, prices: dict[str, float], reason: str) -> None:
+        size = self.paper.sizes().get(coin, 0.0)
+        price = prices.get(coin)
+        if size == 0.0 or not price:
+            return
+        self.paper.execute(coin, -size, price)
+        run_pnl = self.paper.equity(prices) - self.cfg.equity
+        reason_txt = _REASON_TXT.get(reason, reason)
+        log.info("Sprint: Exit %s (%s), Zyklus-PnL %+.2f", coin, reason_txt, run_pnl)
+        if self.journal:
+            self.journal.record("sprint_exit", coin=coin, reason=reason,
+                                cycle_pnl=round(run_pnl, 2))
+        if self.notifier:
+            self.notifier.send(f"🔴 <b>Sprint-Exit</b> {coin}: {reason_txt}\n"
+                               f"Zyklus-PnL {run_pnl:+,.2f} $")
+
+    # ---------- Zyklus-Ende (= Ritt-Ende, v3) ----------
+
+    def close(self, prices: dict[str, float]) -> int:
+        """Manueller Not-Ausstieg (/sprint close): sofort verbuchen + resetten,
+        KEIN Strike (war deine Entscheidung, nicht der Leader). Gibt Anzahl zu."""
+        n = len(self.paper.sizes())
+        if n == 0:
+            return 0
+        for coin in list(self.paper.sizes()):
+            self._close_coin(coin, prices, "manual")
+        self._settle_ride(prices, "manual")
+        return n
+
+    def _settle_ride(self, prices: dict[str, float], reason: str) -> None:
+        """Ritt zu Ende = Zyklus zu Ende (v3): sofort verbuchen (banked/won/busted),
+        Konto sofort auf equity zurücksetzen. flatten() ist idempotent - falls schon
+        alles per _close_coin zu ist (Normalfall), passiert hier nichts mehr; beim
+        TP/Bust-Pfad (noch offene Positionen) schließt es hier alles auf einmal.
+
+        Strikes bleiben ritt-scharf: Verlust -> Strike, Gewinn heilt einen (min 0).
+        Ausnahme 'manual'/'risk_off' - nicht die Entscheidung/Schuld des Leaders."""
+        self.paper.flatten(prices)
         leader = self.ride_leader
-        start = self._ride_start_equity
-        self.ride_leader = ""
-        self._ride_entry_sizes.clear()
-        self._ride_start_equity = None
-        if leader and start is not None:
-            ride_pnl = self.paper.equity(prices) - start
+        pnl = self.paper.equity(prices) - self.cfg.equity
+        cycle = self.won + self.busted + 1
+        self.banked += pnl
+        self.total_trades += self.paper.trades
+        won = pnl > 0
+        if won:
+            self.won += 1
+        else:
+            self.busted += 1
+
+        if leader and reason not in _STRIKE_EXEMPT:
             key = leader.lower()
-            if ride_pnl < 0:
+            if pnl < 0:
                 self.strikes[key] = self.strikes.get(key, 0) + 1
                 n = self.strikes[key]
                 log.warning("Sprint: Verlust-Ritt %+.2f -> Strike %d für %s",
-                            ride_pnl, n, leader[:10])
+                            pnl, n, leader[:10])
                 if self.journal:
                     self.journal.record("sprint_strike", leader=leader, strikes=n,
-                                        ride_pnl=round(ride_pnl, 2))
+                                        ride_pnl=round(pnl, 2))
                 if n >= self.cfg.strike_ban and key not in self.banned:
                     self.banned.add(key)
                     if self.journal:
@@ -239,74 +294,29 @@ class SprintBook:
                             f"{n} Verlust-Ritte in Folge - fürs Sprint-Buch gesperrt.")
                 elif self.notifier:
                     self.notifier.send(f"⚠️ Strike {n}/{self.cfg.strike_ban} für "
-                                       f"<code>{leader[:10]}…</code> (Verlust-Ritt {ride_pnl:+,.2f}$)")
-            elif ride_pnl > 0 and self.strikes.get(key):
+                                       f"<code>{leader[:10]}…</code> (Verlust-Ritt {pnl:+,.2f}$)")
+            elif pnl > 0 and self.strikes.get(key):
                 self.strikes[key] = max(0, self.strikes[key] - 1)  # profitabel heilt
-        self._save_state()
 
-    def _close_coin(self, coin: str, prices: dict[str, float], reason: str) -> None:
-        size = self.paper.sizes().get(coin, 0.0)
-        price = prices.get(coin)
-        if size == 0.0 or not price:
-            return
-        self.paper.execute(coin, -size, price)
-        cycle_pnl = self.paper.equity(prices) - self.cfg.equity
-        reason_txt = {"leader_exit": "Leader raus", "leader_flip": "Leader gedreht",
-                      "leader_rotated": "Leader rotiert", "risk_off": "RISK_OFF"}.get(reason, reason)
-        log.info("Sprint: Exit %s (%s), Zyklus-PnL %+.2f", coin, reason_txt, cycle_pnl)
+        icon = "🏁" if reason == "tp" else "💥" if reason == "bust" else ("✅" if won else "🔻")
+        reason_txt = _REASON_TXT.get(reason, reason)
+        kind = {"tp": "sprint_tp", "bust": "sprint_bust"}.get(reason, "sprint_cycle_end")
+        log.warning("Sprint-Zyklus %d %s (%s): PnL %+.2f (banked gesamt %+.2f)",
+                    cycle, "gewonnen" if won else "verloren", reason_txt, pnl, self.banked)
         if self.journal:
-            self.journal.record("sprint_exit", coin=coin, reason=reason,
-                                cycle_pnl=round(cycle_pnl, 2))
+            self.journal.record(kind, cycle=cycle, pnl=round(pnl, 2), reason=reason,
+                                banked=round(self.banked, 2), leader=leader)
         if self.notifier:
-            self.notifier.send(f"🔴 <b>Sprint-Exit</b> {coin}: {reason_txt}\n"
-                               f"Zyklus-PnL {cycle_pnl:+,.2f} $")
-
-    # ---------- Zyklus-Ende ----------
-
-    def _end_cycle(self, prices: dict[str, float], won: bool) -> None:
-        self.paper.flatten(prices)
-        final = self.paper.equity(prices)
-        pnl = final - self.cfg.equity
-        cycle = self.won + self.busted + 1
-        self.banked += pnl
-        self.total_trades += self.paper.trades
-        if won:
-            self.won += 1
-        else:
-            self.busted += 1
-        kind = "sprint_tp" if won else "sprint_bust"
-        log.warning("Sprint-Zyklus %d %s: PnL %+.2f (banked gesamt %+.2f)",
-                    cycle, "ZIEL ERREICHT" if won else "GEPLATZT", pnl, self.banked)
-        if self.journal:
-            self.journal.record(kind, cycle=cycle, pnl=round(pnl, 2),
-                                banked=round(self.banked, 2),
-                                leader=self.ride_leader)
-        if self.notifier:
-            head = "🏁 <b>Sprint-Zyklus {c}: Ziel erreicht</b>" if won else \
-                   "💥 <b>Sprint-Zyklus {c}: geplatzt</b> (10x-Liquidations-Modell)"
             self.notifier.send(
-                head.format(c=cycle) + f"\nPnL {pnl:+,.2f} $ | Bilanz: {self.won}✅ "
-                f"{self.busted}💥 | banked {self.banked:+,.2f} $\nNeuer Zyklus wartet "
-                f"auf frisches Signal des besten Leaders."
+                f"{icon} <b>Zyklus {cycle} beendet</b> ({reason_txt}): {pnl:+,.2f} $\n"
+                f"Bilanz: {self.won}✅ {self.busted}💥 | banked {self.banked:+,.2f} $\n"
+                f"Nächster Zyklus wartet auf frisches Signal."
             )
         self.paper.reset()
         self.ride_leader = ""
         self._ride_start_equity = None
         self._ride_entry_sizes.clear()
-        self._baselines.clear()
         self._save_state()
-
-    def close(self, prices: dict[str, float]) -> int:
-        """Manueller Not-Ausstieg (/sprint close): Ritt zu, Zyklus läuft weiter,
-        KEIN Strike (war deine Entscheidung, nicht der Leader). Gibt Anzahl zu."""
-        n = len(self.paper.sizes())
-        for coin in list(self.paper.sizes()):
-            self._close_coin(coin, prices, "manual")
-        self.ride_leader = ""
-        self._ride_start_equity = None
-        self._ride_entry_sizes.clear()
-        self._save_state()
-        return n
 
     # ---------- Status & Persistenz ----------
 
@@ -325,15 +335,13 @@ class SprintBook:
         positions = self.paper.position_rows(prices)
         held = [f"{p['coin']} {'LONG' if p['size'] > 0 else 'SHORT'}" for p in positions]
         cycles_done = self.won + self.busted
-        # Ritt-PnL: nur der AKTUELLE Ritt seit seinem eigenen Start - getrennt von
-        # cycle_pnl (Summe über ALLE Ritte des Zyklus, inkl. bereits geschlossener).
-        ride_pnl = (round(eq - self._ride_start_equity, 2)
-                   if self._ride_start_equity is not None else None)
+        # Zyklus = Ritt (v3): cycle_pnl IST die PnL des laufenden Ritts, es gibt
+        # keine separate "Ritt-PnL" mehr (die beiden waren vorher unterschiedlich,
+        # weil ein Zyklus mehrere Ritte akkumulieren konnte - das gibt's nicht mehr).
         return {
             "equity": round(eq, 2),
             "cycle": cycles_done + 1,
             "cycle_pnl": round(eq - self.cfg.equity, 2),
-            "ride_pnl": ride_pnl,
             "positions": positions,
             "target": round(self.cfg.equity + self.cfg.target_profit, 2),
             "progress_pct": round((eq - self.cfg.equity) / self.cfg.target_profit * 100, 1),
