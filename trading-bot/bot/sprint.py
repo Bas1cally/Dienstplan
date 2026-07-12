@@ -315,10 +315,16 @@ class SprintBook:
         sizes = self.paper.sizes()
         held = [f"{c} {'LONG' if s > 0 else 'SHORT'}" for c, s in sizes.items()]
         cycles_done = self.won + self.busted
+        # Ritt-PnL: nur der AKTUELLE Ritt seit seinem eigenen Start - getrennt von
+        # cycle_pnl (Summe über ALLE Ritte des Zyklus, inkl. bereits geschlossener).
+        ride_pnl = (round(eq - self._ride_start_equity, 2)
+                   if self._ride_start_equity is not None else None)
         return {
             "equity": round(eq, 2),
             "cycle": cycles_done + 1,
             "cycle_pnl": round(eq - self.cfg.equity, 2),
+            "ride_pnl": ride_pnl,
+            "positions": self.paper.position_rows(prices) if prices else [],
             "target": round(self.cfg.equity + self.cfg.target_profit, 2),
             "progress_pct": round((eq - self.cfg.equity) / self.cfg.target_profit * 100, 1),
             "state": "hält" if sizes else "wartet auf frisches Signal",

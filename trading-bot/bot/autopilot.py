@@ -315,11 +315,21 @@ class Autopilot:
                     "Zyklus läuft weiter." if n else "Sprint-Buch hält gerade nichts.")
         s = self.sprint.stats(prices)
         lead = f"<code>{s['leader'][:10]}…</code>" if s.get("leader") else "n/a"
-        pos = ", ".join(s["held"]) if s.get("held") else "-"
         strikes = ", ".join(f"{a}:{n}" for a, n in s.get("strikes", {}).items()) or "-"
         banned = ", ".join(s.get("banned", [])) or "-"
+        # Einzelne Positionen mit Entry + eigenem unrealisiertem PnL (nicht nur
+        # 'LONG HYPE' ohne Zahlen) + die Ritt-PnL getrennt von der Zyklus-Summe.
+        if s.get("positions"):
+            pos_lines = "\n".join(
+                f"  {'LONG' if p['size'] > 0 else 'SHORT'} {p['coin']}: "
+                f"{abs(p['size']):.4f} @ {p['entry']:.4f} (PnL {p['unrealized_pnl']:+,.2f} $)"
+                for p in s["positions"])
+            ride = f" | Ritt-PnL {s['ride_pnl']:+,.2f} $" if s.get("ride_pnl") is not None else ""
+            pos_block = f"Positionen:\n{pos_lines}{ride}"
+        else:
+            pos_block = "Positionen: -"
         return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']}): {s['state']}\n"
-                f"Positionen: {pos}\n"
+                f"{pos_block}\n"
                 f"Equity: {s['equity']:,.2f} / Ziel {s['target']:,.0f} "
                 f"(Zyklus-PnL {s['cycle_pnl']:+,.2f} $)\n"
                 f"Bilanz: {s['won']}✅ {s['busted']}💥 | banked {s['banked']:+,.2f} $\n"

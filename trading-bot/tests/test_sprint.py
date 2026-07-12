@@ -186,6 +186,36 @@ def test_tp_accumulates_over_two_rides():
         assert b.paper.sizes() == {} and abs(b.paper.equity({}) - 1000.0) < 1e-9
 
 
+def test_ride_pnl_separate_from_cycle_pnl():
+    """Regression: der Nutzer sah nur die Zyklus-Summe, nicht die PnL des
+    AKTUELLEN Ritts allein - ride_pnl muss bei einem neuen Ritt bei 0 starten,
+    auch wenn der Zyklus schon Gewinn aus einem vorherigen Ritt mitbringt."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)                                     # Ritt 1: long ~10k @100
+        b.tick(LED, [snap("0xbest", 50_000)], {"BTC": 100.65, "ETH": 100.0})  # Exit ~+60
+        assert b.paper.sizes() == {}
+        s0 = b.stats(P)
+        assert s0["cycle_pnl"] > 40 and s0["ride_pnl"] is None, "kein Ritt offen -> None"
+        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], P)     # Ritt 2 beginnt
+        s1 = b.stats(P)
+        # Direkt nach Einstieg: nur die Eintritts-Fee (leicht negativ), NICHT die
+        # +60 aus Ritt 1 - das ist der eigentliche Beweis der Trennung.
+        assert -20 < s1["ride_pnl"] < 0, "frischer Ritt zeigt nur seine eigene (Fee-)PnL"
+        assert s1["cycle_pnl"] > 40, "Zyklus-Summe bleibt (Ritt 1 + Ritt 2 zusammen)"
+        # Preis bewegt sich zugunsten des Ritts -> ride_pnl wächst SEPARAT
+        s2 = b.stats({"BTC": 100.65, "ETH": 103.0})
+        assert s2["ride_pnl"] > s1["ride_pnl"], "Ritt-PnL reagiert auf den Ritt, nicht nur Zyklus"
+
+
+def test_stats_exposes_position_details():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)   # long BTC ~100 Einstieg
+        s = b.stats({"BTC": 105.0, "ETH": 100.0})
+        assert len(s["positions"]) == 1
+        p = s["positions"][0]
+        assert p["coin"] == "BTC" and p["entry"] == 100.0 and p["unrealized_pnl"] > 0
+
+
 def test_bust_floor():
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)
