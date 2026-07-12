@@ -226,6 +226,21 @@ def test_stats_immune_to_concurrent_close_race():
             and s["positions"] == [], "stats() darf sich nicht mehr auf sizes() stützen"
 
 
+def test_stats_survives_empty_prices_right_after_restart():
+    """Regression: direkt nach einem Neustart (/update) sind self.copier.last_prices
+    noch leer, bevor der erste Tick frische Preise holt - stats(prices={}) darf
+    eine ECHTE offene Position dann nicht als 'wartet auf frisches Signal'/leer
+    zeigen (equity()/position_rows() degradieren selbst schon sauber auf
+    Entry-Preis bzw. 0 PnL - kein Grund, das in stats() nochmal zu erzwingen)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)  # BTC-Position offen, echte Preise vorhanden
+        s = b.stats({})    # wie direkt nach Neustart: keine Preise verfügbar
+        assert s["state"] == "hält", "echte offene Position darf nicht verschwinden"
+        assert s["held"] == ["BTC LONG"]
+        assert len(s["positions"]) == 1 and s["positions"][0]["coin"] == "BTC"
+        assert s["equity"] == 1000.0 or s["equity"] > 0, "kein Crash, sinnvoller Fallback"
+
+
 def test_stats_exposes_position_details():
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)   # long BTC ~100 Einstieg

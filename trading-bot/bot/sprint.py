@@ -311,12 +311,18 @@ class SprintBook:
     # ---------- Status & Persistenz ----------
 
     def stats(self, prices: dict[str, float]) -> dict:
-        eq = self.paper.equity(prices) if prices else self.cfg.equity + self.paper.realized_pnl
+        # KEIN Sonderfall für leere prices: equity()/position_rows() degradieren
+        # selbst schon sauber (Preis fehlt -> Entry-Preis bzw. 0 als Fallback,
+        # nie ein Crash). Ein "if prices else leer"-Sonderfall hier würde eine
+        # ECHTE offene Position kurz nach einem Neustart (bevor frische Preise
+        # da sind) fälschlich als 'wartet auf frisches Signal' zeigen - genau
+        # der Bug, der hier gefunden wurde.
+        eq = self.paper.equity(prices)
         # EINE Abfrage des Positionsbestands, held/state/positions leiten sich alle
         # daraus ab - der Hintergrund-Loop (eigener Thread) kann jederzeit einen
         # Ritt schließen; zwei getrennte self.paper-Aufrufe könnten sonst
         # auseinanderlaufen (state="hält" während positions bereits leer ist).
-        positions = self.paper.position_rows(prices) if prices else []
+        positions = self.paper.position_rows(prices)
         held = [f"{p['coin']} {'LONG' if p['size'] > 0 else 'SHORT'}" for p in positions]
         cycles_done = self.won + self.busted
         # Ritt-PnL: nur der AKTUELLE Ritt seit seinem eigenen Start - getrennt von
