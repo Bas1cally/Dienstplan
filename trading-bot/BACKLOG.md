@@ -35,22 +35,42 @@ nicht Glück.
   schützt nicht vor Konsequenzen; er ist reine Auszeichnung fürs bewiesene
   Können.
 
+### Star-Verhalten (Nutzer-Entscheidungen, 12.07.2026)
+- **Verlust-Ritt = einfach ein Strike.** Confidence Points werden dadurch NICHT
+  reduziert — der Verlust lebt allein in den Strikes (kurzfristige Konsequenz),
+  Confidence ist der langfristige Ruf und wächst nur durch Gewinn-Ritte (+5).
+  Wir wollen gar keine Verlust-Ritte; passiert einer, ist er schlicht ein Strike.
+- **Star-Vorrang bei gleichzeitigen Signalen:** Signalisieren zwei Leader zur
+  selben Zeit, hat der Star Vorrang — vor dem reinen Score-Tie-Break in
+  `_tick_waiting`. Top-Star-Trader wird bevorzugt genommen.
+- **Star-Preemption eines laufenden Ritts:** Läuft gerade ein Ritt und ist er
+  **im Profit**, und ein (Super-)Star gibt ein frisches Signal → aktuellen Ritt
+  schließen (Gewinn sofort banked, zählt als normaler Gewinn-Ritt für den
+  bisherigen Leader: +5 Confidence, Strike-Heilung) und auf das Star-Signal
+  wechseln. Ist der laufende Ritt **nicht im Profit** → kein Wechsel (keinen
+  Verlust realisieren, um einem Star hinterherzujagen; der Ritt endet normal
+  über seine eigenen Exit-/Strike-Regeln).
+  - **Interaktion beachten:** Das ist eine bewusste Ausnahme zur bisherigen
+    „kein Mid-Ride-Leaderwechsel"-Regel (v2/v3). Beim Bau sauber mit
+    `_tick_riding` versöhnen — bisher wird nur auf Leader-Exit/-Flip/-Scaleout/
+    -Rotation, TP/Bust, RISK_OFF und manuellen Close geschlossen.
+
+Restliche Feinheiten: „fuchsen wir aus, wenn es soweit ist" (Nutzer).
+
 ### Offene Fragen für die Umsetzung (in der Bau-Session klären)
 1. **Persistenz:** Confidence Points neben den Strikes in
    `runtime/sprint_cycles.json` ablegen (dort liegen `strikes`/`banned` schon),
    oder eigenes Konto? Vermutlich dazu, Key `confidence: {addr: n}` + abgeleitete
    `stars: [addr]`.
-2. **Punkt-Dynamik bei Verlust:** Der Nutzer nennt nur den Zuwachs (+5 bei
-   Gewinn). Offen: Reduziert ein Verlust-Ritt die Confidence Points, oder bleibt
-   der Verlust allein in den Strikes? (Vorschlag: Strikes = kurzfristige
-   Konsequenz, Confidence = langfristiger Ruf; Verlust strikt, aber Confidence
-   sinkt evtl. leicht — mit Nutzer abstimmen.) Ein Ban könnte Confidence
-   einfrieren/zurücksetzen — klären.
-3. **Wo genau greift der „weitere Filter für den gesamten Code"?** Das ist der
-   breiteste Punkt. Kandidaten: Star-Bonus im HL-Leaderboard-Score
-   (`rotate_leaders`), Bevorzugung im Sprint-Pool, Voraussetzung/Boost für den
-   Sprung auf echtes Kapital. Kernidee klar (Star = codeweites Qualitätssignal),
-   konkrete Einhängepunkte mit Nutzer festlegen.
+2. ~~Punkt-Dynamik bei Verlust~~ **ENTSCHIEDEN:** Verlust-Ritt = nur Strike,
+   keine Confidence-Reduktion (siehe „Star-Verhalten" oben). Offen bleibt nur:
+   Was passiert mit Confidence bei einem Ban? (einfrieren vs. zurücksetzen)
+3. **Wo greift der „weitere Filter für den gesamten Code"?** Sprint-Teil
+   **ENTSCHIEDEN** (Vorrang bei gleichzeitigen Signalen + Preemption eines
+   profitablen Ritts, siehe oben). Noch offen: der *breitere* codeweite Filter —
+   Star-Bonus im HL-Leaderboard-Score (`rotate_leaders`)? Voraussetzung/Boost
+   für den Sprung auf echtes Kapital? Kernidee klar (Star = codeweites
+   Qualitätssignal), konkrete Einhängepunkte später festlegen.
 4. **Sichtbarkeit:** `/sprint` bzw. `/leaders` um Confidence/Star-Marker (z.B.
    ⭐) erweitern; Journal-Kind `sprint_star` beim Erreichen der 100.
 5. **Quellen-Reichweite:** Gilt Confidence nur für HL-Sprint-Ritte, oder auch
