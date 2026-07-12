@@ -207,6 +207,25 @@ def test_ride_pnl_separate_from_cycle_pnl():
         assert s2["ride_pnl"] > s1["ride_pnl"], "Ritt-PnL reagiert auf den Ritt, nicht nur Zyklus"
 
 
+def test_stats_immune_to_concurrent_close_race():
+    """Regression: der Nutzer sah state='hält' bei leerer Positionsliste, weil
+    stats() den Bestand frueher ZWEIMAL abfragte (sizes() fuer state/held,
+    position_rows() fuer positions) - der Hintergrund-Loop (anderer Thread)
+    konnte den Ritt exakt dazwischen schliessen. Simuliert hier ohne echtes
+    Threading: sizes() liefert bewusst einen VERALTETEN Bestand (noch offen),
+    position_rows() den AKTUELLEN (schon zu) - stats() darf sich nur noch auf
+    EINE Quelle stuetzen, nicht auf sizes()."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)  # BTC-Position offen
+        b.close(P)         # wirklich geschlossen
+        # sizes() luegt jetzt bewusst "noch offen" - genau das haette die Race
+        # gezeigt, wenn stats() sich weiterhin darauf stuetzen wuerde.
+        b.paper.sizes = lambda: {"BTC": 1.0}
+        s = b.stats(P)
+        assert s["state"] == "wartet auf frisches Signal" and s["held"] == [] \
+            and s["positions"] == [], "stats() darf sich nicht mehr auf sizes() stützen"
+
+
 def test_stats_exposes_position_details():
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)   # long BTC ~100 Einstieg

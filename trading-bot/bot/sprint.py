@@ -312,8 +312,12 @@ class SprintBook:
 
     def stats(self, prices: dict[str, float]) -> dict:
         eq = self.paper.equity(prices) if prices else self.cfg.equity + self.paper.realized_pnl
-        sizes = self.paper.sizes()
-        held = [f"{c} {'LONG' if s > 0 else 'SHORT'}" for c, s in sizes.items()]
+        # EINE Abfrage des Positionsbestands, held/state/positions leiten sich alle
+        # daraus ab - der Hintergrund-Loop (eigener Thread) kann jederzeit einen
+        # Ritt schließen; zwei getrennte self.paper-Aufrufe könnten sonst
+        # auseinanderlaufen (state="hält" während positions bereits leer ist).
+        positions = self.paper.position_rows(prices) if prices else []
+        held = [f"{p['coin']} {'LONG' if p['size'] > 0 else 'SHORT'}" for p in positions]
         cycles_done = self.won + self.busted
         # Ritt-PnL: nur der AKTUELLE Ritt seit seinem eigenen Start - getrennt von
         # cycle_pnl (Summe über ALLE Ritte des Zyklus, inkl. bereits geschlossener).
@@ -324,10 +328,10 @@ class SprintBook:
             "cycle": cycles_done + 1,
             "cycle_pnl": round(eq - self.cfg.equity, 2),
             "ride_pnl": ride_pnl,
-            "positions": self.paper.position_rows(prices) if prices else [],
+            "positions": positions,
             "target": round(self.cfg.equity + self.cfg.target_profit, 2),
             "progress_pct": round((eq - self.cfg.equity) / self.cfg.target_profit * 100, 1),
-            "state": "hält" if sizes else "wartet auf frisches Signal",
+            "state": "hält" if positions else "wartet auf frisches Signal",
             "held": held,
             "banked": round(self.banked, 2),
             "won": self.won,
