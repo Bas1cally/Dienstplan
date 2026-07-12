@@ -373,6 +373,7 @@ class LighterConfig:
     min_positions: int = 1        # muss aktuell handeln
     max_leaders: int = 5          # so viele Beste werden gemessen
     initial_equity: float = 10_000  # Paper-Konto der Lighter-Messung
+    throttle_s: float = 0.25      # Pause zwischen Konto-Reads (Rate-Limit-Hygiene)
 
     def __post_init__(self):
         if self.accounts is None:

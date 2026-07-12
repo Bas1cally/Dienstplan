@@ -155,7 +155,10 @@ class LighterSource:
         Lighter hat kein PnL-Ranking-API; das ist der pragmatische Aktivitäts-Proxy."""
         cands = self.discover_active()[: self.cfg.max_candidates]
         scored: list[tuple[float, LeaderSnapshot]] = []
-        for ref in cands:
+        throttle = getattr(self.cfg, "throttle_s", 0.25)
+        for i, ref in enumerate(cands):
+            if i and throttle:
+                time.sleep(throttle)   # Rate-Limit-Hygiene: nicht 40 Reads am Stück
             try:
                 snap = self.snapshot(ref)
             except Exception:
