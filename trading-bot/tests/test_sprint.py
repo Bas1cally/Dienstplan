@@ -28,6 +28,10 @@ def leaders(*rows):
 
 
 def book(tmp, **overrides):
+    # Default für die generischen Mechanik-Tests: BTC NICHT ausschließen (das ist
+    # ein eigenes Feature, unten separat getestet) - sonst bräche hier fast jeder
+    # bestehende Test, weil er BTC als Test-Coin nutzt.
+    overrides.setdefault("exclude_coins", [])
     cfg = SprintConfig(**overrides)
     return SprintBook(cfg, FEE, runtime_dir=Path(tmp))
 
@@ -292,6 +296,38 @@ def test_other_leader_ignored_while_riding_no_stale_entry_after():
         assert b.paper.sizes() == {}, "laufender Trade der Nr. 2 bleibt tabu"
 
 
+def test_btc_excluded_by_default():
+    """BTC = Beta statt Leader-Alpha, plus Fee-Falle bei fixem 10%-Ziel -> raus."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = SprintConfig()  # KEIN exclude_coins-Override -> Default gilt
+        b = SprintBook(cfg, FEE, runtime_dir=Path(tmp))
+        b.tick(LED, [snap("0xbest", 50_000)], P)                  # Baseline
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)         # frisches BTC-Signal
+        assert b.paper.sizes() == {}, "BTC-Signal wird ignoriert"
+        assert b.ride_leader == "", "kein Ritt ausgelöst"
+
+
+def test_non_excluded_coin_still_enters_when_btc_and_alt_open_together():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = SprintConfig()
+        b = SprintBook(cfg, FEE, runtime_dir=Path(tmp))
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        # Leader eröffnet BEIDES gleichzeitig -> BTC raus, ETH bleibt
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500, ETH=300)], P)
+        sizes = b.paper.sizes()
+        assert "BTC" not in sizes and "ETH" in sizes
+
+
+def test_exclude_coins_configurable():
+    """Leere Liste erlaubt BTC wieder - keine hartkodierte Sonderregel."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = SprintConfig(exclude_coins=[])
+        b = SprintBook(cfg, FEE, runtime_dir=Path(tmp))
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert "BTC" in b.paper.sizes()
+
+
 def test_v1_migration_resets_churned_book():
     with tempfile.TemporaryDirectory() as tmp:
         rt = Path(tmp)
@@ -317,7 +353,8 @@ def test_notifier_journal_and_stats():
             recorded.append((kind, d))
 
     with tempfile.TemporaryDirectory() as tmp:
-        b = SprintBook(SprintConfig(), FEE, notifier=N(), journal=J(), runtime_dir=Path(tmp))
+        b = SprintBook(SprintConfig(exclude_coins=[]), FEE, notifier=N(), journal=J(),
+                       runtime_dir=Path(tmp))
         b.tick(LED, [snap("0xbest", 50_000)], P)
         assert b.stats(P)["state"] == "wartet auf frisches Signal"
         b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)

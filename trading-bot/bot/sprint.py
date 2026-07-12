@@ -178,6 +178,8 @@ class SprintBook:
     # ---------- Ein-/Ausstieg ----------
 
     def _enter(self, coin: str, snap, prices: dict[str, float]) -> None:
+        if coin in self.cfg.exclude_coins:
+            return  # Beta statt Leader-Alpha (z.B. BTC) - kein Signal
         price = prices.get(coin)
         if not price or price <= 0:
             return

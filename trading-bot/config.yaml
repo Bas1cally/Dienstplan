@@ -156,6 +156,10 @@ sprint:
   rebalance_threshold: 0.02
   partial_exit_frac: 0.75   # Leader baut >=75% ab -> wir gehen mit raus (Scale-out)
   strike_ban: 2             # 2 Verlust-Ritte -> Leader fürs Sprint-Buch gesperrt
+  exclude_coins: [BTC]      # BTC = Beta statt Leader-Alpha; bei fixem +10%-Ziel
+                            # (10x ~1% Move) stoppt ein BTC-Scalper oft mehrfach
+                            # aus, bevor das Ziel steht - teure Ein-/Ausstiegs-Fees
+                            # ohne besonderen Edge. Leer lassen, um BTC zuzulassen.
 
 # === Lighter (zkLighter): fremde Trader auto-entdecken + auf HL messen ===
 # Probe hat bestätigt: Lighter gibt fremde Positionen öffentlich her. Der Bot

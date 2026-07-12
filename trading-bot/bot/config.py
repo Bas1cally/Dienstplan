@@ -347,6 +347,15 @@ class SprintConfig:
     # LARP-Strikes: Verlust-Ritt -> Strike +1, Gewinn-Ritt -> Strike -1 (min 0).
     # Bei strike_ban Strikes wird der Leader fürs Sprint-Buch gesperrt.
     strike_ban: int = 2
+    # BTC ist praktisch "der Markt" (Beta statt Leader-Alpha) und volatilitätsarm -
+    # bis das feste +10%-Ziel (bei 10x ~1% Kursbewegung) erreicht ist, stoppt ein
+    # scalpender Leader oft mehrfach aus - jeder Ritt kostet echte Ein-/Ausstiegs-
+    # fee auf ~10x Notional. Ausschlussliste statt starrer Whitelist, frei änderbar.
+    exclude_coins: list = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.exclude_coins is None:
+            self.exclude_coins = ["BTC"]
 
 
 @dataclass
