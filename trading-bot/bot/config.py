@@ -353,8 +353,9 @@ class SprintConfig:
 class LighterConfig:
     """Lighter (zkLighter) als zusätzliche Trader-Quelle (read-only, Copy auf HL).
 
-    Kein Ranking-API -> Watchlist: Account-Indizes oder L1-Adressen aus dem
-    Lighter-Web-Leaderboard. Erst per /lighter <ref> verifizieren, dann messen.
+    Kein Ranking-API -> automatische Discovery über den öffentlichen Trade-Strom
+    (marktweise, da recentTrades einen market_id-Pflichtparameter braucht) +
+    optionale manuelle Seeds. Erst per /lighter <ref> verifizieren, dann messen.
     """
     enabled: bool = False
     base_url: str = "https://mainnet.zklighter.elliot.ai"
@@ -366,7 +367,6 @@ class LighterConfig:
     # bewerten (LARP/Score) und die Besten im Paper-Schatten messen. Kein manuelles
     # Wallet-Durchgehen nötig.
     auto_discover: bool = True
-    trades_url: str = "https://mainnet.zklighter.elliot.ai/api/v1/recentTrades"
     scan_seconds: int = 300
     max_candidates: int = 40      # API-Budget je Scan (Snapshot je Kandidat)
     min_equity: float = 5_000     # Wegwerf-Konten aussortieren

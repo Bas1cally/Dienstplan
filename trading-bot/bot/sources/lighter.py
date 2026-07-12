@@ -74,9 +74,23 @@ class LighterClient:
         return _first_account(self._http(f"{self.base}/api/v1/account",
                                          {"by": by, "value": str(ref)}))
 
-    def recent_trades(self, url: str, limit: int = 200) -> list:
-        """Öffentlicher Trade-Strom (für Discovery). Toleriert mehrere Response-Formen."""
-        data = self._http(url, {"limit": limit})
+    def markets(self) -> list[dict]:
+        """Marktliste (GET /api/v1/orderBooks): liefert market_id <-> symbol.
+        Nötig, weil recentTrades einen market_id-Pflichtparameter braucht -
+        Lighter ist marktbasiert, es gibt keinen globalen Trade-Strom wie bei HL."""
+        data = self._http(f"{self.base}/api/v1/orderBooks", {})
+        if isinstance(data, dict):
+            for k in ("order_books", "orderBooks", "markets", "data", "result"):
+                if isinstance(data.get(k), list):
+                    return data[k]
+            return []
+        return data if isinstance(data, list) else []
+
+    def recent_trades(self, market_id: int, limit: int = 100) -> list:
+        """Trade-Strom EINES Markts (market_id ist Pflicht laut API). Toleriert
+        mehrere Response-Formen."""
+        data = self._http(f"{self.base}/api/v1/recentTrades",
+                          {"market_id": market_id, "limit": limit})
         if isinstance(data, dict):
             for k in ("trades", "recentTrades", "data", "result"):
                 if isinstance(data.get(k), list):
@@ -116,6 +130,8 @@ class LighterSource:
         self.cfg = cfg                        # LighterConfig
         self.client = client or LighterClient(cfg.base_url)
         self._hl_coins = set(cfg.coins) if cfg.coins else None
+        self._market_ids: list[int] | None = None   # Cache, Märkte wechseln selten
+        self.last_scan_note = ""              # sichtbare Diagnose statt stillem Fehlschlag
 
     def discover(self, min_score: float = 0) -> list[str]:
         return [str(a) for a in (self.cfg.accounts or [])]
@@ -133,21 +149,63 @@ class LighterSource:
 
     # ---------- Auto-Discovery: aktive Konten aus dem Trade-Strom ----------
 
-    def discover_active(self) -> list[str]:
-        """Zieht Kandidaten-Konten aus dem öffentlichen Trade-Strom + Seeds."""
-        cands: list[str] = [str(a) for a in (self.cfg.accounts or [])]  # Seeds zuerst
-        if getattr(self.cfg, "auto_discover", False):
+    def _resolve_market_ids(self) -> list[int]:
+        """symbol -> market_id, gefiltert auf die konfigurierte Coin-Liste. Gecacht,
+        weil Märkte selten wechseln - recentTrades braucht market_id als Pflichtfeld."""
+        if self._market_ids is not None:
+            return self._market_ids
+        try:
+            raw = self.client.markets()
+        except Exception as e:
+            log.warning("Lighter orderBooks nicht abrufbar: %s", str(e)[:80])
+            self._market_ids = []
+            return []
+        wanted = set(self.cfg.coins) if self.cfg.coins else None
+        ids = []
+        for m in raw:
+            sym = str(m.get("symbol") or "").upper().replace("-USD", "").replace("USD", "")
+            mid = m.get("market_id")
+            if mid is None or (wanted is not None and sym not in wanted):
+                continue
             try:
-                trades = self.client.recent_trades(self.cfg.trades_url)
+                ids.append(int(mid))
+            except (TypeError, ValueError):
+                continue
+        self._market_ids = ids
+        return ids
+
+    def discover_active(self) -> list[str]:
+        """Zieht Kandidaten-Konten aus dem öffentlichen Trade-Strom (je Markt,
+        market_id ist Pflicht) + Seeds. Setzt last_scan_note bei Problemen -
+        sonst verschwindet ein Fehlschlag sonst spurlos in 'sucht…'."""
+        cands: list[str] = [str(a) for a in (self.cfg.accounts or [])]  # Seeds zuerst
+        if not getattr(self.cfg, "auto_discover", False):
+            return cands
+        market_ids = self._resolve_market_ids()
+        if not market_ids:
+            self.last_scan_note = "keine Märkte aufgelöst (orderBooks nicht erreichbar/leer)"
+            log.warning("Lighter: %s", self.last_scan_note)
+            return cands
+        seen = set(cands)
+        found_any_trades = False
+        for i, mid in enumerate(market_ids):
+            if i and self.cfg.throttle_s:
+                time.sleep(self.cfg.throttle_s)
+            try:
+                trades = self.client.recent_trades(mid, limit=100)
             except Exception as e:
-                log.warning("Lighter recent_trades nicht abrufbar: %s", str(e)[:80])
-                trades = []
-            seen = set(cands)
+                log.warning("Lighter recentTrades market_id=%s fehlgeschlagen: %s",
+                           mid, str(e)[:80])
+                continue
+            if trades:
+                found_any_trades = True
             for t in trades:
                 for idx in _account_ids(t):
                     if idx not in seen:
                         seen.add(idx)
                         cands.append(idx)
+        self.last_scan_note = ("" if found_any_trades else
+                               f"{len(market_ids)} Märkte abgefragt, keine Trades erhalten")
         return cands
 
     def rank(self) -> list[LeaderSnapshot]:
@@ -169,11 +227,15 @@ class LighterSource:
             scored.append((activity, snap))
         scored.sort(key=lambda x: x[0], reverse=True)
         top = [s for _, s in scored[: self.cfg.max_leaders]]
+        if not top and not self.last_scan_note:
+            self.last_scan_note = (f"{len(cands)} Kandidaten gescannt, keiner erfüllt "
+                                   f"min_equity/min_positions")
         try:
             RUNTIME.mkdir(exist_ok=True)
             (RUNTIME / "lighter_leaders.json").write_text(json.dumps(
                 {"t": int(time.time()), "leaders": [s.address for s in top],
-                 "scanned": len(cands), "qualified": len(scored)}, indent=2))
+                 "scanned": len(cands), "qualified": len(scored),
+                 "note": self.last_scan_note}, indent=2))
         except OSError:
             pass
         return top
@@ -252,4 +314,5 @@ class LighterShadow:
             "realized_pnl": round(self.paper.realized_pnl, 2),
             "leaders": [s.address for s in self._leaders],
             "open_positions": len(self.paper.positions),
+            "note": self.source.last_scan_note,
         }

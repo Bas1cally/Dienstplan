@@ -378,10 +378,11 @@ class Autopilot:
             if self.lighter and self.copier:
                 s = self.lighter.stats(self.copier.last_prices)
                 leaders = ", ".join(a[:8] for a in s.get("leaders", [])) or "sucht…"
+                note = f"\n⚠️ {s['note']}" if s.get("note") else ""
                 return (f"<b>Lighter-Schatten</b> (Auto-Discovery)\n"
                         f"Equity: {s['equity']:,.2f} ({s['return_pct']:+.2f}%) | "
                         f"{s['trades']} Trades, {s['open_positions']} offen\n"
-                        f"Aktuelle Top-Konten: {leaders}\n"
+                        f"Aktuelle Top-Konten: {leaders}{note}\n"
                         f"Einzeltest: <code>/lighter &lt;index&gt;</code>")
             return (f"<b>Lighter</b> ({'aktiv' if cfg.enabled else 'aus'})\n"
                     f"Auto-Discovery: {cfg.auto_discover}\n"

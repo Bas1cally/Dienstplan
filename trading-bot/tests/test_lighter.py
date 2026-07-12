@@ -88,14 +88,59 @@ def test_discover_extracts_account_ids_from_trades():
     assert set(ids) == {"7", "12"}, "nur account-Felder, market_id nicht"
 
 
-def test_discover_includes_seeds_and_budget():
-    trades = [{"maker_account_id": i} for i in range(100)]
-    cfg = LighterConfig(accounts=[999], auto_discover=True, max_candidates=10)
-    client = LighterClient(http=lambda url, params: {"trades": trades})
-    src = LighterSource(cfg, client)
+MARKETS = [{"symbol": "BTC", "market_id": 1}, {"symbol": "ETH", "market_id": 2},
+           {"symbol": "SOL", "market_id": 3}]
+
+
+def http_markets_and_trades(trades_by_market, extra=None):
+    """Fake-HTTP: orderBooks liefert MARKETS, recentTrades(market_id=X) liefert
+    trades_by_market[X]. account-Requests gehen an `extra` (dict ref->response)."""
+    def http(url, params):
+        if "orderBooks" in url:
+            return {"order_books": MARKETS}
+        if "recentTrades" in url:
+            return {"trades": trades_by_market.get(params["market_id"], [])}
+        if extra is not None:
+            return extra[params["value"]]
+        raise AssertionError(f"unerwarteter Call: {url} {params}")
+    return http
+
+
+def test_resolve_market_ids_filters_by_coins():
+    cfg = LighterConfig(coins=["BTC", "ETH"])
+    src = LighterSource(cfg, LighterClient(http=http_markets_and_trades({})))
+    ids = src._resolve_market_ids()
+    assert set(ids) == {1, 2}, "nur konfigurierte Coins, SOL raus"
+    assert src._resolve_market_ids() is ids, "gecacht, kein zweiter Call nötig"
+
+
+def test_discover_queries_each_market_and_dedupes():
+    trades = {1: [{"maker_account_id": 7}, {"taker_account_id": 8}],
+             2: [{"maker_account_id": 8}]}   # 8 doppelt -> dedup
+    cfg = LighterConfig(accounts=[999], auto_discover=True, coins=["BTC", "ETH"], throttle_s=0)
+    src = LighterSource(cfg, LighterClient(http=http_markets_and_trades(trades)))
     cands = src.discover_active()
     assert cands[0] == "999", "Seeds zuerst"
-    assert len(set(cands)) == len(cands), "dedupliziert"
+    assert set(cands) == {"999", "7", "8"}
+    assert len(cands) == len(set(cands)), "dedupliziert"
+    assert src.last_scan_note == "", "Trades gefunden -> keine Fehlermeldung"
+
+
+def test_discover_no_markets_resolved_sets_note():
+    """Regression: der reale Bug - orderBooks liefert nichts -> vorher stille
+    Endlosschleife ('sucht…'), jetzt eine sichtbare Diagnose."""
+    cfg = LighterConfig(auto_discover=True, coins=["BTC"], throttle_s=0)
+    src = LighterSource(cfg, LighterClient(http=lambda url, params: {}))
+    cands = src.discover_active()
+    assert cands == []
+    assert "Märkte" in src.last_scan_note
+
+
+def test_discover_markets_ok_but_no_trades_sets_note():
+    cfg = LighterConfig(auto_discover=True, coins=["BTC", "ETH"], throttle_s=0)
+    src = LighterSource(cfg, LighterClient(http=http_markets_and_trades({})))
+    src.discover_active()
+    assert "keine Trades" in src.last_scan_note
 
 
 def test_rank_filters_and_tops():
@@ -106,15 +151,11 @@ def test_rank_filters_and_tops():
         "3": acct(1_000, pos("BTC", 1, 1, 60_000)),   # < min_equity -> raus
         "4": acct(50_000),                             # flach -> raus
     }
-
-    def http(url, params):
-        if "recentTrades" in url or "trades" in url:
-            return {"trades": [{"maker_account_id": int(k)} for k in accounts]}
-        return accounts[params["value"]]
+    trades = {1: [{"maker_account_id": int(k)} for k in accounts], 2: [], 3: []}
 
     cfg = LighterConfig(auto_discover=True, min_equity=5000, min_positions=1,
-                        max_leaders=2, coins=["BTC", "ETH", "SOL"])
-    src = LighterSource(cfg, LighterClient(http=http))
+                        max_leaders=2, coins=["BTC", "ETH", "SOL"], throttle_s=0)
+    src = LighterSource(cfg, LighterClient(http=http_markets_and_trades(trades, extra=accounts)))
     top = src.rank()
     addrs = [s.address for s in top]
     assert "1" in addrs and "2" in addrs, "qualifizierte drin"
@@ -125,15 +166,12 @@ def test_rank_filters_and_tops():
 def test_lighter_shadow_reconciles_and_persists():
     import tempfile
     accounts = {"1": acct(20_000, pos("BTC", 1, 1, 60_000))}
-
-    def http(url, params):
-        if "account" in url:
-            return accounts[params["value"]]
-        return {"trades": [{"maker_account_id": 1}]}
+    trades = {1: [{"maker_account_id": 1}]}
 
     from bot.sources.lighter import LighterShadow
-    cfg = LighterConfig(auto_discover=True, min_equity=5000, coins=["BTC"], initial_equity=10_000)
-    src = LighterSource(cfg, LighterClient(http=http))
+    cfg = LighterConfig(auto_discover=True, min_equity=5000, coins=["BTC"],
+                        initial_equity=10_000, throttle_s=0)
+    src = LighterSource(cfg, LighterClient(http=http_markets_and_trades(trades, extra=accounts)))
     with tempfile.TemporaryDirectory() as tmp:
         sh = LighterShadow(cfg, 0.00045, source=src, runtime_dir=Path(tmp))
         sh.tick({"BTC": 60_000.0})
@@ -141,6 +179,7 @@ def test_lighter_shadow_reconciles_and_persists():
         assert "BTC" in sh.paper.sizes()
         st = sh.stats({"BTC": 60_000.0})
         assert st["trades"] >= 1 and "1" in st["leaders"]
+        assert st["note"] == ""
 
 
 if __name__ == "__main__":
