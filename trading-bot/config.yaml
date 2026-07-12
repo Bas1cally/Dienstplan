@@ -152,6 +152,12 @@ sprint:
   equity: 1000
   leverage: 10
   target_profit: 100
+  pool_size: 12             # Sprint scannt einen breiteren Leader-Pool als das
+                            # Hauptbuch (max_leaders: 6). Sprint hält immer nur EINE
+                            # Position -> mehr Quellen = weniger Leerlauf, ohne die
+                            # Qualität der Einstiege zu senken (bestbewerteter Leader
+                            # mit frischem Signal gewinnt immer). Betrifft NUR Sprint,
+                            # das Hauptbuch bleibt bei seinen 6 konzentriert.
   bust_frac: 0.05           # Liquidations-Modell: unter 5% Rest ist der Zyklus geplatzt
   rebalance_threshold: 0.02
   partial_exit_frac: 0.75   # Leader baut >=75% ab -> wir gehen mit raus (Scale-out)

@@ -60,6 +60,57 @@ def test_rotation_weights_sum_to_one():
     assert abs(sum(l["weight"] for l in out) - 1.0) < 0.01
 
 
+def _autopilot():
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+    return Autopilot(load_config())
+
+
+def test_sprint_pool_wider_than_main_and_score_sorted():
+    """Sprint bekommt einen breiteren Pool (pool_size) als das Hauptbuch, nach
+    Score sortiert - das Hauptbuch (max_leaders) bleibt davon unberührt."""
+    ap = _autopilot()
+    ap.cfg.sprint.pool_size = 5
+    ap.leaders = [leader("0xa"), leader("0xb")]   # Hauptbuch: nur 2
+    ranked = [metrics("0xa", 60), metrics("0xb", 55), metrics("0xc", 50),
+              metrics("0xd", 45), metrics("0xe", 40), metrics("0xf", 38)]
+    pool = ap._build_sprint_pool(ranked)
+    assert [p["address"] for p in pool] == ["0xa", "0xb", "0xc", "0xd", "0xe"]
+    assert len(pool) == 5 and len(ap.leaders) == 2, "Hauptbuch bleibt schmal"
+
+
+def test_sprint_pool_always_contains_main_leaders():
+    """Ein Bestands-Leader, den der Keep-Bonus trotz niedrigem Score hält, kann
+    aus den rohen Top-N fallen - er MUSS trotzdem im Sprint-Pool sein, sonst
+    scannt Sprint einen aktiven Copy-Leader nicht."""
+    ap = _autopilot()
+    ap.cfg.sprint.pool_size = 5
+    ap.leaders = [leader("0xz")]   # Score im Ranking nur 36 -> außerhalb Top-5
+    ranked = [metrics("0xa", 60), metrics("0xb", 55), metrics("0xc", 50),
+              metrics("0xd", 48), metrics("0xe", 46), metrics("0xz", 36)]
+    pool = ap._build_sprint_pool(ranked)
+    assert "0xz" in [p["address"] for p in pool], "Haupt-Leader immer im Pool"
+    assert len(pool) == 6, "0xz zusätzlich zu den Top-5 angehängt"
+
+
+def test_tracked_addresses_union_no_duplicates():
+    ap = _autopilot()
+    ap.cfg.sprint.enabled = True
+    ap.leaders = [leader("0xa"), leader("0xb")]
+    ap.sprint_leaders = [{"address": "0xa"}, {"address": "0xc"}, {"address": "0xd"}]
+    assert ap._tracked_addresses() == ["0xa", "0xb", "0xc", "0xd"], \
+        "Haupt-Leader zuerst, dann neue Sprint-Adressen, 0xa nicht doppelt"
+
+
+def test_tracked_addresses_sprint_off_stays_narrow():
+    """Sprint aus -> keine Extra-Adressen im Tracker (keine Extra-API-Last)."""
+    ap = _autopilot()
+    ap.cfg.sprint.enabled = False
+    ap.leaders = [leader("0xa"), leader("0xb")]
+    ap.sprint_leaders = [{"address": "0xc"}, {"address": "0xd"}]
+    assert ap._tracked_addresses() == ["0xa", "0xb"]
+
+
 def test_setup_retries_until_success():
     """Setup-Fehler (z.B. 429 beim Hochfahren) dürfen den Autopilot nie endgültig
     töten: er probiert mit Backoff weiter und läuft beim nächsten Erfolg los."""

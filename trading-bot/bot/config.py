@@ -339,6 +339,12 @@ class SprintConfig:
     leverage: float = 10.0          # Exposure-Multiplikator auf den besten Leader
     target_profit: float = 100.0    # Take-Profit je Zyklus (+10%)
     bust_frac: float = 0.05         # Liquidations-Modell: darunter ist der Zyklus geplatzt
+    # Eigener, breiterer Leader-Pool als das Hauptbuch: Sprint hält immer nur EINE
+    # Position und steigt beim bestbewerteten Leader mit frischem Signal ein. Mehr
+    # Quellen = weniger Leerlauf, OHNE Qualitätsverlust bei den genommenen Einstiegen
+    # (der Top-Leader gewinnt immer, wenn er aktiv ist). Das Hauptbuch bleibt
+    # konzentriert bei copytrade.max_leaders - dieser Pool betrifft nur das Sprint-Buch.
+    pool_size: int = 12
     rebalance_threshold: float = 0.02
     min_notional: float = 10.0
     # Teil-Exit-Folge: hat der Leader >= partial_exit_frac seiner Einstiegsgröße

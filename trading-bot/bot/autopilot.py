@@ -126,6 +126,9 @@ class Autopilot:
         self._lock = threading.Lock()
         self._last_analysis = 0.0
         self.leaders: list[dict] = []
+        # Eigener, breiterer Leader-Pool nur fürs Sprint-Buch (siehe sprint.pool_size).
+        # Obermenge der Haupt-Leader; das Hauptbuch bleibt bei self.leaders.
+        self.sprint_leaders: list[dict] = []
         self.client: HyperliquidClient | None = None
         self.copier: CopyTrader | None = None
         self.guard: MarketGuard | None = None
@@ -335,7 +338,8 @@ class Autopilot:
                 f"(Zyklus-PnL {s['cycle_pnl']:+,.2f} $)\n"
                 f"Bilanz: {s['won']}✅ {s['busted']}💥 | banked {s['banked']:+,.2f} $\n"
                 f"Strikes: {strikes} | 🚫 gesperrt: {banned}\n"
-                f"Leader: {lead} | Trades: {s['trades']} (Ø {s['avg_trades_per_cycle']}/Zyklus)\n"
+                f"Leader: {lead} | Pool: {len(self.sprint_leaders)} scanbar | "
+                f"Trades: {s['trades']} (Ø {s['avg_trades_per_cycle']}/Zyklus)\n"
                 f"<i>/sprint close = Ritt manuell schließen</i>")
 
     def _cmd_twap(self) -> str:
@@ -541,7 +545,7 @@ class Autopilot:
                     from .news.guard import RiskLevel
 
                     off = bool(self.guard and self.guard.last_level == RiskLevel.RISK_OFF)
-                    self.sprint.tick(self.leaders, self.copier.last_snapshots,
+                    self.sprint.tick(self.sprint_leaders, self.copier.last_snapshots,
                                      self.copier.last_prices, risk_off=off)
                 if self.lighter and self.copier:
                     self.lighter.tick(self.copier.last_prices)
@@ -575,8 +579,9 @@ class Autopilot:
         self.guard = MarketGuard(self.cfg.news, self.cfg.shock, client=self.client, coin="BTC")
         self._load_or_analyze_leaders()
         leader_info = Info(api_url(testnet=False), skip_ws=True)
-        # Leader-Positionen über ALLE DEXs verfolgen - sie handeln auch TSLA/Gold/Öl
-        tracker = LeaderTracker(leader_info, [l["address"] for l in self.leaders],
+        # Leader-Positionen über ALLE DEXs verfolgen - sie handeln auch TSLA/Gold/Öl.
+        # Adressen = Haupt-Leader + breiterer Sprint-Pool (falls Sprint an).
+        tracker = LeaderTracker(leader_info, self._tracked_addresses(),
                                 dexs=self.client.dexs)
         weights = {l["address"]: float(l["weight"]) for l in self.leaders}
         convergence = ConvergenceEngine(self.cfg.convergence) if self.cfg.convergence.enabled else None
@@ -712,14 +717,60 @@ class Autopilot:
 
     # ---------- Leader-Analyse & Rotation ----------
 
+    _SPRINT_POOL_FILE = "sprint_leaders.json"
+
     def _load_or_analyze_leaders(self) -> None:
         path = Path(self.cfg.copytrade.leaders_file)
         if path.exists():
             self.leaders = json.loads(path.read_text())[: self.cfg.copytrade.max_leaders]
             self._last_analysis = path.stat().st_mtime
             log.info("Leaders aus %s geladen (%d)", path, len(self.leaders))
+            self._load_sprint_pool()
         else:
-            self._reanalyze()
+            self._reanalyze()   # setzt self.sprint_leaders gleich mit
+
+    def _tracked_addresses(self) -> list[str]:
+        """Adressen, die der Tracker snapshotten muss: Haupt-Leader + (wenn Sprint
+        an ist) der breitere Sprint-Pool. Reihenfolge stabil, keine Duplikate.
+        Ist Sprint aus, bleibt es bei den Haupt-Leadern - keine Extra-API-Last."""
+        addrs = [l["address"] for l in self.leaders]
+        if not self.cfg.sprint.enabled:
+            return addrs
+        seen = set(addrs)
+        for l in self.sprint_leaders:
+            a = l.get("address", "")
+            if a and a not in seen:
+                seen.add(a)
+                addrs.append(a)
+        return addrs
+
+    def _build_sprint_pool(self, ranked) -> list[dict]:
+        """Top-pool_size nach Score aus der Analyse; Haupt-Leader immer enthalten
+        (der Keep-Bonus kann einen Bestands-Leader aus den rohen Top-N drücken)."""
+        n = max(self.cfg.sprint.pool_size, len(self.leaders))
+        top = sorted(ranked, key=lambda m: m.score, reverse=True)[:n]
+        pool = [{"address": m.address, "score": round(m.score, 1)} for m in top]
+        have = {p["address"] for p in pool}
+        for l in self.leaders:
+            if l["address"] not in have:
+                pool.append({"address": l["address"], "score": l.get("score", 0)})
+        return pool
+
+    def _load_sprint_pool(self) -> None:
+        """Sprint-Pool aus der letzten Analyse laden (überlebt Neustart), sonst auf
+        die Haupt-Leader zurückfallen, bis die erste Rotation den Pool verbreitert."""
+        pool: list[dict] = []
+        path = RUNTIME / self._SPRINT_POOL_FILE
+        if path.exists():
+            try:
+                pool = json.loads(path.read_text())[: self.cfg.sprint.pool_size]
+            except (ValueError, OSError):
+                pool = []
+        have = {p.get("address") for p in pool}
+        for l in self.leaders:   # Haupt-Leader immer im Pool (Datei evtl. veraltet)
+            if l["address"] not in have:
+                pool.append({"address": l["address"], "score": l.get("score", 0)})
+        self.sprint_leaders = pool or list(self.leaders)
 
     def _maybe_reanalyze(self) -> None:
         hours = self.cfg.autopilot.reanalyze_hours
@@ -764,9 +815,15 @@ class Autopilot:
                 )
             self.leaders = new_leaders
             Path(self.cfg.copytrade.leaders_file).write_text(json.dumps(new_leaders, indent=2))
+            self.sprint_leaders = self._build_sprint_pool(ranked)
+            try:
+                (RUNTIME / self._SPRINT_POOL_FILE).write_text(
+                    json.dumps(self.sprint_leaders, indent=2))
+            except OSError:
+                log.debug("sprint_leaders.json nicht schreibbar", exc_info=True)
             if self.copier:
                 self.copier.weights = {l["address"]: float(l["weight"]) for l in new_leaders}
-                self.copier.tracker.addresses = [l["address"] for l in new_leaders]
+                self.copier.tracker.addresses = self._tracked_addresses()
             if self.feed:
                 self.feed.resubscribe([l["address"] for l in new_leaders])
         self._last_analysis = time.time()
