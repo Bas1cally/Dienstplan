@@ -53,13 +53,13 @@ def _positions_of(acc: dict) -> list:
 
 
 def _is_long(pos: dict) -> bool:
-    """sign-Semantik defensiv: >0/„long"/1 = long, <0/2/„short" = short.
-    (Wird am echten Konto per /lighter verifiziert.)"""
+    """sign ist laut offiziellem Schema signiert: 1 = long, -1 = short
+    (bestätigt: github.com/elliottech/lighter-agent-kit/references/schemas-read.md,
+    Beispiel-Response kommentiert 'sign: 1, // 1 = long, -1 = short'). Fallback
+    auf das Vorzeichen der Positionsgröße nur, falls sign fehlt/unlesbar."""
     s = pos.get("sign")
-    if isinstance(s, str):
-        return s.lower().startswith("l") or s in ("1", "+1")
     try:
-        return int(s) >= 0 and int(s) != 2
+        return int(s) >= 0
     except (TypeError, ValueError):
         return float(pos.get("position", 0) or 0) >= 0
 
