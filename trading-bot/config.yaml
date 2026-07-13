@@ -184,17 +184,19 @@ lighter:
 
 # === HyperTracker (CoinMarketMan): reichhaltiges Leader-Leaderboard ===
 # Vorberechnetes Perp-PnL-Leaderboard (Tag/Woche/Monat/all-time) + Exposure,
-# Directional Bias - soll den schmalen HL-Leaderboard-Trichter fürs Discovery/
-# Ranking ersetzen (Problem: nur 1 qualifizierter Leader). Live-Positionen bleiben
-# bei HLs kostenlosem user_state (Rate-Limit-Hygiene).
+# Directional Bias - ersetzt den schmalen HL-Leaderboard-Trichter bei der
+# Kandidaten-Discovery (Problem: nur 1 qualifizierter Leader). Das Qualitäts-Gate
+# (30-Tage-Tiefenanalyse + LARP-Filter) und das Live-Position-Tracking bleiben
+# bei HLs kostenlosem API (Rate-Hygiene: Free-Tier = 100 Requests/TAG, Discovery
+# alle reanalyze_hours = 4 Requests/Tag). Fällt CMM aus -> automatisch alter Weg.
 # Token NICHT hier - COINMARKETMAN_TOKEN in der .env (per Telegram /setcmm setzbar).
-# BLEIBT AUS, bis /cmm das echte Response-Format bestätigt hat und der Parser steht.
+# Live-Probe 13.07.2026: Contract bestätigt (perp-pnl, Zahlen als Strings).
 coinmarketman:
-  enabled: false
+  enabled: true
   period: pnlMonth          # pnlDay | pnlWeek | pnlMonth | pnlAllTime
   limit: 100                # Leaderboard-Zeilen pro Abruf (25 | 50 | 100)
-  min_equity: 10000
-  min_pnl: 0
+  min_equity: 10000         # Kandidaten-Grobfilter: Mindest-Perp-Equity
+  min_pnl: 0                # ... und Monats-PnL muss positiv sein
 
 # === Strategie-Labor: eigene Signale parallel im Paper-Schatten messen ===
 # Der Copy-Bot folgt fremden Tradern (kein originäres Alpha). Hier laufen EIGENE

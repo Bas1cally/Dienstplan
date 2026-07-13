@@ -25,6 +25,7 @@ budgetiert werden (K<=15 je Scan -> <=64 Req/Tag gesamt). Niemals je Tick callen
 import json
 import logging
 import os
+from dataclasses import dataclass
 
 import requests
 
@@ -80,6 +81,66 @@ class CMMClient:
         """Winrate-Rohdaten je Wallet: totalTrades, wins, losses, avgDuration.
         ACHTUNG Budget: 1 Request pro Wallet - nur für Top-Kandidaten nutzen."""
         return self._get("closed-trades/summary", {"address": address})
+
+
+# ---------- Discovery: perp-pnl-Board -> Kandidaten für die Tiefenanalyse ----------
+#
+# Live-Probe (13.07.2026) hat das Contract bestätigt:
+#   {totalCount, data: [{address, age, perpEquity, openValue, openValueLong,
+#    exposureRatio, bias, pnlDay/Week/Month/AllTime, rank, volumeDay/Week/Month/
+#    AllTime, pnlPercent*}]}  -- ALLE Zahlwerte kommen als Strings.
+
+@dataclass
+class CMMCandidate:
+    address: str
+    equity: float          # perpEquity
+    pnl_month: float
+    pnl_week: float
+    pnl_day: float
+    exposure_ratio: float  # openValue / perpEquity (effektiver Hebel)
+    volume_month: float
+    rank: int
+
+
+def _f(v) -> float:
+    """Die API liefert Zahlen als Strings ('4522388.484516') - defensiv wandeln."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def fetch_cmm_candidates(cfg) -> list[CMMCandidate]:
+    """Kandidaten-Adressen aus dem perp-pnl-Leaderboard (1 Request von 100/Tag).
+
+    Bewusst nur GROBE Filter (Equity, Fenster-PnL) - das echte Qualitäts-Gate
+    bleibt unsere 30-Tage-Tiefenanalyse + LARP-Filter auf HL-Daten (kostenlos).
+    CMM ersetzt nur den zu schmalen HL-Leaderboard-Trichter bei der Discovery."""
+    client = CMMClient(cfg.base_url, cfg.timeout)
+    payload = client.leaderboard(board="perp-pnl", rank_by=cfg.period, limit=cfg.limit)
+    out: list[CMMCandidate] = []
+    seen: set[str] = set()
+    for r in rows_of(payload):
+        if not isinstance(r, dict):
+            continue
+        addr = str(r.get("address", "")).strip()
+        if not addr.startswith("0x") or addr.lower() in seen:
+            continue
+        c = CMMCandidate(
+            address=addr,
+            equity=_f(r.get("perpEquity")),
+            pnl_month=_f(r.get("pnlMonth")),
+            pnl_week=_f(r.get("pnlWeek")),
+            pnl_day=_f(r.get("pnlDay")),
+            exposure_ratio=_f(r.get("exposureRatio")),
+            volume_month=_f(r.get("volumeMonth")),
+            rank=int(_f(r.get("rank"))),
+        )
+        if c.equity < cfg.min_equity or c.pnl_month <= cfg.min_pnl:
+            continue
+        seen.add(addr.lower())
+        out.append(c)
+    return out
 
 
 def rows_of(payload) -> list:

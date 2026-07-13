@@ -839,18 +839,41 @@ class Autopilot:
         if time.time() - self._last_analysis >= hours * 3600:
             self._reanalyze()
 
+    def _discover_candidates(self, an) -> list[str]:
+        """Kandidaten-Adressen für die Tiefenanalyse. Primär: HyperTracker-Board
+        (perp-pnl, vorberechnete Monats-PnL - viel breiterer Trichter als HLs
+        eigenes Leaderboard, das zuletzt nur 1-3 Qualifizierte hergab). Fallback:
+        der bisherige HL-Weg, wenn CMM aus/leer/kaputt ist. Das Qualitäts-Gate
+        (30-Tage-Analyse + LARP-Filter) läuft danach für BEIDE Quellen gleich."""
+        cm = self.cfg.coinmarketman
+        if cm.enabled:
+            try:
+                from .sources.coinmarketman import fetch_cmm_candidates
+
+                cands = fetch_cmm_candidates(cm)
+                if cands:
+                    log.info("CMM-Discovery: %d Kandidaten (perp-pnl nach %s, "
+                             "Equity>=%.0f)", len(cands), cm.period, cm.min_equity)
+                    return [c.address for c in cands][: an.top_n]
+                log.warning("CMM-Discovery leer - Fallback auf HL-Leaderboard")
+            except Exception as e:
+                log.warning("CMM-Discovery fehlgeschlagen (%s) - Fallback auf "
+                            "HL-Leaderboard", str(e)[:150])
+        candidates = fetch_candidates(
+            min_account_value=an.min_account_value, min_volume=an.min_volume,
+            top_n=an.top_n, top_percent=an.top_percent,
+        )
+        return [c.address for c in candidates]
+
     def _reanalyze(self) -> None:
         log.info("Starte Leaderboard-Analyse (Funnel + LARP-Filter) ...")
         an = self.cfg.copytrade.analysis
         try:
-            candidates = fetch_candidates(
-                min_account_value=an.min_account_value, min_volume=an.min_volume,
-                top_n=an.top_n, top_percent=an.top_percent,
-            )
+            addresses = self._discover_candidates(an)
             info = Info(api_url(testnet=False), skip_ws=True)
             analyzer = TraderAnalyzer(info, days=an.days)
             larp = LarpFilter(LarpConfig(**(an.larp or {})))
-            ranked = analyzer.rank([c.address for c in candidates], min_score=an.min_score, larp=larp)
+            ranked = analyzer.rank(addresses, min_score=an.min_score, larp=larp)
         except Exception:
             log.exception("Analyse fehlgeschlagen - behalte bisherige Leader")
             self._last_analysis = time.time()

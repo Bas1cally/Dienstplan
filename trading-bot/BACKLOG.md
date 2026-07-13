@@ -57,6 +57,27 @@ nicht Glück.
 
 Restliche Feinheiten: „fuchsen wir aus, wenn es soweit ist" (Nutzer).
 
+---
+
+## CMM/HyperTracker-Ausbau (nach der Discovery-Reform)
+
+**Status:** Discovery über das perp-pnl-Board ist LIVE (13.07.2026). Die API
+kann deutlich mehr — Spec: github.com/Coin-Market-Man/hypertracker-skills
+(SKILL.md). Budget beachten: Free-Tier = 100 Requests/TAG.
+
+Kandidaten für später, nach Nutzen sortiert:
+1. **Tiefen-Scoring via `GET /closed-trades/summary?address=…`** — echte
+   Winrate (wins/losses/avgDuration) je Wallet als Zusatz-Signal im Analyzer-
+   Score. Budget: nur für die Top-K (~15) je Analyse = ~60 Req/Tag.
+2. **Smart-Money-Kohorten via `GET /wallets?segmentIds=8,9,10&hasOpenPositions=true`**
+   — CMMs eigene PnL-Kohorten (8=Money Printer $1M+, 9=Smart Money $100K-$1M,
+   10=Consistent Grinder) als alternative/zusätzliche Kandidatenquelle; 1 Request.
+3. **`GET /positions?address=…`** — Positions-Historie mit PnL je Trade (ab
+   April 2025) — könnte langfristig unsere eigene Fills-Rekonstruktion ersetzen.
+4. **Cohort-Bias / Heatmap** (`/positions/heatmap`, `/segments/{id}/bias-history`)
+   — Markt-Sentiment nach Kohorte (was machen die Smart-Money-Wallets NETTO?)
+   als MarketGuard-/Konvergenz-Input.
+
 ### Offene Fragen für die Umsetzung (in der Bau-Session klären)
 1. **Persistenz:** Confidence Points neben den Strikes in
    `runtime/sprint_cycles.json` ablegen (dort liegen `strikes`/`banned` schon),

@@ -165,6 +165,100 @@ def test_cmd_setcmm_rejects_non_jwt():
     assert "JWT" in ap._cmd_setcmm("a.b.c"), "zu kurz -> abgelehnt"
 
 
+# Exakt das live bestätigte Contract (Probe 13.07.2026): Zahlen als STRINGS.
+_ROW = {"address": "0x4e23288cee4960f9f962195c22948e4bc7ae2001",
+        "age": "2026-04-08T22:40:00.026Z", "perpEquity": "4522388.484516",
+        "openValue": "23471677.91024", "openValueLong": "23346067.31737",
+        "exposureRatio": "5.190106509116501", "bias": "5.134555955111655",
+        "pnlDay": "-736553.612319", "pnlWeek": "4542601.498803",
+        "pnlMonth": "11658199.786792", "pnlAllTime": "16931007.91796",
+        "rank": "1", "volumeMonth": "1844272759.2"}
+
+
+def _cmm_cfg(**over):
+    from bot.config import CoinMarketManConfig
+    return CoinMarketManConfig(**{"enabled": True, "min_equity": 10_000,
+                                  "min_pnl": 0, **over})
+
+
+def _with_fake_board(rows, fn):
+    """fetch_cmm_candidates gegen ein gefaktes Board laufen lassen."""
+    import bot.sources.coinmarketman as cmm
+
+    orig_get, orig_env = cmm.requests.get, dict(cmm.os.environ)
+    cmm.requests.get = lambda url, params=None, headers=None, timeout=None: \
+        _FakeResp(payload={"totalCount": str(len(rows)), "data": rows})
+    cmm.os.environ[cmm.TOKEN_ENV] = "x.y.z"
+    try:
+        return fn()
+    finally:
+        cmm.requests.get = orig_get
+        cmm.os.environ.clear()
+        cmm.os.environ.update(orig_env)
+
+
+def test_fetch_candidates_parses_string_numbers():
+    from bot.sources.coinmarketman import fetch_cmm_candidates
+
+    cands = _with_fake_board([_ROW], lambda: fetch_cmm_candidates(_cmm_cfg()))
+    assert len(cands) == 1
+    c = cands[0]
+    assert c.address == _ROW["address"]
+    assert abs(c.equity - 4_522_388.484516) < 0.01, "String-Equity -> float"
+    assert abs(c.pnl_month - 11_658_199.786792) < 0.01
+    assert c.pnl_day < 0, "negative Strings korrekt"
+    assert c.rank == 1 and abs(c.exposure_ratio - 5.19) < 0.01
+
+
+def test_fetch_candidates_filters_and_dedupes():
+    from bot.sources.coinmarketman import fetch_cmm_candidates
+
+    rows = [
+        _ROW,                                                        # gut
+        {**_ROW, "address": _ROW["address"].upper()},                # Duplikat (Case)
+        {**_ROW, "address": "0xaa" + "1" * 38, "perpEquity": "500"}, # zu klein
+        {**_ROW, "address": "0xbb" + "1" * 38, "pnlMonth": "-5"},    # Monats-Verlierer
+        {**_ROW, "address": "kein-hex"},                             # kaputt
+        "garbage",                                                   # kein dict
+        {**_ROW, "address": "0xcc" + "1" * 38, "perpEquity": None},  # None -> 0.0
+    ]
+    cands = _with_fake_board(rows, lambda: fetch_cmm_candidates(_cmm_cfg()))
+    assert [c.address for c in cands] == [_ROW["address"]], \
+        "nur die eine saubere Zeile überlebt Filter+Dedupe"
+
+
+def test_discover_candidates_cmm_primary_and_fallback():
+    """CMM liefert -> dessen Adressen (gedeckelt auf top_n). CMM wirft (z.B. kein
+    Token) -> alter HL-Weg übernimmt nahtlos."""
+    import bot.autopilot as ap_mod
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+
+    ap = Autopilot(load_config())
+    ap.cfg.coinmarketman.enabled = True
+    an = ap.cfg.copytrade.analysis
+
+    class _C:
+        def __init__(self, a): self.address = a
+
+    orig_hl = ap_mod.fetch_candidates
+    ap_mod.fetch_candidates = lambda **kw: [_C("0xHL1"), _C("0xHL2")]
+    import bot.sources.coinmarketman as cmm
+    orig_env = dict(cmm.os.environ)
+    cmm.os.environ.pop(cmm.TOKEN_ENV, None)   # kein Token -> CMM wirft
+    try:
+        assert ap._discover_candidates(an) == ["0xHL1", "0xHL2"], \
+            "ohne Token greift der HL-Fallback"
+        rows = [{**_ROW, "address": f"0x{i:040x}"} for i in range(200)]
+        got = _with_fake_board(rows, lambda: ap._discover_candidates(an))
+        assert 0 < len(got) <= an.top_n, "CMM-Kandidaten auf top_n gedeckelt"
+        assert got[0] == rows[0]["address"], "Board-Reihenfolge (Rang) bleibt"
+    finally:
+        ap_mod.fetch_candidates = orig_hl
+        cmm.os.environ.clear()
+        cmm.os.environ.update(orig_env)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
