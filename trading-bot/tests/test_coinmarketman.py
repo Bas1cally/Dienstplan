@@ -11,7 +11,95 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bot.autopilot import set_env_var
-from bot.sources.coinmarketman import describe_payload, rows_of
+from bot.sources.coinmarketman import CMMClient, describe_payload, rows_of
+
+
+class _FakeResp:
+    def __init__(self, status=200, payload=None, text=""):
+        self.status_code = status
+        self._payload = payload if payload is not None else {}
+        self.text = text
+
+    def json(self):
+        return self._payload
+
+
+def test_leaderboard_sends_required_params(monkeypatch=None):
+    """Die API verlangt rankBy+orderBy+order (400 sonst, live bewiesen) -
+    der Client MUSS alle drei setzen."""
+    import bot.sources.coinmarketman as cmm
+
+    captured = {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        captured.update({"url": url, "params": params, "headers": headers})
+        return _FakeResp(payload={"traders": []})
+
+    orig_get, orig_env = cmm.requests.get, dict(cmm.os.environ)
+    cmm.requests.get = fake_get
+    cmm.os.environ[cmm.TOKEN_ENV] = "x.y.z"
+    try:
+        CMMClient("https://api.example/api/external").leaderboard(
+            board="perp-pnl", rank_by="pnlMonth", limit=25)
+    finally:
+        cmm.requests.get = orig_get
+        cmm.os.environ.clear()
+        cmm.os.environ.update(orig_env)
+    p = captured["params"]
+    assert captured["url"].endswith("/leaderboards/perp-pnl")
+    assert p["rankBy"] == "pnlMonth" and p["orderBy"] == "pnlMonth"
+    assert p["order"] == "desc" and p["limit"] == 25
+    assert captured["headers"]["Authorization"] == "Bearer x.y.z"
+
+
+def test_leaderboard_rejects_bad_rankby_and_snaps_limit():
+    import bot.sources.coinmarketman as cmm
+
+    c = CMMClient("https://api.example/api/external")
+    try:
+        c.leaderboard(rank_by="pnlYear")
+        assert False, "ungültiges rank_by muss ValueError werfen"
+    except ValueError:
+        pass
+    # limit wird auf erlaubte Werte (25|50|100) gerundet statt 400 zu riskieren
+    captured = {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        captured.update(params)
+        return _FakeResp(payload=[])
+
+    orig_get, orig_env = cmm.requests.get, dict(cmm.os.environ)
+    cmm.requests.get = fake_get
+    cmm.os.environ[cmm.TOKEN_ENV] = "x.y.z"
+    try:
+        c.leaderboard(limit=30)
+    finally:
+        cmm.requests.get = orig_get
+        cmm.os.environ.clear()
+        cmm.os.environ.update(orig_env)
+    assert captured["limit"] == 25
+
+
+def test_client_error_includes_response_body():
+    """400er müssen den API-Fehlertext zeigen - '400 Client Error' ohne Body
+    war live nicht debugbar."""
+    import bot.sources.coinmarketman as cmm
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        return _FakeResp(status=400, text='{"error":"rankBy is required"}')
+
+    orig_get, orig_env = cmm.requests.get, dict(cmm.os.environ)
+    cmm.requests.get = fake_get
+    cmm.os.environ[cmm.TOKEN_ENV] = "x.y.z"
+    try:
+        CMMClient("https://api.example/api/external").leaderboard()
+        assert False, "400 muss RuntimeError werfen"
+    except RuntimeError as e:
+        assert "rankBy is required" in str(e), "API-Fehlertext muss durchkommen"
+    finally:
+        cmm.requests.get = orig_get
+        cmm.os.environ.clear()
+        cmm.os.environ.update(orig_env)
 
 
 def test_set_env_var_replaces_and_preserves():
