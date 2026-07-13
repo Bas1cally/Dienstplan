@@ -111,14 +111,16 @@ def test_tracked_addresses_sprint_off_stays_narrow():
     assert ap._tracked_addresses() == ["0xa", "0xb"]
 
 
-def test_force_analysis_flag_triggers_once():
-    """/analyze setzt nur ein Flag; der Loop-Thread konsumiert es EINMAL -
-    so gibt es keine parallele Analyse aus dem Telegram-Thread (Race)."""
+def test_force_analysis_flag_triggers_once_and_pushes_result():
+    """/analyze setzt nur ein Flag; der Loop-Thread konsumiert es EINMAL und
+    pusht danach das Ergebnis (mobil soll niemand /status pollen müssen)."""
     import time as _t
 
     ap = _autopilot()
-    calls = []
-    ap._reanalyze = lambda: calls.append(1)
+    calls, sent = [], []
+    ap._reanalyze = lambda: (calls.append(1),
+                             setattr(ap, "_analysis_note", "50 Kandidaten → 3/9"))
+    ap.notifier.send = sent.append
     ap._last_analysis = _t.time()   # Zeit-Trigger aus - nur das Flag zählt
     ap._maybe_reanalyze()
     assert calls == [], "ohne Flag und ohne Fälligkeit keine Analyse"
@@ -126,8 +128,10 @@ def test_force_analysis_flag_triggers_once():
     ap._maybe_reanalyze()
     assert calls == [1], "Flag löst genau eine Analyse aus"
     assert ap._force_analysis is False, "Flag wird konsumiert"
+    assert sent and "Analyse fertig" in sent[0] and "50 Kandidaten" in sent[0], \
+        "erzwungene Analyse pusht ihr Ergebnis"
     ap._maybe_reanalyze()
-    assert calls == [1], "kein Dauerfeuer nach der erzwungenen Analyse"
+    assert calls == [1] and len(sent) == 1, "kein Dauerfeuer, kein Push-Spam"
 
 
 def test_cmd_analyze_sets_flag_only_when_running():
@@ -141,6 +145,29 @@ def test_cmd_analyze_sets_flag_only_when_running():
     ap._thread = _T()   # running-Property simulieren
     out = ap._cmd_analyze()
     assert ap._force_analysis is True and "angestoßen" in out
+    ap._force_analysis = False
+    ap._analysis_running = True     # Doppel-Anstoß während laufender Analyse
+    ap._analysis_started = __import__("time").time() - 120
+    out = ap._cmd_analyze()
+    assert "läuft bereits" in out and ap._force_analysis is False
+
+
+def test_status_shows_running_and_pending_analysis():
+    """Während der minutenlangen Analyse muss /status 'läuft' zeigen - vorher
+    stand dort stur 'vor 3.2h' und sah aus wie 'nichts passiert' (Live-Bug)."""
+    import time as _t
+
+    ap = _autopilot()
+    ap._analysis_running = True
+    ap._analysis_started = _t.time() - 180
+    ap._analysis_note = "alte Notiz"
+    s = ap._cmd_status()
+    assert "LÄUFT seit 3 min" in s
+    assert "alte Notiz" not in s, "alte Trichter-Zeile nicht als aktuell ausgeben"
+    ap._analysis_running = False
+    ap._force_analysis = True
+    s = ap._cmd_status()
+    assert "angefordert" in s
 
 
 def test_status_shows_analysis_funnel_and_pool():

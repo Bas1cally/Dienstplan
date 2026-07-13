@@ -143,6 +143,8 @@ class Autopilot:
         self._last_analysis = 0.0
         self._force_analysis = False   # /analyze: nächster Loop-Tick analysiert sofort
         self._analysis_note = ""       # Trichter der letzten Analyse (für /status)
+        self._analysis_running = False # Analyse blockiert den Loop minutenlang -
+        self._analysis_started = 0.0   # /status muss "läuft gerade" zeigen können
         self.leaders: list[dict] = []
         # Eigener, breiterer Leader-Pool nur fürs Sprint-Buch (siehe sprint.pool_size).
         # Obermenge der Haupt-Leader; das Hauptbuch bleibt bei self.leaders.
@@ -223,11 +225,18 @@ class Autopilot:
         day_t = int(time.time()) - 86_400
         orders = sum(1 for e in self.journal.tail(2000)
                      if e.get("kind") == "order" and e.get("t", 0) >= day_t)
-        age_h = (time.time() - self._last_analysis) / 3600 if self._last_analysis else None
-        next_h = max(0.0, self.cfg.autopilot.reanalyze_hours - age_h) if age_h is not None else None
-        analysis = (f"Analyse: vor {age_h:.1f}h (nächste in {next_h:.1f}h)"
-                    if age_h is not None else "Analyse: läuft noch/nie")
-        if self._analysis_note:
+        if self._analysis_running:
+            mins = (time.time() - self._analysis_started) / 60
+            analysis = (f"Analyse: ⏳ LÄUFT seit {mins:.0f} min (50 Wallets dauern "
+                        f"einige Minuten, bei API-Drossel länger)")
+        elif self._force_analysis:
+            analysis = "Analyse: angefordert - startet im nächsten Tick"
+        else:
+            age_h = (time.time() - self._last_analysis) / 3600 if self._last_analysis else None
+            next_h = max(0.0, self.cfg.autopilot.reanalyze_hours - age_h) if age_h is not None else None
+            analysis = (f"Analyse: vor {age_h:.1f}h (nächste in {next_h:.1f}h)"
+                        if age_h is not None else "Analyse: noch keine gelaufen")
+        if self._analysis_note and not self._analysis_running:
             analysis += f"\n{self._analysis_note}"
         return (f"<b>Status</b>: {s.get('state', '?')}\n"
                 f"Equity: {f'{eq:,.2f}' if eq else 'n/a'}\n"
@@ -499,10 +508,14 @@ class Autopilot:
         gleichzeitige Analysen würden sich sonst die Leader-Liste zerschreiben."""
         if not self.running:
             return "Autopilot läuft nicht - erst /start."
+        if self._analysis_running:
+            mins = (time.time() - self._analysis_started) / 60
+            return f"⏳ Analyse läuft bereits (seit {mins:.0f} min) - Ergebnis kommt als Push."
         self._force_analysis = True
-        return ("🔬 Analyse angestoßen - läuft im nächsten Tick (dauert ~1-2 Min "
-                "bei vielen Kandidaten).\nDanach: /status zeigt den Trichter, "
-                "/leaders die Auswahl, /sprint den Pool.")
+        return ("🔬 Analyse angestoßen - startet im nächsten Tick und dauert bei "
+                "~50 Wallets EINIGE MINUTEN (API-Drossel).\n"
+                "Das Ergebnis kommt automatisch als Push; /status zeigt derweil "
+                "'läuft seit X min'.")
 
     def _cmd_update(self) -> str:
         """Zieht das neueste Update (git pull) und startet neu - per Telegram vom
@@ -860,9 +873,15 @@ class Autopilot:
 
     def _maybe_reanalyze(self) -> None:
         hours = self.cfg.autopilot.reanalyze_hours
-        if self._force_analysis or time.time() - self._last_analysis >= hours * 3600:
+        forced = self._force_analysis
+        if forced or time.time() - self._last_analysis >= hours * 3600:
             self._force_analysis = False   # /analyze: einmalig, im Loop-Thread (kein Race)
             self._reanalyze()
+            if forced:
+                # Explizit angefordert -> Ergebnis aktiv pushen statt den Nutzer
+                # /status pollen zu lassen (Analyse dauert Minuten, mobil nervig)
+                self.notifier.send("🔬 <b>Analyse fertig</b>\n"
+                                   + (self._analysis_note or "keine Diagnose (Logs prüfen)"))
 
     def _discover_candidates(self, an) -> tuple[list[str], str]:
         """Kandidaten-Adressen für die Tiefenanalyse: UNION aus HyperTracker-Board
@@ -914,15 +933,24 @@ class Autopilot:
         if self.cfg.sprint.enabled:
             floor = min(floor, self.cfg.sprint.pool_min_score)
         report: dict = {}
+        self._analysis_running = True
+        self._analysis_started = time.time()
+        try:
+            self._reanalyze_body(an, floor, report)
+        finally:
+            self._analysis_running = False
+            self._last_analysis = time.time()
+
+    def _reanalyze_body(self, an, floor: float, report: dict) -> None:
         try:
             addresses, src_note = self._discover_candidates(an)
             info = Info(api_url(testnet=False), skip_ws=True)
             analyzer = TraderAnalyzer(info, days=an.days)
             larp = LarpFilter(LarpConfig(**(an.larp or {})))
             ranked = analyzer.rank(addresses, min_score=floor, larp=larp, report=report)
-        except Exception:
+        except Exception as e:
             log.exception("Analyse fehlgeschlagen - behalte bisherige Leader")
-            self._last_analysis = time.time()
+            self._analysis_note = f"⚠️ Analyse fehlgeschlagen: {str(e)[:150]}"
             return
 
         main_ranked = [m for m in ranked if m.score >= an.min_score]
@@ -971,7 +999,6 @@ class Autopilot:
                 log.debug("sprint_leaders.json nicht schreibbar", exc_info=True)
         if self.copier:
             self.copier.tracker.addresses = self._tracked_addresses()
-        self._last_analysis = time.time()
 
     # ---------- Status für das Frontend ----------
 
