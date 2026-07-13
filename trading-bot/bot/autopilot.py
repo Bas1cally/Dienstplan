@@ -145,6 +145,7 @@ class Autopilot:
         self._analysis_note = ""       # Trichter der letzten Analyse (für /status)
         self._analysis_running = False # Analyse blockiert den Loop minutenlang -
         self._analysis_started = 0.0   # /status muss "läuft gerade" zeigen können
+        self._stale_feed_warned = False  # Sprint scannt Standbilder -> einmal warnen
         self.leaders: list[dict] = []
         # Eigener, breiterer Leader-Pool nur fürs Sprint-Buch (siehe sprint.pool_size).
         # Obermenge der Haupt-Leader; das Hauptbuch bleibt bei self.leaders.
@@ -210,6 +211,7 @@ class Autopilot:
                 "/positions – offene Positionen + PnL\n/leaders – Leader + ROI\n/anomalies – HL-Scout-Funde\n"
                 "/orderbook – Mikrostruktur-Signale\n/twap – laufende Whale-TWAPs\n"
                 "/sprint – Sprint-Buch (1000$ x10, Ziel +100$)\n"
+                "/sprint pool – Sprint-Pool mit Richtungs-Scores\n"
                 "/polymarket – Prediction-Market-Funde\n"
                 "/update – Update ziehen + neu starten\n"
                 "/probe – Multi-DEX-Scan-Probe (Extended/Lighter/…)\n"
@@ -359,6 +361,16 @@ class Autopilot:
             return (f"⏹ Sprint-Zyklus manuell beendet ({n} Position(en)) - sofort "
                     "verbucht, kein Strike. Nächster Zyklus wartet auf frisches Signal."
                     if n else "Sprint-Buch hält gerade nichts.")
+        if arg.lower().strip() == "pool":
+            if not self.sprint_leaders:
+                return "Sprint-Pool ist leer (nächste Analyse: /analyze)."
+            lines = ["<b>Sprint-Pool</b> (Richtungs-Score, bester zuerst)"]
+            banned = self.sprint.banned
+            for l in self.sprint_leaders:
+                a = str(l.get("address", ""))
+                mark = " 🚫" if a.lower() in banned else ""
+                lines.append(f"<code>{a[:12]}…</code> Score {l.get('score', '?')}{mark}")
+            return "\n".join(lines)
         s = self.sprint.stats(prices)
         lead = f"<code>{s['leader'][:10]}…</code>" if s.get("leader") else "n/a"
         strikes = ", ".join(f"{a}:{n}" for a, n in s.get("strikes", {}).items()) or "-"
@@ -374,6 +386,18 @@ class Autopilot:
             pos_block = f"Positionen:\n{pos_lines}"
         else:
             pos_block = "Positionen: -"
+        # Scan-Telemetrie: unterscheidet 'kein Signal kam' (gesund, nur ruhig)
+        # von 'Signale kamen, wurden verworfen' und 'Feed eingefroren' (kaputt)
+        sc = s.get("scan", {})
+        rej = ", ".join(f"{k} ×{n}" for k, n in sc.get("rejected", {}).items()) or "keine"
+        seen = sc.get("fresh_seen", 0)
+        last_fresh = (f"vor {sc['last_fresh_min']:.0f} min"
+                      if sc.get("last_fresh_min") is not None else "noch keins")
+        feed_age = (time.time() - self.copier.last_snapshots_t
+                    if self.copier and self.copier.last_snapshots_t else None)
+        feed = (f"vor {feed_age:.0f}s" if feed_age is not None and feed_age < 120
+                else f"⚠️ vor {feed_age / 60:.0f} min" if feed_age is not None
+                else "n/a")
         return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']}): {s['state']}\n"
                 f"{pos_block}\n"
                 f"Equity: {s['equity']:,.2f} / Ziel {s['target']:,.0f} "
@@ -382,7 +406,10 @@ class Autopilot:
                 f"Strikes: {strikes} | 🚫 gesperrt: {banned}\n"
                 f"Leader: {lead} | Pool: {len(self.sprint_leaders)} scanbar | "
                 f"Trades: {s['trades']} (Ø {s['avg_trades_per_cycle']}/Zyklus)\n"
-                f"<i>/sprint close = Ritt manuell schließen</i>")
+                f"Scan seit Start: {seen} frische Signale (letztes: {last_fresh}) | "
+                f"verworfen: {rej}\n"
+                f"Feed: Snapshots {feed}\n"
+                f"<i>/sprint close = schließen | /sprint pool = Pool-Liste</i>")
 
     def _cmd_twap(self) -> str:
         flagged = self.twap_scout.flagged[-6:] if self.twap_scout else []
@@ -623,7 +650,11 @@ class Autopilot:
         while not self._stop.is_set():
             try:
                 self._maybe_reanalyze()
-                if self.copier and self.leaders:
+                # Auch ticken, wenn nur der Sprint-Pool Adressen hat: der Sprint-
+                # Feed (last_snapshots) hängt am Copier - ein leeres Hauptbuch
+                # darf die 13 Pool-Beobachter nicht einfrieren (Audit-Befund).
+                if self.copier and (self.leaders or
+                                    (self.cfg.sprint.enabled and self.sprint_leaders)):
                     self.copier.tick()
                 if self.scalper:
                     self.scalper.tick()
@@ -646,6 +677,7 @@ class Autopilot:
                     off = bool(self.guard and self.guard.last_level == RiskLevel.RISK_OFF)
                     self.sprint.tick(self.sprint_leaders, self.copier.last_snapshots,
                                      self.copier.last_prices, risk_off=off)
+                    self._maybe_warn_stale_feed()
                 if self.lighter and self.copier:
                     self.lighter.tick(self.copier.last_prices)
                 self._maybe_digest()
@@ -1172,6 +1204,25 @@ class Autopilot:
         log.info("Tagesbericht: %d Orders, %d Vetos", orders, vetoes)
         self.notifier.send(msg)
         self._digest_equity = equity
+
+    def _maybe_warn_stale_feed(self) -> None:
+        """Warnt, wenn Sprint auf eingefrorenen Snapshots scannt (Copier pausiert
+        z.B. bei HALTED oder Dauerfehlern) - sonst sähe 'wartet auf frisches
+        Signal' gesund aus, während der Bot in Wahrheit Standbilder anstarrt."""
+        if not (self.copier and self.copier.last_snapshots_t):
+            return
+        age = time.time() - self.copier.last_snapshots_t
+        if age > 300 and not self._stale_feed_warned:
+            self._stale_feed_warned = True
+            log.warning("Sprint-Feed eingefroren: Snapshots %.0f min alt", age / 60)
+            self.notifier.send(
+                f"⚠️ <b>Sprint-Feed eingefroren</b>: Leader-Snapshots sind "
+                f"{age / 60:.0f} min alt - der Scan sieht keine neuen Signale.\n"
+                f"Mögliche Ursachen: Circuit-Breaker (/resume), API-Störung. /status prüfen."
+            )
+        elif age < 60 and self._stale_feed_warned:
+            self._stale_feed_warned = False   # wieder frisch -> Warnung neu scharf
+            self.notifier.send("✅ Sprint-Feed wieder frisch (Snapshots aktuell).")
 
     def _maybe_watchdog(self) -> None:
         """Meldet sich von selbst, wenn der Bot auffällig lange nichts handelt."""

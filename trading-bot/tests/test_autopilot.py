@@ -162,6 +162,31 @@ def test_cmd_analyze_sets_flag_only_when_running():
     assert "läuft bereits" in out and ap._force_analysis is False
 
 
+def test_stale_feed_warns_once_and_recovers():
+    """Audit-Befund: friert der Copier ein (halted/Störung), scannt Sprint
+    Standbilder und 'wartet auf frisches Signal' sieht gesund aus. Jetzt: eine
+    Warnung bei >5 min alten Snapshots, Entwarnung wenn wieder frisch."""
+    import time as _t
+
+    ap = _autopilot()
+
+    class _Cop:
+        last_snapshots_t = _t.time() - 400   # 6.7 min alt
+
+    ap.copier = _Cop()
+    sent = []
+    ap.notifier.send = sent.append
+    ap._maybe_warn_stale_feed()
+    ap._maybe_warn_stale_feed()
+    assert sum("eingefroren" in m for m in sent) == 1, "genau EINE Warnung, kein Spam"
+    ap.copier.last_snapshots_t = _t.time()   # Feed wieder frisch
+    ap._maybe_warn_stale_feed()
+    assert any("wieder frisch" in m for m in sent), "Entwarnung kommt"
+    ap.copier.last_snapshots_t = _t.time() - 400
+    ap._maybe_warn_stale_feed()
+    assert sum("eingefroren" in m for m in sent) == 2, "erneutes Einfrieren warnt wieder"
+
+
 def test_status_shows_running_and_pending_analysis():
     """Während der minutenlangen Analyse muss /status 'läuft' zeigen - vorher
     stand dort stur 'vor 3.2h' und sah aus wie 'nichts passiert' (Live-Bug)."""

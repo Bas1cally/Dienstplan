@@ -316,6 +316,69 @@ def test_ride_leader_rotated_out_closes():
         assert abs(b.paper.equity(P) - 1000.0) < 1e-6, "Zyklus-Equity resettet"
 
 
+def test_scan_telemetry_makes_rejections_visible():
+    """Audit-Befund: verworfene Signale verschwanden spurlos - 'kein Signal kam'
+    und 'Signal kam, wurde verworfen' waren von außen identisch. Jetzt zählt
+    und zeigt stats() jede Verwerfung mit Grund."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, exclude_coins=["BTC"])
+        b.tick(LED, [snap("0xbest", 50_000)], P)                 # Baseline
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)        # frisch, aber BTC
+        assert b.paper.sizes() == {}, "BTC bleibt ausgeschlossen"
+        sc = b.stats(P)["scan"]
+        assert sc["fresh_seen"] == 1, "das Signal wurde GESEHEN"
+        assert sc["rejected"].get("coin_ausgeschlossen") == 1
+        assert sc["last_rejected"][-1]["coin"] == "BTC"
+        assert sc["last_fresh_min"] is not None
+
+
+def test_banned_leader_rejection_visible():
+    """Gebannte Leader werden weiter übersprungen - aber sichtbar (Telemetrie),
+    nicht still."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.banned.add("0xbad")
+        led = leaders(("0xbad", 90))
+        b.tick(led, [snap("0xbad", 50_000)], P)                  # Baseline
+        b.tick(led, [snap("0xbad", 50_000, ETH=300)], P)         # frisch, gebannt
+        assert b.paper.sizes() == {}, "gebannter Leader löst keinen Ritt aus"
+        sc = b.stats(P)["scan"]
+        assert sc["rejected"].get("leader_gesperrt") == 1
+        assert sc["last_rejected"][-1]["grund"] == "leader_gesperrt"
+
+
+def test_baselines_survive_short_restart_no_blind_window():
+    """Audit-Befund: Baselines nur im RAM -> jeder Deploy riss ein Blindfenster
+    (während der Downtime eröffnete Positionen galten für immer als 'alt').
+    Jetzt überleben Baselines kurze Neustarts - das Downtime-Signal wird geritten."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        cfg = SprintConfig(exclude_coins=[])
+        b = SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+        b.tick(LED, [snap("0xbest", 50_000)], P)     # Baseline flach, persistiert
+        t["now"] += 60                                # ~1 min Deploy-Downtime
+        b2 = SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+        b2.tick(LED, [snap("0xbest", 50_000, ETH=200)], P)   # während Downtime eröffnet
+        assert "ETH" in b2.paper.sizes(), \
+            "kurz nach Neustart ist das Downtime-Signal noch frisch -> reiten"
+
+
+def test_baselines_stale_file_discarded():
+    """Nach LANGER Downtime wäre der Einstieg längst verpasst - alte Baseline-
+    Datei wird verworfen, es gilt wieder: erst re-baselinen, nichts reiten."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        cfg = SprintConfig(exclude_coins=[])
+        b = SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        t["now"] += 3600                              # 1h down: viel zu alt
+        b2 = SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+        b2.tick(LED, [snap("0xbest", 50_000, ETH=200)], P)
+        assert b2.paper.sizes() == {}, "alte Baselines verworfen -> ETH gilt als laufend"
+        b2.tick(LED, [snap("0xbest", 50_000, ETH=200)], P)
+        assert b2.paper.sizes() == {}, "ETH bleibt 'laufender Trade', kein Späteinstieg"
+
+
 def test_restart_keeps_ride_and_rebaselines():
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)

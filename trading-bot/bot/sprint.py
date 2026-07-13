@@ -49,6 +49,12 @@ _REASON_TXT = {
 }
 _STRIKE_EXEMPT = {"manual", "risk_off"}  # nicht die Entscheidung/Schuld des Leaders
 
+# Baselines überleben Neustarts nur, wenn die Datei jünger ist: bei kurzen
+# Deploys (~1 min) wollen wir das Blindfenster schließen (ein während des
+# Neustarts eröffnetes Signal ist noch frisch genug zum Reiten). Nach langer
+# Downtime wäre der Einstieg dagegen längst verpasst -> lieber re-baselinen.
+_BASELINE_MAX_AGE_S = 600.0
+
 
 class SprintBook:
     def __init__(self, cfg, fee_rate: float, notifier=None, journal=None,
@@ -74,7 +80,19 @@ class SprintBook:
         # Rotations-Leader mit (auch während eines Ritts), damit nach dem Ritt
         # keine längst laufenden Positionen fälschlich als "frisch" gelten.
         self._baselines: dict[str, dict[str, float]] = {}
+        # Scan-Telemetrie (seit Prozess-Start): ohne sie sind "kein Signal kam"
+        # und "Signale kamen, wurden aber still verworfen" von außen identisch -
+        # genau das Beobachtbarkeits-Loch, das der Nutzer als 'irgendwas fehlt'
+        # gespürt hat. Verworfene Signale werden gezählt UND die letzten gezeigt.
+        self._scan_rejected: dict[str, int] = {}
+        self._scan_last: list[dict] = []       # letzte verworfene Signale (max 5)
+        self._fresh_seen = 0                   # frische Signale gesamt (auch verworfene)
+        self._last_fresh_t: float | None = None
+        self._last_entry_t: float | None = None
+        self.baselines_path = runtime / "sprint_baselines.json"
+        self._baselines_saved_t = 0.0
         self._migrate_v1_or_load()
+        self._load_baselines()
 
     # ---------- Tick (Zustandsmaschine) ----------
 
@@ -118,8 +136,6 @@ class SprintBook:
         # Höchster Score zuerst: melden mehrere Leader gleichzeitig, gewinnt der Beste
         for l in sorted(leaders, key=lambda l: float(l.get("score", 0)), reverse=True):
             addr = str(l.get("address", "")).lower()
-            if addr in self.banned:
-                continue  # LARP-enttarnt: seine frischen Signale zählen nicht mehr
             snap = by_addr.get(addr)
             if snap is None:
                 continue
@@ -129,6 +145,13 @@ class SprintBook:
             book = self._book_of(snap)
             fresh = [c for c, sz in book.items() if sz != 0 and prev.get(c, 0.0) == 0.0]
             if not fresh:
+                continue
+            self._note_fresh(len(fresh))
+            if addr in self.banned:
+                # LARP-enttarnt: sein frisches Signal zählt nicht - aber SICHTBAR
+                # verwerfen statt still (Telemetrie fürs 'warum passiert nichts')
+                for coin in fresh:
+                    self._reject(coin, snap.address, "leader_gesperrt")
                 continue
             for coin in fresh:
                 self._enter(coin, snap, prices)
@@ -174,6 +197,8 @@ class SprintBook:
             fresh = [c for c, sz in book.items()
                      if sz != 0 and prev.get(c, 0.0) == 0.0
                      and c not in self.paper.sizes()]
+            if fresh:
+                self._note_fresh(len(fresh))
             for coin in fresh:
                 self._enter(coin, snap, prices)
 
@@ -183,20 +208,76 @@ class SprintBook:
     def _refresh_baselines(self, leaders: list[dict], snapshots: list) -> None:
         keep = {str(l.get("address", "")).lower() for l in leaders}
         keep.add(self.ride_leader.lower())
+        changed = False
         for s in snapshots:
-            if s.address.lower() in keep:
-                self._baselines[s.address.lower()] = self._book_of(s)
+            key = s.address.lower()
+            if key in keep:
+                book = self._book_of(s)
+                if self._baselines.get(key) != book:
+                    self._baselines[key] = book
+                    changed = True
         for addr in list(self._baselines):
             if addr not in keep:
                 self._baselines.pop(addr, None)
+                changed = True
+        self._persist_baselines(changed)
+
+    def _persist_baselines(self, changed: bool) -> None:
+        """Baselines auf Platte, damit ein Neustart kein Blindfenster reißt
+        (RAM-only hieß: jeder Deploy re-baselined alles, während der Downtime
+        eröffnete Positionen galten für immer als 'alt'). Geschrieben wird bei
+        Änderung sofort, sonst alle 60s (frischer Zeitstempel)."""
+        now = self.clock()
+        if not changed and now - self._baselines_saved_t < 60:
+            return
+        self._baselines_saved_t = now
+        try:
+            self.baselines_path.write_text(json.dumps(
+                {"t": now, "baselines": self._baselines}))
+        except OSError:
+            log.debug("sprint_baselines.json nicht schreibbar", exc_info=True)
+
+    def _load_baselines(self) -> None:
+        try:
+            raw = json.loads(self.baselines_path.read_text())
+            age = self.clock() - float(raw.get("t", 0))
+            if age > _BASELINE_MAX_AGE_S:
+                log.info("Sprint: Baseline-Datei %.0fs alt (> %.0fs) - re-baseline "
+                         "(zu lange down, verpasste Einstiege wären nicht mehr frisch)",
+                         age, _BASELINE_MAX_AGE_S)
+                return
+            self._baselines = {
+                str(a).lower(): {str(c): float(s) for c, s in (b or {}).items()}
+                for a, b in raw.get("baselines", {}).items()
+            }
+            log.info("Sprint: %d Baselines übernommen (%.0fs alt) - kein "
+                     "Blindfenster nach Neustart", len(self._baselines), age)
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass   # keine/kaputte Datei -> normales Re-Baseline beim ersten Tick
+
+    def _note_fresh(self, n: int) -> None:
+        self._fresh_seen += n
+        self._last_fresh_t = self.clock()
+
+    def _reject(self, coin: str, addr: str, reason: str) -> None:
+        """Verworfenes frisches Signal SICHTBAR machen (Zähler + letzte Fälle) -
+        stille returns waren von 'es kam nie ein Signal' nicht unterscheidbar."""
+        self._scan_rejected[reason] = self._scan_rejected.get(reason, 0) + 1
+        self._scan_last.append({"t": int(self.clock()), "coin": coin,
+                                "leader": addr[:10], "grund": reason})
+        del self._scan_last[:-5]
+        log.info("Sprint: frisches Signal %s von %s VERWORFEN (%s)",
+                 coin, addr[:10], reason)
 
     # ---------- Ein-/Ausstieg ----------
 
     def _enter(self, coin: str, snap, prices: dict[str, float]) -> None:
         if coin in self.cfg.exclude_coins:
+            self._reject(coin, snap.address, "coin_ausgeschlossen")
             return  # Beta statt Leader-Alpha (z.B. BTC) - kein Signal
         price = prices.get(coin)
         if not price or price <= 0:
+            self._reject(coin, snap.address, "kein_hl_preis")
             return
         equity = self.paper.equity(prices)
         target = snap.exposure(coin) * self.cfg.leverage * equity
@@ -205,7 +286,9 @@ class SprintBook:
         headroom = max(0.0, self.cfg.leverage * equity - gross)
         notional = max(-headroom, min(headroom, target))
         if abs(notional) < self.cfg.min_notional:
+            self._reject(coin, snap.address, "unter_min_notional")
             return
+        self._last_entry_t = self.clock()
         if self._ride_start_equity is None:
             self._ride_start_equity = equity   # erster Einstieg des Ritts -> PnL-Basis
         self.paper.execute(coin, notional / price, price)
@@ -356,6 +439,17 @@ class SprintBook:
             "leader": self.ride_leader,
             "strikes": {a[:10]: n for a, n in self.strikes.items() if n > 0},
             "banned": [a[:10] for a in self.banned],
+            # Scan-Telemetrie (seit Prozess-Start): macht 'kein Signal kam' von
+            # 'Signal kam, wurde verworfen' unterscheidbar
+            "scan": {
+                "fresh_seen": self._fresh_seen,
+                "rejected": dict(self._scan_rejected),
+                "last_rejected": list(self._scan_last),
+                "last_fresh_min": (round((self.clock() - self._last_fresh_t) / 60, 1)
+                                   if self._last_fresh_t else None),
+                "last_entry_min": (round((self.clock() - self._last_entry_t) / 60, 1)
+                                   if self._last_entry_t else None),
+            },
         }
 
     def _migrate_v1_or_load(self) -> None:

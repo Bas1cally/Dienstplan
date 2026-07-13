@@ -14,6 +14,7 @@ Eigene Sicherungen bleiben aktiv: Tagesverlust-Circuit-Breaker, dry_run.
 """
 
 import logging
+import time
 from dataclasses import dataclass
 
 from ..config import CopytradeConfig, RiskConfig
@@ -176,6 +177,7 @@ class CopyTrader:
         self.funding = None                 # FundingCache (optional, Carry-Edge)
         self.start_equity: float | None = None  # für den Max-Drawdown-Halt
         self.last_snapshots: list[LeaderSnapshot] = []  # für Performance-Tracking
+        self.last_snapshots_t = 0.0   # wann zuletzt refresht (Sprint-Feed-Frische)
         self.last_prices: dict[str, float] = {}
         self.last_equity: float | None = None
         self.scalp_inventory: dict[str, float] = {}  # vom Scalper gehaltener Bestand
@@ -247,6 +249,7 @@ class CopyTrader:
         if not snapshots:
             return
         self.last_snapshots = snapshots
+        self.last_snapshots_t = time.time()
         targets = compute_targets(
             snapshots, self.weights, equity, self.ct, self.cfg.risk,
             convergence=self.convergence,
