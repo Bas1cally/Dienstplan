@@ -4,6 +4,12 @@ Dieses Dokument hält Feature-Ideen fest, die über Session-Grenzen hinweg
 überleben müssen. Die nächste Session klont das Repo frisch — was hier steht,
 ist da; Chat-Verlauf ist es nicht.
 
+> **AKTUELLER FOKUS (Nutzer, 13.07.2026): das Sprint-Buch.** Stand: 3/3
+> Gewinn-Zyklen unter v3. Die Mess-Woche (bis So 19.07. 16:30) läuft mit
+> CMM-Discovery + 12er-Pool. Danach hat der Sprint-Ausbau Vorrang — zuerst
+> das Confidence-Points/Star-System (Spec unten), dann ggf. Lighter-Promotion
+> in den Sprint-Pool, je nach Lighter-Schatten-Zahlen.
+
 ---
 
 ## Confidence Points / interner LARP-Star-Rang (Sprint-basiert)
