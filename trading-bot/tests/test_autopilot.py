@@ -9,9 +9,10 @@ from bot.autopilot import rotate_leaders
 from bot.copytrade.analyzer import TraderMetrics
 
 
-def metrics(addr, score, roi=0.05):
+def metrics(addr, score, roi=0.05, sprint=None):
     m = TraderMetrics(address=addr, account_value=50000, days=30)
     m.score = score
+    m.sprint_score = score if sprint is None else sprint
     m.roi = roi
     m.profit_factor = 2.0
     m.closed_trades = 50
@@ -66,17 +67,26 @@ def _autopilot():
     return Autopilot(load_config())
 
 
-def test_sprint_pool_wider_than_main_and_score_sorted():
-    """Sprint bekommt einen breiteren Pool (pool_size) als das Hauptbuch, nach
-    Score sortiert - das Hauptbuch (max_leaders) bleibt davon unberührt."""
+def test_sprint_pool_wider_than_main_and_sorted_by_direction_score():
+    """Sprint bekommt einen breiteren Pool (pool_size) als das Hauptbuch,
+    sortiert nach RICHTUNGS-Score (sprint_score, nicht Haupt-Score) - das
+    Hauptbuch (max_leaders) bleibt davon unberührt."""
     ap = _autopilot()
     ap.cfg.sprint.pool_size = 5
     ap.leaders = [leader("0xa"), leader("0xb")]   # Hauptbuch: nur 2
-    ranked = [metrics("0xa", 60), metrics("0xb", 55), metrics("0xc", 50),
-              metrics("0xd", 45), metrics("0xe", 40), metrics("0xf", 38)]
+    # Haupt-Score absichtlich GEGENLÄUFIG zum Sprint-Score: 0xf ist der
+    # schwächste fürs Hauptbuch, aber der beste Richtungs-Trader
+    ranked = [metrics("0xa", 60, sprint=40), metrics("0xb", 55, sprint=45),
+              metrics("0xc", 50, sprint=50), metrics("0xd", 45, sprint=55),
+              metrics("0xe", 40, sprint=60), metrics("0xf", 38, sprint=65)]
     pool = ap._build_sprint_pool(ranked)
-    assert [p["address"] for p in pool] == ["0xa", "0xb", "0xc", "0xd", "0xe"]
-    assert len(pool) == 5 and len(ap.leaders) == 2, "Hauptbuch bleibt schmal"
+    assert [p["address"] for p in pool[:5]] == ["0xf", "0xe", "0xd", "0xc", "0xb"], \
+        "Richtungs-Score entscheidet, nicht der Haupt-Score"
+    assert pool[0]["score"] == 65, "angezeigt wird der Richtungs-Score"
+    # 0xa (bester Haupt-Score!) fiel aus den Top-5 - als Haupt-Leader kommt er
+    # trotzdem rein
+    assert "0xa" in [p["address"] for p in pool]
+    assert len(pool) == 6 and len(ap.leaders) == 2, "Hauptbuch bleibt schmal"
 
 
 def test_sprint_pool_always_contains_main_leaders():
@@ -85,7 +95,7 @@ def test_sprint_pool_always_contains_main_leaders():
     scannt Sprint einen aktiven Copy-Leader nicht."""
     ap = _autopilot()
     ap.cfg.sprint.pool_size = 5
-    ap.leaders = [leader("0xz")]   # Score im Ranking nur 36 -> außerhalb Top-5
+    ap.leaders = [leader("0xz")]   # Richtungs-Score nur 36 -> außerhalb Top-5
     ranked = [metrics("0xa", 60), metrics("0xb", 55), metrics("0xc", 50),
               metrics("0xd", 48), metrics("0xe", 46), metrics("0xz", 36)]
     pool = ap._build_sprint_pool(ranked)

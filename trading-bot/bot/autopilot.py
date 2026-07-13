@@ -843,12 +843,13 @@ class Autopilot:
                 addrs.append(a)
         return addrs
 
-    def _build_sprint_pool(self, ranked) -> list[dict]:
-        """Top-pool_size nach Score aus der Analyse; Haupt-Leader immer enthalten
-        (der Keep-Bonus kann einen Bestands-Leader aus den rohen Top-N drücken)."""
+    def _build_sprint_pool(self, sprint_ok) -> list[dict]:
+        """Top-pool_size nach RICHTUNGS-Score (sprint_score) aus den Sprint-
+        tauglichen Wallets; Haupt-Leader immer enthalten (sie sind bewiesen gut
+        genug fürs Hauptbuch - Sprint darf sie nie aus den Augen verlieren)."""
         n = max(self.cfg.sprint.pool_size, len(self.leaders))
-        top = sorted(ranked, key=lambda m: m.score, reverse=True)[:n]
-        pool = [{"address": m.address, "score": round(m.score, 1)} for m in top]
+        top = sorted(sprint_ok, key=lambda m: m.sprint_score, reverse=True)[:n]
+        pool = [{"address": m.address, "score": round(m.sprint_score, 1)} for m in top]
         have = {p["address"] for p in pool}
         for l in self.leaders:
             if l["address"] not in have:
@@ -926,41 +927,51 @@ class Autopilot:
     def _reanalyze(self) -> None:
         log.info("Starte Leaderboard-Analyse (Funnel + LARP-Filter) ...")
         an = self.cfg.copytrade.analysis
-        # Weicher Boden NUR für den Sprint-Pool: die Analyse rankt ab pool_min_score,
-        # das Hauptbuch wählt weiter strikt ab an.min_score (rotate_leaders floort
-        # NEUE Kandidaten nicht selbst - deshalb wird hier vorgefiltert).
-        floor = an.min_score
-        if self.cfg.sprint.enabled:
-            floor = min(floor, self.cfg.sprint.pool_min_score)
         report: dict = {}
         self._analysis_running = True
         self._analysis_started = time.time()
         try:
-            self._reanalyze_body(an, floor, report)
+            self._reanalyze_body(an, report)
         finally:
             self._analysis_running = False
             self._last_analysis = time.time()
 
-    def _reanalyze_body(self, an, floor: float, report: dict) -> None:
+    def _reanalyze_body(self, an, report: dict) -> None:
         try:
             addresses, src_note = self._discover_candidates(an)
             info = Info(api_url(testnet=False), skip_ws=True)
             analyzer = TraderAnalyzer(info, days=an.days)
             larp = LarpFilter(LarpConfig(**(an.larp or {})))
-            ranked = analyzer.rank(addresses, min_score=floor, larp=larp, report=report)
+            main_ranked = analyzer.rank(addresses, min_score=an.min_score,
+                                        larp=larp, report=report)
         except Exception as e:
             log.exception("Analyse fehlgeschlagen - behalte bisherige Leader")
             self._analysis_note = f"⚠️ Analyse fehlgeschlagen: {str(e)[:150]}"
             return
 
-        main_ranked = [m for m in ranked if m.score >= an.min_score]
+        # Sprint-Pool: eigenes, richtungs-orientiertes Gate über ALLE messbaren
+        # Wallets (auch Haupt-LARP-K.O.s wie Swing-Trader oder Lucky-Puncher) -
+        # Sprint zählt Richtungs-Treffer, nicht Profit-Größe (Nutzer-Vorgabe).
+        sprint_ok = []
+        if self.cfg.sprint.enabled:
+            from .copytrade.larp import check_sprint
+
+            larp_cfg = LarpConfig(**(an.larp or {}))
+            sprint_ok = [m for m in report.get("metrics", [])
+                         if check_sprint(m, larp_cfg).passed
+                         and m.sprint_score >= self.cfg.sprint.pool_min_score]
+            sprint_ok.sort(key=lambda m: m.sprint_score, reverse=True)
+
         top_scores = "/".join(f"{s:.0f}" for _, s in report.get("scores", [])[:3]) or "-"
+        larp_top = ", ".join(f"{k}×{n}" for k, n in sorted(
+            report.get("larp_reasons", {}).items(), key=lambda t: -t[1])[:2]) or "-"
         self._analysis_note = (
             f"{len(addresses)} Kandidaten ({src_note}) → {len(main_ranked)} Haupt"
-            f"(≥{an.min_score:g}) / {len(ranked)} Pool(≥{floor:g})\n"
+            f"(≥{an.min_score:g}) / {len(sprint_ok)} Sprint-tauglich"
+            f"(Richtung≥{self.cfg.sprint.pool_min_score:g})\n"
             f"Aussortiert: {report.get('truncated', 0)} zu aktiv, "
-            f"{report.get('larp_ko', 0)} LARP, {report.get('errors', 0)} Fehler | "
-            f"Top-Scores: {top_scores}")
+            f"{report.get('larp_ko', 0)} LARP ({larp_top}), "
+            f"{report.get('errors', 0)} Fehler | Top-Scores: {top_scores}")
         log.info("Analyse-Trichter: %s", self._analysis_note.replace("\n", " | "))
 
         new_leaders = rotate_leaders(
@@ -990,8 +1001,8 @@ class Autopilot:
                 self.feed.resubscribe([l["address"] for l in new_leaders])
         # Sprint-Pool UNABHÄNGIG vom Haupt-Rotations-Ausgang aktualisieren - sonst
         # bleibt der Pool bei einer leeren Haupt-Auswahl auf dem alten Stand hängen.
-        if ranked:
-            self.sprint_leaders = self._build_sprint_pool(ranked)
+        if sprint_ok or main_ranked:
+            self.sprint_leaders = self._build_sprint_pool(sprint_ok)
             try:
                 (RUNTIME / self._SPRINT_POOL_FILE).write_text(
                     json.dumps(self.sprint_leaders, indent=2))

@@ -158,10 +158,15 @@ sprint:
                             # Qualität der Einstiege zu senken (bestbewerteter Leader
                             # mit frischem Signal gewinnt immer). Betrifft NUR Sprint,
                             # das Hauptbuch bleibt bei seinen 6 konzentriert.
-  pool_min_score: 25        # weicher Score-Boden NUR für den Sprint-Pool: füllt den
-                            # Pool mit soliden (LARP-geprüften) Wallets ab Score 25,
-                            # wenn das strenge 35er-Gate zu wenige durchlässt.
-                            # Hauptbuch wählt weiterhin strikt ab analysis.min_score.
+  pool_min_score: 25        # Mindest-RICHTUNGS-Score (0..100) für den Sprint-Pool.
+                            # Der Pool hat ein EIGENES Gate (larp.check_sprint):
+                            # Trefferquote >=52%, >=30 Trades, Aktivität, kein
+                            # Scalper - aber KEINE Profit-Größen-Gates (Lucky-
+                            # Punch, Wochen-Konsistenz, Drawdown, Swing-Cap).
+                            # Sprint reitet EINE Position bis +10% und ist raus:
+                            # es zählt, dass der Leader die Richtung erkennt,
+                            # nicht wie viel er selbst am Trade verdient.
+                            # Hauptbuch wählt weiter strikt ab analysis.min_score.
   bust_frac: 0.05           # Liquidations-Modell: unter 5% Rest ist der Zyklus geplatzt
   rebalance_threshold: 0.02
   partial_exit_frac: 0.75   # Leader baut >=75% ab -> wir gehen mit raus (Scale-out)

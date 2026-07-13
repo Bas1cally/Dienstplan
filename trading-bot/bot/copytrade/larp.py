@@ -75,3 +75,41 @@ class LarpFilter:
             )
 
         return LarpVerdict(passed=not reasons, reasons=reasons)
+
+
+# Sprint-Buch: Münzwurf wäre 50% - darunter erkennt niemand "die Richtung".
+SPRINT_MIN_WIN_RATE = 0.52
+
+
+def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict:
+    """Richtungs-orientiertes LARP-Gate fürs SPRINT-Buch (Nutzer-Vorgabe: es
+    zählt, dass der Leader die Richtung erkennt - nicht, wie viel Profit er
+    selbst aus dem Trade holt; Sprint nimmt +10% und ist raus).
+
+    BEHALTEN werden die Anti-Zufalls-Gates (Stichprobe, Aktivität, Scalper-
+    Boden - unter ~30min Haltedauer erreicht kein Ritt die nötige ~1%-Bewegung)
+    plus neu die Trefferquote. GESTRICHEN sind die Profit-Größen-Gates des
+    Hauptbuchs (Lucky-Punch-Anteil, Wochen-Profit-Konsistenz, Drawdown,
+    Swing-Cap, Netto-PnL): für einen +10%-und-raus-Ritt irrelevant, und
+    Strikes/Bans räumen schwache Leader ohnehin nach 2 Verlust-Ritten ab."""
+    c = cfg or LarpConfig()
+    reasons: list[str] = []
+
+    if m.round_trips < c.min_round_trips:
+        reasons.append(f"nur {m.round_trips} Round-Trips (< {c.min_round_trips})")
+    # Bei verkürztem Messfenster (7d-Retry sehr aktiver Trader) anteilig fordern
+    min_days = min(c.min_active_days, max(1, int(m.days * 0.6)))
+    if m.active_days < min_days:
+        reasons.append(f"nur {m.active_days} aktive Tage (< {min_days})")
+    if 0 < m.median_holding_minutes < c.min_median_holding_minutes:
+        reasons.append(
+            f"Scalper: mediane Haltedauer {m.median_holding_minutes:.0f}min "
+            f"(< {c.min_median_holding_minutes:.0f}min) - zu kurz für ~1% Bewegung"
+        )
+    if m.win_rate < SPRINT_MIN_WIN_RATE:
+        reasons.append(
+            f"Trefferquote {m.win_rate:.0%} (< {SPRINT_MIN_WIN_RATE:.0%}) - "
+            f"erkennt die Richtung nicht besser als der Münzwurf"
+        )
+
+    return LarpVerdict(passed=not reasons, reasons=reasons)

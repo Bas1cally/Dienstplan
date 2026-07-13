@@ -49,6 +49,10 @@ class TraderMetrics:
     max_trade_share: float = 1.0    # Anteil des größten Trades am Brutto-Gewinn
     profitable_week_share: float = 0.0
     score: float = 0.0
+    # Richtungs-Score fürs Sprint-Buch: dort zählt NICHT, wie viel Profit der
+    # Leader selbst aus dem Trade holt (wir nehmen +10% und sind raus), sondern
+    # wie oft er die Richtung richtig erkennt. Gewichtet Trefferquote statt ROI.
+    sprint_score: float = 0.0
     # userFillsByTime liefert max ~2000 Fills: ist das Fenster voll, sehen wir nur
     # einen Ausschnitt - alle Metriken wären verzerrt (betrifft HFT/MM-Konten).
     fills_truncated: bool = False
@@ -177,6 +181,7 @@ def analyze_fills(address: str, fills: list[dict], account_value: float, days: i
         m.profitable_week_share = sum(1 for v in weekly.values() if v > 0) / len(weekly)
 
     m.score = _score(m)
+    m.sprint_score = _sprint_score(m)
     return m
 
 
@@ -204,6 +209,23 @@ def _score(m: TraderMetrics) -> float:
 
     raw = (0.30 * roi_part + 0.25 * pf_part + 0.20 * consistency_part + 0.25 * risk_part)
     return round(100 * raw * (0.5 + 0.5 * sample), 1)
+
+
+def _sprint_score(m: TraderMetrics) -> float:
+    """Richtungs-Score 0..100 fürs Sprint-Buch (Nutzer-Vorgabe: 'das wichtigste
+    ist nicht wie viel Profit sie machen, sondern dass sie die richtige Richtung
+    erkennen'). Sprint nimmt +10% (bei 10x = ~1% Kursbewegung) und ist raus -
+    ROI-Größe, Lucky-Punch-Anteil und Drawdown des Leaders sind dafür egal.
+    Zählt: Trefferquote (Richtung), Konsistenz, Stichprobe, Aktivität."""
+    if m.round_trips < 5 or m.win_rate <= 0:
+        return 0.0
+    # Trefferquote: 50% = Münzwurf = 0 Punkte, ab 65% voll ausgereizt
+    wr_part = max(0.0, min((m.win_rate - 0.50) / 0.15, 1.0))
+    consistency_part = m.profitable_day_share
+    sample = min(m.round_trips / 60.0, 1.0)
+    activity = min(m.active_days / max(m.days, 1), 1.0)
+    return round(100 * (0.50 * wr_part + 0.20 * consistency_part
+                        + 0.20 * sample + 0.10 * activity), 1)
 
 
 class TraderAnalyzer:
@@ -240,9 +262,17 @@ class TraderAnalyzer:
         end = int(_time.time() * 1000)
         start = end - self.days * 86_400_000
         fills = self._call(self.info.user_fills_by_time, address, start, end)
+        days = self.days
+        if len(fills or []) >= 2000:
+            # 30-Tage-Fenster gesprengt (HL-Deckel ~2000 Fills): aktive Trader
+            # nicht ungewertet wegwerfen, sondern auf 7 Tagen neu vermessen.
+            # Wer AUCH 7 Tage sprengt (~285+ Fills/Tag), ist echtes HFT/MM.
+            fills = self._call(self.info.user_fills_by_time,
+                               address, end - 7 * 86_400_000, end)
+            days = 7
         state = self._call(self.info.user_state, address)
         account_value = float(state["marginSummary"]["accountValue"])
-        m = analyze_fills(address, fills, account_value, self.days)
+        m = analyze_fills(address, fills, account_value, days)
         m.fills_truncated = len(fills or []) >= 2000
         return m
 
@@ -258,29 +288,36 @@ class TraderAnalyzer:
         rep = report if report is not None else {}
         rep.setdefault("analyzed", 0); rep.setdefault("errors", 0)
         rep.setdefault("larp_ko", 0); rep.setdefault("truncated", 0)
-        rep.setdefault("scores", [])
+        rep.setdefault("scores", []); rep.setdefault("metrics", [])
+        rep.setdefault("larp_reasons", {})
         results = []
         for i, addr in enumerate(addresses):
             if i and self.throttle_s:
                 _time.sleep(self.throttle_s)
             try:
                 m = self.analyze(addr)
-                log.info("Analysiert %s: score=%.1f roi=%.1f%% pf=%.2f trips=%d dd=%.1f%% hold=%.0fmin%s",
-                         addr[:10], m.score, m.roi * 100, m.profit_factor,
-                         m.round_trips, m.max_drawdown * 100, m.median_holding_minutes,
+                log.info("Analysiert %s: score=%.1f sprint=%.1f wr=%.0f%% roi=%.1f%% pf=%.2f trips=%d dd=%.1f%% hold=%.0fmin%s",
+                         addr[:10], m.score, m.sprint_score, m.win_rate * 100,
+                         m.roi * 100, m.profit_factor, m.round_trips,
+                         m.max_drawdown * 100, m.median_holding_minutes,
                          " [Fills-Fenster VOLL]" if m.fills_truncated else "")
                 rep["analyzed"] += 1
                 if m.fills_truncated:
-                    # >=2000 Fills im Fenster: Metriken wären ein verzerrter
-                    # Ausschnitt UND so hochfrequente Konten (HFT/MM) sind zum
-                    # Kopieren ungeeignet (Churn frisst Fees) -> raus.
+                    # Auch das 7-Tage-Fenster voll (~285+ Fills/Tag): echtes
+                    # HFT/MM - unmessbar UND unkopierbar (Churn frisst Fees).
                     rep["truncated"] += 1
                     continue
+                # ALLE messbaren Wallets fürs Sprint-Pool-Gate aufheben - der
+                # Sprint-Pool nutzt ein eigenes, richtungs-orientiertes LARP-Gate
+                # und darf Haupt-LARP-K.O.s enthalten (z.B. Swing-Trader).
+                rep["metrics"].append(m)
                 if larp:
                     verdict = larp.check(m)
                     if not verdict.passed:
                         log.info("  LARP-Filter K.O. für %s: %s", addr[:10], "; ".join(verdict.reasons))
                         rep["larp_ko"] += 1
+                        key = verdict.reasons[0].split(":")[0].split(" (")[0][:24]
+                        rep["larp_reasons"][key] = rep["larp_reasons"].get(key, 0) + 1
                         continue
                 rep["scores"].append((addr, m.score))
                 if m.score >= min_score:

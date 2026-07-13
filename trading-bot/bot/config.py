@@ -345,10 +345,11 @@ class SprintConfig:
     # (der Top-Leader gewinnt immer, wenn er aktiv ist). Das Hauptbuch bleibt
     # konzentriert bei copytrade.max_leaders - dieser Pool betrifft nur das Sprint-Buch.
     pool_size: int = 12
-    # Weicherer Score-Boden NUR für den Sprint-Pool (Hauptbuch bleibt bei
-    # analysis.min_score). Ohne ihn hungert der Pool, wenn das strenge Gate nur
-    # 1-2 Wallets durchlässt ('Pool: 1 scanbar'). LARP-Filter gilt trotzdem für
-    # alle; Strikes/Bans sichern die Schwächeren zusätzlich ab.
+    # Mindest-RICHTUNGS-Score (TraderMetrics.sprint_score, 0..100) für den Pool.
+    # Der Pool nutzt ein eigenes LARP-Gate (larp.check_sprint) und eine eigene
+    # Skala: Trefferquote/Konsistenz/Stichprobe statt Profit-Größe - Sprint
+    # nimmt +10% und ist raus, der Profit des Leaders selbst ist egal
+    # (Nutzer-Vorgabe). Hauptbuch bleibt strikt bei analysis.min_score.
     pool_min_score: float = 25.0
     rebalance_threshold: float = 0.02
     min_notional: float = 10.0
