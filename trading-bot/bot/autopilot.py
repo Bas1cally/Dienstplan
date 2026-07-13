@@ -935,6 +935,16 @@ class Autopilot:
         finally:
             self._analysis_running = False
             self._last_analysis = time.time()
+            # Zeitstempel auch über Neustarts persistieren: _load_or_analyze_leaders
+            # liest die mtime der Leader-Datei. Ohne touch feuert nach JEDEM
+            # /update sofort eine neue Analyse (Datei ändert sich nur bei
+            # Leader-Wechsel) - das frisst CMM-Budget und blockiert den Loop.
+            try:
+                path = Path(self.cfg.copytrade.leaders_file)
+                if path.exists():
+                    path.touch()
+            except OSError:
+                pass
 
     def _reanalyze_body(self, an, report: dict) -> None:
         try:
@@ -971,11 +981,13 @@ class Autopilot:
         top_scores = "/".join(f"{s:.0f}" for _, s in report.get("scores", [])[:3]) or "-"
         larp_top = ", ".join(f"{k}×{n}" for k, n in sorted(
             report.get("larp_reasons", {}).items(), key=lambda t: -t[1])[:2]) or "-"
+        # ACHTUNG: kein rohes '<' in dieser Notiz - sie geht mit parse_mode=HTML
+        # an Telegram, und ein '<' ließ den Versand mit 400 platzen (Funkstille!)
         self._analysis_note = (
             f"{len(addresses)} Kandidaten ({src_note}) → {len(main_ranked)} Haupt"
             f"(≥{an.min_score:g}) / {len(sprint_ok)} Sprint-tauglich "
-            f"(Gate-K.O. {sprint_gate_ko}, Richtung<{self.cfg.sprint.pool_min_score:g}: "
-            f"{sprint_score_ko})\n"
+            f"(Gate-K.O. {sprint_gate_ko}, Richtung unter "
+            f"{self.cfg.sprint.pool_min_score:g}: {sprint_score_ko})\n"
             f"Aussortiert: {report.get('truncated', 0)} zu aktiv, "
             f"{report.get('larp_ko', 0)} LARP ({larp_top}), "
             f"{report.get('errors', 0)} Fehler | Top-Scores: {top_scores}")

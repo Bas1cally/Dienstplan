@@ -112,11 +112,22 @@ class TelegramCommander:
         return r.json().get("result", [])
 
     def _send(self, text: str) -> None:
+        # HTML zuerst; lehnt Telegram das Parsing ab (400, z.B. rohes '<' im
+        # dynamischen Inhalt), als KLARTEXT nachsenden - kaputte Formatierung
+        # darf nie wieder komplette Funkstille erzeugen (Live-Vorfall 13.07.).
         try:
-            requests.post(
+            r = requests.post(
                 f"https://api.telegram.org/bot{self.token}/sendMessage",
                 json={"chat_id": self.chat_id, "text": text, "parse_mode": "HTML"},
                 timeout=10,
-            ).raise_for_status()
+            )
+            if r.status_code == 400:
+                log.warning("Telegram lehnt HTML ab (400) - sende als Klartext")
+                r = requests.post(
+                    f"https://api.telegram.org/bot{self.token}/sendMessage",
+                    json={"chat_id": self.chat_id, "text": text},
+                    timeout=10,
+                )
+            r.raise_for_status()
         except Exception:
             log.exception("Antwort-Versand fehlgeschlagen")

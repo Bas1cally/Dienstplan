@@ -28,14 +28,24 @@ class Notifier:
         return bool(self.token and self.chat_id)
 
     def send(self, text: str) -> None:
-        """Sendet eine Nachricht; Fehler werden geloggt, nie geworfen."""
+        """Sendet eine Nachricht; Fehler werden geloggt, nie geworfen.
+        Lehnt Telegram das HTML-Parsing ab (400, z.B. rohes '<' in dynamischem
+        Inhalt), wird als Klartext nachgesendet - Push darf nie stumm sterben."""
         if not self.enabled:
             return
         try:
-            requests.post(
+            r = requests.post(
                 f"https://api.telegram.org/bot{self.token}/sendMessage",
                 json={"chat_id": self.chat_id, "text": text, "parse_mode": "HTML"},
                 timeout=10,
-            ).raise_for_status()
+            )
+            if r.status_code == 400:
+                log.warning("Telegram lehnt HTML ab (400) - sende als Klartext")
+                r = requests.post(
+                    f"https://api.telegram.org/bot{self.token}/sendMessage",
+                    json={"chat_id": self.chat_id, "text": text},
+                    timeout=10,
+                )
+            r.raise_for_status()
         except Exception:
             log.exception("Telegram-Versand fehlgeschlagen")
