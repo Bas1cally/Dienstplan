@@ -49,6 +49,9 @@ class TraderMetrics:
     max_trade_share: float = 1.0    # Anteil des größten Trades am Brutto-Gewinn
     profitable_week_share: float = 0.0
     score: float = 0.0
+    # userFillsByTime liefert max ~2000 Fills: ist das Fenster voll, sehen wir nur
+    # einen Ausschnitt - alle Metriken wären verzerrt (betrifft HFT/MM-Konten).
+    fills_truncated: bool = False
 
 
 @dataclass
@@ -239,29 +242,52 @@ class TraderAnalyzer:
         fills = self._call(self.info.user_fills_by_time, address, start, end)
         state = self._call(self.info.user_state, address)
         account_value = float(state["marginSummary"]["accountValue"])
-        return analyze_fills(address, fills, account_value, self.days)
+        m = analyze_fills(address, fills, account_value, self.days)
+        m.fills_truncated = len(fills or []) >= 2000
+        return m
 
-    def rank(self, addresses: list[str], min_score: float, larp=None) -> list[TraderMetrics]:
-        """Bewertet Wallets; `larp` (LarpFilter) sortiert Blender vorab hart aus."""
+    def rank(self, addresses: list[str], min_score: float, larp=None,
+             report: dict | None = None) -> list[TraderMetrics]:
+        """Bewertet Wallets; `larp` (LarpFilter) sortiert Blender vorab hart aus.
+
+        `report` (optional, mutable) sammelt die Trichter-Diagnose: analyzed/
+        errors/larp_ko/truncated-Zähler und die Top-Scores ALLER Bewerteten -
+        damit sichtbar ist, WARUM Kandidaten sterben (statt nur '0 qualifiziert')."""
         import time as _time
 
+        rep = report if report is not None else {}
+        rep.setdefault("analyzed", 0); rep.setdefault("errors", 0)
+        rep.setdefault("larp_ko", 0); rep.setdefault("truncated", 0)
+        rep.setdefault("scores", [])
         results = []
         for i, addr in enumerate(addresses):
             if i and self.throttle_s:
                 _time.sleep(self.throttle_s)
             try:
                 m = self.analyze(addr)
-                log.info("Analysiert %s: score=%.1f roi=%.1f%% pf=%.2f trips=%d dd=%.1f%% hold=%.0fmin",
+                log.info("Analysiert %s: score=%.1f roi=%.1f%% pf=%.2f trips=%d dd=%.1f%% hold=%.0fmin%s",
                          addr[:10], m.score, m.roi * 100, m.profit_factor,
-                         m.round_trips, m.max_drawdown * 100, m.median_holding_minutes)
+                         m.round_trips, m.max_drawdown * 100, m.median_holding_minutes,
+                         " [Fills-Fenster VOLL]" if m.fills_truncated else "")
+                rep["analyzed"] += 1
+                if m.fills_truncated:
+                    # >=2000 Fills im Fenster: Metriken wären ein verzerrter
+                    # Ausschnitt UND so hochfrequente Konten (HFT/MM) sind zum
+                    # Kopieren ungeeignet (Churn frisst Fees) -> raus.
+                    rep["truncated"] += 1
+                    continue
                 if larp:
                     verdict = larp.check(m)
                     if not verdict.passed:
                         log.info("  LARP-Filter K.O. für %s: %s", addr[:10], "; ".join(verdict.reasons))
+                        rep["larp_ko"] += 1
                         continue
+                rep["scores"].append((addr, m.score))
                 if m.score >= min_score:
                     results.append(m)
             except Exception:
+                rep["errors"] += 1
                 log.exception("Analyse fehlgeschlagen für %s", addr)
+        rep["scores"].sort(key=lambda t: t[1], reverse=True)
         results.sort(key=lambda m: m.score, reverse=True)
         return results

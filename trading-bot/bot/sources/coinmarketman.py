@@ -111,35 +111,50 @@ def _f(v) -> float:
 
 
 def fetch_cmm_candidates(cfg) -> list[CMMCandidate]:
-    """Kandidaten-Adressen aus dem perp-pnl-Leaderboard (1 Request von 100/Tag).
+    """KOPIERBARE Kandidaten aus dem perp-pnl-Leaderboard (`pages` Requests).
 
-    Bewusst nur GROBE Filter (Equity, Fenster-PnL) - das echte Qualitäts-Gate
-    bleibt unsere 30-Tage-Tiefenanalyse + LARP-Filter auf HL-Daten (kostenlos).
-    CMM ersetzt nur den zu schmalen HL-Leaderboard-Trichter bei der Discovery."""
+    Live-Befund: die Board-Spitze nach Monats-PnL sind MM/HFT-Whales (z.B. 408x
+    Monats-Umsatz zur Equity) - zum Kopieren ungeeignet und fuer die Tiefen-
+    analyse unlesbar (HL deckelt userFills auf ~2000). Deshalb hier neben den
+    Grob-Filtern (Equity-Spanne, Fenster-PnL) auch Umsatz- und Hebel-Deckel,
+    und es wird tiefer geblaettert, weil die Spitze rausfaellt. Das echte
+    Qualitaets-Gate bleibt die 30-Tage-Tiefenanalyse + LARP auf HL-Daten."""
     client = CMMClient(cfg.base_url, cfg.timeout)
-    payload = client.leaderboard(board="perp-pnl", rank_by=cfg.period, limit=cfg.limit)
     out: list[CMMCandidate] = []
     seen: set[str] = set()
-    for r in rows_of(payload):
-        if not isinstance(r, dict):
-            continue
-        addr = str(r.get("address", "")).strip()
-        if not addr.startswith("0x") or addr.lower() in seen:
-            continue
-        c = CMMCandidate(
-            address=addr,
-            equity=_f(r.get("perpEquity")),
-            pnl_month=_f(r.get("pnlMonth")),
-            pnl_week=_f(r.get("pnlWeek")),
-            pnl_day=_f(r.get("pnlDay")),
-            exposure_ratio=_f(r.get("exposureRatio")),
-            volume_month=_f(r.get("volumeMonth")),
-            rank=int(_f(r.get("rank"))),
-        )
-        if c.equity < cfg.min_equity or c.pnl_month <= cfg.min_pnl:
-            continue
-        seen.add(addr.lower())
-        out.append(c)
+    pages = max(1, int(getattr(cfg, "pages", 1)))
+    for page in range(pages):
+        payload = client.leaderboard(board="perp-pnl", rank_by=cfg.period,
+                                     limit=cfg.limit, offset=page * cfg.limit)
+        rows = rows_of(payload)
+        if not rows:
+            break
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            addr = str(r.get("address", "")).strip()
+            if not addr.startswith("0x") or addr.lower() in seen:
+                continue
+            c = CMMCandidate(
+                address=addr,
+                equity=_f(r.get("perpEquity")),
+                pnl_month=_f(r.get("pnlMonth")),
+                pnl_week=_f(r.get("pnlWeek")),
+                pnl_day=_f(r.get("pnlDay")),
+                exposure_ratio=_f(r.get("exposureRatio")),
+                volume_month=_f(r.get("volumeMonth")),
+                rank=int(_f(r.get("rank"))),
+            )
+            if not (cfg.min_equity <= c.equity <= cfg.max_equity):
+                continue
+            if c.pnl_month <= cfg.min_pnl:
+                continue
+            if abs(c.exposure_ratio) > cfg.max_exposure:
+                continue
+            if c.equity > 0 and c.volume_month / c.equity > cfg.max_turnover:
+                continue
+            seen.add(addr.lower())
+            out.append(c)
     return out
 
 

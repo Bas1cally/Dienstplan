@@ -864,31 +864,45 @@ class Autopilot:
             self._force_analysis = False   # /analyze: einmalig, im Loop-Thread (kein Race)
             self._reanalyze()
 
-    def _discover_candidates(self, an) -> list[str]:
-        """Kandidaten-Adressen für die Tiefenanalyse. Primär: HyperTracker-Board
-        (perp-pnl, vorberechnete Monats-PnL - viel breiterer Trichter als HLs
-        eigenes Leaderboard, das zuletzt nur 1-3 Qualifizierte hergab). Fallback:
-        der bisherige HL-Weg, wenn CMM aus/leer/kaputt ist. Das Qualitäts-Gate
-        (30-Tage-Analyse + LARP-Filter) läuft danach für BEIDE Quellen gleich."""
+    def _discover_candidates(self, an) -> tuple[list[str], str]:
+        """Kandidaten-Adressen für die Tiefenanalyse: UNION aus HyperTracker-Board
+        (kopierbare, vorgefilterte perp-pnl-Trader) und dem bisherigen HL-Funnel.
+        Union statt entweder/oder: CMM verbreitert, HL liefert die bewährte
+        Population weiter - wir sind nie schlechter als der alte Weg. Das
+        Qualitäts-Gate (30-Tage-Analyse + LARP) läuft danach für alle gleich.
+        Liefert (Adressen, Quellen-Notiz fürs /status)."""
         cm = self.cfg.coinmarketman
+        cmm_addrs: list[str] = []
         if cm.enabled:
             try:
                 from .sources.coinmarketman import fetch_cmm_candidates
 
-                cands = fetch_cmm_candidates(cm)
-                if cands:
-                    log.info("CMM-Discovery: %d Kandidaten (perp-pnl nach %s, "
-                             "Equity>=%.0f)", len(cands), cm.period, cm.min_equity)
-                    return [c.address for c in cands][: an.top_n]
-                log.warning("CMM-Discovery leer - Fallback auf HL-Leaderboard")
+                cmm_addrs = [c.address for c in fetch_cmm_candidates(cm)]
+                log.info("CMM-Discovery: %d kopierbare Kandidaten (perp-pnl nach "
+                         "%s, %d Seiten)", len(cmm_addrs), cm.period, cm.pages)
             except Exception as e:
-                log.warning("CMM-Discovery fehlgeschlagen (%s) - Fallback auf "
-                            "HL-Leaderboard", str(e)[:150])
-        candidates = fetch_candidates(
-            min_account_value=an.min_account_value, min_volume=an.min_volume,
-            top_n=an.top_n, top_percent=an.top_percent,
-        )
-        return [c.address for c in candidates]
+                log.warning("CMM-Discovery fehlgeschlagen (%s) - nur HL-Funnel",
+                            str(e)[:150])
+        hl_addrs: list[str] = []
+        try:
+            hl_addrs = [c.address for c in fetch_candidates(
+                min_account_value=an.min_account_value, min_volume=an.min_volume,
+                top_n=an.top_n, top_percent=an.top_percent,
+            )]
+        except Exception as e:
+            if not cmm_addrs:
+                raise   # beide Quellen tot -> Analyse abbrechen (Aufrufer fängt)
+            log.warning("HL-Funnel fehlgeschlagen (%s) - nur CMM-Kandidaten",
+                        str(e)[:150])
+        seen: set[str] = set()
+        union: list[str] = []
+        for a in cmm_addrs + hl_addrs:          # CMM zuerst (PnL-Rangfolge)
+            k = a.lower()
+            if k not in seen:
+                seen.add(k)
+                union.append(a)
+        note = f"CMM {len(cmm_addrs)} + HL {len(hl_addrs)}"
+        return union[: an.top_n], note
 
     def _reanalyze(self) -> None:
         log.info("Starte Leaderboard-Analyse (Funnel + LARP-Filter) ...")
@@ -899,21 +913,27 @@ class Autopilot:
         floor = an.min_score
         if self.cfg.sprint.enabled:
             floor = min(floor, self.cfg.sprint.pool_min_score)
+        report: dict = {}
         try:
-            addresses = self._discover_candidates(an)
+            addresses, src_note = self._discover_candidates(an)
             info = Info(api_url(testnet=False), skip_ws=True)
             analyzer = TraderAnalyzer(info, days=an.days)
             larp = LarpFilter(LarpConfig(**(an.larp or {})))
-            ranked = analyzer.rank(addresses, min_score=floor, larp=larp)
+            ranked = analyzer.rank(addresses, min_score=floor, larp=larp, report=report)
         except Exception:
             log.exception("Analyse fehlgeschlagen - behalte bisherige Leader")
             self._last_analysis = time.time()
             return
 
         main_ranked = [m for m in ranked if m.score >= an.min_score]
-        self._analysis_note = (f"{len(addresses)} Kandidaten → {len(main_ranked)} Haupt"
-                               f"(≥{an.min_score:g}) / {len(ranked)} Pool(≥{floor:g})")
-        log.info("Analyse-Trichter: %s", self._analysis_note)
+        top_scores = "/".join(f"{s:.0f}" for _, s in report.get("scores", [])[:3]) or "-"
+        self._analysis_note = (
+            f"{len(addresses)} Kandidaten ({src_note}) → {len(main_ranked)} Haupt"
+            f"(≥{an.min_score:g}) / {len(ranked)} Pool(≥{floor:g})\n"
+            f"Aussortiert: {report.get('truncated', 0)} zu aktiv, "
+            f"{report.get('larp_ko', 0)} LARP, {report.get('errors', 0)} Fehler | "
+            f"Top-Scores: {top_scores}")
+        log.info("Analyse-Trichter: %s", self._analysis_note.replace("\n", " | "))
 
         new_leaders = rotate_leaders(
             self.leaders, main_ranked, self.cfg.copytrade.max_leaders, self.cfg.autopilot.min_keep_score,

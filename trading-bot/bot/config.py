@@ -418,6 +418,16 @@ class CoinMarketManConfig:
     timeout: float = 20.0
     min_equity: float = 10_000     # Wegwerf-/Mini-Konten aussortieren
     min_pnl: float = 0.0           # nur im gewählten Fenster profitable
+    # Kopierbarkeits-Filter: die Spitze des PnL-Boards sind Market-Maker/HFT-
+    # Whales (Live-Befund: 408x Monats-Umsatz zur Equity, >2000 Fills im
+    # Analysefenster) - unkopierbar (Churn frisst Fees) und für die Tiefen-
+    # analyse unlesbar (HL deckelt userFills auf ~2000). Also VOR der teuren
+    # Analyse aussieben:
+    max_turnover: float = 120.0    # Monatsvolumen / Equity (Day-Trader ~5-100x)
+    max_exposure: float = 6.0      # |exposureRatio| (offenes Notional / Equity)
+    max_equity: float = 5_000_000  # darüber fast nur Fonds/MMs (Slippage-Realität)
+    pages: int = 3                 # Board-Seiten je Scan (je 1 Request), tiefer
+                                   # blättern, weil die Spitze rausgefiltert wird
 
 
 @dataclass

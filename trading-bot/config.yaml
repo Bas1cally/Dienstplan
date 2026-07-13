@@ -201,6 +201,15 @@ coinmarketman:
   limit: 100                # Leaderboard-Zeilen pro Abruf (25 | 50 | 100)
   min_equity: 10000         # Kandidaten-Grobfilter: Mindest-Perp-Equity
   min_pnl: 0                # ... und Monats-PnL muss positiv sein
+  # Kopierbarkeits-Filter (Live-Befund 13.07.: Board-Spitze = MM/HFT-Whales mit
+  # 400x Monats-Umsatz - unkopierbar, und ihre >2000 Fills sprengen HLs
+  # userFills-Fenster, sodass die Tiefenanalyse nur verzerrte Ausschnitte sieht):
+  max_turnover: 120         # Monatsvolumen/Equity-Deckel (Day-Trader ~5-100x)
+  max_exposure: 6           # |offenes Notional / Equity| (Hebel-Deckel)
+  max_equity: 5000000       # darüber fast nur Fonds/MMs (Slippage-Realität)
+  pages: 3                  # so viele Board-Seiten je Scan durchblättern (je 1
+                            # Request), weil die gefilterte Spitze Platz macht.
+                            # Budget: 3 Seiten x 4 Analysen/Tag = 12 von 100/Tag
 
 # === Strategie-Labor: eigene Signale parallel im Paper-Schatten messen ===
 # Der Copy-Bot folgt fremden Tradern (kein originäres Alpha). Hier laufen EIGENE
