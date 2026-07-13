@@ -41,6 +41,22 @@ from .notify import Notifier
 log = logging.getLogger(__name__)
 
 RUNTIME = Path(__file__).resolve().parent.parent / "runtime"
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
+
+def set_env_var(key: str, value: str, env_path: Path = ENV_FILE) -> None:
+    """Setzt/ersetzt EINE Zeile `key=value` in der .env, andere Zeilen bleiben.
+    chmod 600. Für per-Telegram gesetzte Read-only-Tokens (nicht für Wallet-Keys)."""
+    lines = []
+    if env_path.exists():
+        lines = [l for l in env_path.read_text().splitlines()
+                 if not l.startswith(f"{key}=")]
+    lines.append(f"{key}={value}")
+    env_path.write_text("\n".join(lines) + "\n")
+    try:
+        env_path.chmod(0o600)
+    except OSError:
+        pass
 
 
 def diagnose_inactivity(entries: list[dict], since_t: float, copier=None) -> str:
@@ -177,6 +193,8 @@ class Autopilot:
             "/update": self._cmd_update,
             "/probe": self._cmd_probe,
             "/lighter": self._cmd_lighter,
+            "/cmm": self._cmd_cmm,
+            "/setcmm": self._cmd_setcmm,
             "/help": self._cmd_help,
         })
 
@@ -191,6 +209,8 @@ class Autopilot:
                 "/update – Update ziehen + neu starten\n"
                 "/probe – Multi-DEX-Scan-Probe (Extended/Lighter/…)\n"
                 "/lighter &lt;ref&gt; – Lighter-Konto prüfen (Verifikation)\n"
+                "/setcmm &lt;token&gt; – HyperTracker-API-Token setzen\n"
+                "/cmm – HyperTracker-Leaderboard live proben\n"
                 "/stop /start /resume – Autopilot/Halt steuern")
 
     def _cmd_status(self) -> str:
@@ -417,6 +437,48 @@ class Autopilot:
                          f"({snap.exposure(coin) * 100:+.0f}% der Equity)")
         lines.append("\n✅ Stimmen Richtung/Größe? Dann können wir darauf messen.")
         return "\n".join(lines)
+
+    def _cmd_setcmm(self, arg: str = "") -> str:
+        """Setzt den HyperTracker/CoinMarketMan-API-Token (COINMARKETMAN_TOKEN) in
+        die .env UND live in den Prozess - vom Handy, ohne SSH. NUR für diesen
+        read-only Free-Tier-Token, NICHT für Wallet-Keys. Chat-ID-geschützt."""
+        tok = arg.strip()
+        if not tok:
+            return "Nutzung: <code>/setcmm &lt;token&gt;</code> (JWT von coinmarketman.com)"
+        if tok.count(".") != 2 or len(tok) < 40:
+            return "Das sieht nicht nach einem JWT aus (drei punkt-getrennte Teile erwartet)."
+        from .sources.coinmarketman import TOKEN_ENV
+
+        set_env_var(TOKEN_ENV, tok)
+        os.environ[TOKEN_ENV] = tok   # sofort live, kein Neustart nötig
+        return (f"✅ Token gespeichert (…{tok[-6:]}) und live geladen.\n"
+                f"Jetzt <code>/cmm</code> für die Live-Probe der API.")
+
+    def _cmd_cmm(self, arg: str = "") -> str:
+        """Live-Probe der HyperTracker-API: holt das Perp-PnL-Leaderboard und zeigt
+        die ROHE Response-Struktur (Keys, Beispielzeile) - damit wir das echte
+        Format sehen, bevor der Parser scharf geht. Läuft vom VPS (Sandbox blockt
+        coinmarketman.com). Optionales Arg: Zeitfenster (pnlDay/Week/Month/AllTime)."""
+        if not (self.notifier and self.notifier.enabled):
+            return "CMM-Probe braucht Telegram-Push (Ergebnis wird gesendet)."
+        from .config import load_config
+        from .sources.coinmarketman import CMMClient, probe as cmm_probe
+
+        if not CMMClient.token():
+            return ("Kein Token gesetzt. Erst <code>/setcmm &lt;token&gt;</code> senden.")
+        cfg = load_config().coinmarketman
+        period = arg.strip() or cfg.period
+
+        def run():
+            try:
+                msg = cmm_probe(cfg.base_url, period=period,
+                                limit=min(cfg.limit, 25), timeout=cfg.timeout)
+            except Exception as e:
+                msg = f"⚠️ CMM-Probe fehlgeschlagen: {str(e)[:250]}"
+            self.notifier.send(msg)
+
+        threading.Thread(target=run, daemon=True, name="cmm-probe").start()
+        return f"🔎 CMM-Probe läuft ({period}) … Ergebnis kommt gleich als Nachricht."
 
     def _cmd_update(self) -> str:
         """Zieht das neueste Update (git pull) und startet neu - per Telegram vom

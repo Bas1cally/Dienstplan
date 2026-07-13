@@ -182,6 +182,20 @@ lighter:
   max_leaders: 5
   copy_ratio: 0.5
 
+# === HyperTracker (CoinMarketMan): reichhaltiges Leader-Leaderboard ===
+# Vorberechnetes Perp-PnL-Leaderboard (Tag/Woche/Monat/all-time) + Exposure,
+# Directional Bias - soll den schmalen HL-Leaderboard-Trichter fürs Discovery/
+# Ranking ersetzen (Problem: nur 1 qualifizierter Leader). Live-Positionen bleiben
+# bei HLs kostenlosem user_state (Rate-Limit-Hygiene).
+# Token NICHT hier - COINMARKETMAN_TOKEN in der .env (per Telegram /setcmm setzbar).
+# BLEIBT AUS, bis /cmm das echte Response-Format bestätigt hat und der Parser steht.
+coinmarketman:
+  enabled: false
+  period: pnlMonth          # pnlDay | pnlWeek | pnlMonth | pnlAllTime
+  limit: 100                # Leaderboard-Zeilen pro Abruf (25 | 50 | 100)
+  min_equity: 10000
+  min_pnl: 0
+
 # === Strategie-Labor: eigene Signale parallel im Paper-Schatten messen ===
 # Der Copy-Bot folgt fremden Tradern (kein originäres Alpha). Hier laufen EIGENE
 # Strategien mit Spielgeld parallel mit, damit der Report (python report.py)

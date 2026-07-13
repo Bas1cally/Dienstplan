@@ -396,6 +396,26 @@ class LighterConfig:
 
 
 @dataclass
+class CoinMarketManConfig:
+    """HyperTracker (CoinMarketMan) als reichhaltige Leader-Quelle: vorberechnetes
+    Perp-PnL-Leaderboard (Tag/Woche/Monat/all-time) mit Equity, Exposure-Ratio,
+    Directional Bias. Ersetzt langfristig den schmalen HL-Leaderboard-Trichter fürs
+    Discovery/Ranking; Live-Positionen bleiben bei HLs kostenlosem user_state
+    (Rate-Limit-Hygiene: teurer Hochfrequenz-Teil bei HL, reiches Discovery bei CMM).
+
+    Token liegt NICHT hier - der JWT steht als COINMARKETMAN_TOKEN in der .env
+    (Secret, gitignored; per Telegram /setcmm setzbar). Read-only.
+    """
+    enabled: bool = False   # erst nach Live-Probe (/cmm) scharf schalten
+    base_url: str = "https://ht-api.coinmarketman.com/api/external"
+    period: str = "pnlMonth"   # pnlDay | pnlWeek | pnlMonth | pnlAllTime
+    limit: int = 100           # Leaderboard-Zeilen pro Abruf (25 | 50 | 100)
+    timeout: float = 20.0
+    min_equity: float = 10_000     # Wegwerf-/Mini-Konten aussortieren
+    min_pnl: float = 0.0           # nur im gewählten Fenster profitable
+
+
+@dataclass
 class Config:
     network: str
     dry_run: bool
@@ -420,6 +440,7 @@ class Config:
     labs: LabsConfig
     sprint: SprintConfig
     lighter: LighterConfig
+    coinmarketman: CoinMarketManConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -457,6 +478,7 @@ def load_config(path: Path | None = None) -> Config:
         labs=labs,
         sprint=SprintConfig(**raw.get("sprint", {})),
         lighter=LighterConfig(**raw.get("lighter", {})),
+        coinmarketman=CoinMarketManConfig(**raw.get("coinmarketman", {})),
     )
     _validate(cfg)
     return cfg
