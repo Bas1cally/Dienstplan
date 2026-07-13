@@ -177,6 +177,29 @@ def test_sprint_gate_still_rejects_scalper_and_thin_history():
     assert not v2.passed and any("Round-Trips" in r for r in v2.reasons)
 
 
+def test_sprint_gate_position_path_green_open_book():
+    """Positions-Trader (Live-Befund: 25/34 'netto unprofitabel', weil der
+    Gewinn unrealisiert läuft): 1 Round-Trip, realisiert negativ - aber offenes
+    Buch satt im Plus -> Sprint-tauglich über den Positions-Pfad."""
+    from bot.copytrade.analyzer import TraderMetrics, _sprint_score
+    from bot.copytrade.larp import check_sprint
+
+    m = TraderMetrics(address="0xswing", account_value=200_000, days=30)
+    m.round_trips, m.win_rate = 1, 0.0          # Aktiv-Pfad chancenlos
+    m.net_pnl = -800.0                          # realisiert: kleine Verluste
+    m.open_positions, m.open_green_share = 2, 0.85
+    m.open_unrealized = 45_000.0                # der Gewinn LÄUFT noch
+    v = check_sprint(m)
+    assert v.passed, f"grünes offenes Buch muss qualifizieren: {v.reasons}"
+    m.sprint_score = _sprint_score(m)
+    assert m.sprint_score >= 25, "Positions-Pfad muss auch den Score-Boden schaffen"
+
+    m.open_green_share = 0.30                   # rotes Buch -> Richtung falsch
+    assert not check_sprint(m).passed
+    m.open_green_share, m.open_unrealized = 0.85, -60_000.0
+    assert not check_sprint(m).passed, "Gesamt-PnL inkl. unrealisiert muss > 0 sein"
+
+
 def test_sprint_score_ranks_direction_over_profit():
     """Hoher Richtungs-Treffer schlägt hohen Profit: der 65%-Trefferquoten-
     Trader mit kleinen Gewinnen rankt fürs Sprint-Buch über dem ROI-Monster
@@ -220,10 +243,37 @@ def test_analyzer_retries_shorter_window_for_active_traders():
     assert len(info.calls) == 2, "zweiter Abruf mit kürzerem Fenster"
     assert (info.calls[0][1] - info.calls[0][0]) > (info.calls[1][1] - info.calls[1][0])
     assert m.days == 7 and not m.fills_truncated, "7d-Messung zählt"
+    assert m.open_positions == 0 and m.open_green_share == 0.0
 
     info2 = _Info(mk_fills(2000))   # auch 7d voll -> echtes HFT
     m2 = TraderAnalyzer(info2, days=30, throttle_s=0).analyze("0xhft")
     assert m2.fills_truncated, "wer auch 7d sprengt, bleibt 'zu aktiv'"
+
+
+def test_analyzer_parses_open_book_from_user_state():
+    """Offene Positionen kommen aus derselben user_state-Antwort (kein Extra-
+    Call) und speisen den Positions-Pfad des Sprint-Gates."""
+    from bot.copytrade.analyzer import TraderAnalyzer
+
+    class _Info:
+        def user_fills_by_time(self, addr, start, end):
+            return [fill(0, closed=10, start=0)]
+
+        def user_state(self, addr):
+            return {"marginSummary": {"accountValue": "80000"},
+                    "assetPositions": [
+                        {"position": {"szi": "2.0", "positionValue": "60000",
+                                      "unrealizedPnl": "4200"}},
+                        {"position": {"szi": "-1.0", "positionValue": "20000",
+                                      "unrealizedPnl": "-500"}},
+                        {"position": {"szi": "0", "positionValue": "0",
+                                      "unrealizedPnl": "0"}},   # flach: ignorieren
+                    ]}
+
+    m = TraderAnalyzer(_Info(), days=30, throttle_s=0).analyze("0xbook")
+    assert m.open_positions == 2
+    assert abs(m.open_green_share - 0.75) < 1e-9, "60k von 80k im Plus"
+    assert abs(m.open_unrealized - 3700) < 1e-9
 
 
 # ---------- Sentiment ----------

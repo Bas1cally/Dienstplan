@@ -953,13 +953,19 @@ class Autopilot:
         # Wallets (auch Haupt-LARP-K.O.s wie Swing-Trader oder Lucky-Puncher) -
         # Sprint zählt Richtungs-Treffer, nicht Profit-Größe (Nutzer-Vorgabe).
         sprint_ok = []
+        sprint_gate_ko = sprint_score_ko = 0
         if self.cfg.sprint.enabled:
             from .copytrade.larp import check_sprint
 
             larp_cfg = LarpConfig(**(an.larp or {}))
-            sprint_ok = [m for m in report.get("metrics", [])
-                         if check_sprint(m, larp_cfg).passed
-                         and m.sprint_score >= self.cfg.sprint.pool_min_score]
+            pool_min = self.cfg.sprint.pool_min_score
+            for m in report.get("metrics", []):
+                if not check_sprint(m, larp_cfg).passed:
+                    sprint_gate_ko += 1
+                elif m.sprint_score < pool_min:
+                    sprint_score_ko += 1
+                else:
+                    sprint_ok.append(m)
             sprint_ok.sort(key=lambda m: m.sprint_score, reverse=True)
 
         top_scores = "/".join(f"{s:.0f}" for _, s in report.get("scores", [])[:3]) or "-"
@@ -967,8 +973,9 @@ class Autopilot:
             report.get("larp_reasons", {}).items(), key=lambda t: -t[1])[:2]) or "-"
         self._analysis_note = (
             f"{len(addresses)} Kandidaten ({src_note}) → {len(main_ranked)} Haupt"
-            f"(≥{an.min_score:g}) / {len(sprint_ok)} Sprint-tauglich"
-            f"(Richtung≥{self.cfg.sprint.pool_min_score:g})\n"
+            f"(≥{an.min_score:g}) / {len(sprint_ok)} Sprint-tauglich "
+            f"(Gate-K.O. {sprint_gate_ko}, Richtung<{self.cfg.sprint.pool_min_score:g}: "
+            f"{sprint_score_ko})\n"
             f"Aussortiert: {report.get('truncated', 0)} zu aktiv, "
             f"{report.get('larp_ko', 0)} LARP ({larp_top}), "
             f"{report.get('errors', 0)} Fehler | Top-Scores: {top_scores}")

@@ -53,6 +53,12 @@ class TraderMetrics:
     # Leader selbst aus dem Trade holt (wir nehmen +10% und sind raus), sondern
     # wie oft er die Richtung richtig erkennt. Gewichtet Trefferquote statt ROI.
     sprint_score: float = 0.0
+    # Offenes Buch (aus user_state, kein Extra-API-Call): Positions-Trader
+    # realisieren selten - ihr Richtungs-Beweis sitzt UNREALISIERT in offenen
+    # Positionen. Fills-Metriken bestrafen sonst genau "Gewinner laufen lassen".
+    open_positions: int = 0
+    open_green_share: float = 0.0   # wertgewichteter Anteil der Positionen im Plus
+    open_unrealized: float = 0.0
     # userFillsByTime liefert max ~2000 Fills: ist das Fenster voll, sehen wir nur
     # einen Ausschnitt - alle Metriken wären verzerrt (betrifft HFT/MM-Konten).
     fills_truncated: bool = False
@@ -216,16 +222,26 @@ def _sprint_score(m: TraderMetrics) -> float:
     ist nicht wie viel Profit sie machen, sondern dass sie die richtige Richtung
     erkennen'). Sprint nimmt +10% (bei 10x = ~1% Kursbewegung) und ist raus -
     ROI-Größe, Lucky-Punch-Anteil und Drawdown des Leaders sind dafür egal.
-    Zählt: Trefferquote (Richtung), Konsistenz, Stichprobe, Aktivität."""
-    if m.round_trips < 5 or m.win_rate <= 0:
-        return 0.0
-    # Trefferquote: 50% = Münzwurf = 0 Punkte, ab 65% voll ausgereizt
-    wr_part = max(0.0, min((m.win_rate - 0.50) / 0.15, 1.0))
-    consistency_part = m.profitable_day_share
-    sample = min(m.round_trips / 60.0, 1.0)
-    activity = min(m.active_days / max(m.days, 1), 1.0)
-    return round(100 * (0.50 * wr_part + 0.20 * consistency_part
-                        + 0.20 * sample + 0.10 * activity), 1)
+
+    Zwei Wege, Richtung zu beweisen (es zählt der bessere):
+    - Fills-Pfad: Trefferquote geschlossener Trades + Konsistenz/Stichprobe.
+    - Positions-Pfad: grünes offenes Buch. Positions-Trader realisieren selten
+      (Gewinner laufen lassen!) - ihre laufenden Positionen im Plus sind der
+      direkteste Richtungs-Beweis, den es gibt."""
+    fills_part = 0.0
+    if m.round_trips >= 5 and m.win_rate > 0:
+        # Trefferquote: 50% = Münzwurf = 0 Punkte, ab 65% voll ausgereizt
+        wr_part = max(0.0, min((m.win_rate - 0.50) / 0.15, 1.0))
+        fills_part = 100 * (0.50 * wr_part + 0.20 * m.profitable_day_share
+                            + 0.20 * min(m.round_trips / 60.0, 1.0)
+                            + 0.10 * min(m.active_days / max(m.days, 1), 1.0))
+    pos_part = 0.0
+    if m.open_positions > 0:
+        # 50% grün = Münzwurf = 0; Breite (mehrere grüne Coins) gibt Bonus
+        green_part = max(0.0, min((m.open_green_share - 0.5) / 0.5, 1.0))
+        breadth = min(m.open_positions / 4.0, 1.0)
+        pos_part = 100 * green_part * (0.70 + 0.30 * breadth)
+    return round(max(fills_part, pos_part), 1)
 
 
 class TraderAnalyzer:
@@ -274,6 +290,28 @@ class TraderAnalyzer:
         account_value = float(state["marginSummary"]["accountValue"])
         m = analyze_fills(address, fills, account_value, days)
         m.fills_truncated = len(fills or []) >= 2000
+        # Offenes Buch aus derselben user_state-Antwort (kein Extra-Call):
+        # Richtungs-Beweis für Positions-Trader, deren Gewinn unrealisiert läuft.
+        total_val = green_val = unrealized = 0.0
+        n_open = 0
+        for p in state.get("assetPositions", []):
+            pos = p.get("position", {})
+            try:
+                if float(pos.get("szi", 0) or 0) == 0:
+                    continue
+                val = abs(float(pos.get("positionValue", 0) or 0))
+                upnl = float(pos.get("unrealizedPnl", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            n_open += 1
+            total_val += val
+            unrealized += upnl
+            if upnl > 0:
+                green_val += val
+        m.open_positions = n_open
+        m.open_unrealized = unrealized
+        m.open_green_share = green_val / total_val if total_val > 0 else 0.0
+        m.sprint_score = _sprint_score(m)   # mit Positions-Pfad neu bewerten
         return m
 
     def rank(self, addresses: list[str], min_score: float, larp=None,

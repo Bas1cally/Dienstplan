@@ -86,30 +86,54 @@ def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict
     zählt, dass der Leader die Richtung erkennt - nicht, wie viel Profit er
     selbst aus dem Trade holt; Sprint nimmt +10% und ist raus).
 
-    BEHALTEN werden die Anti-Zufalls-Gates (Stichprobe, Aktivität, Scalper-
-    Boden - unter ~30min Haltedauer erreicht kein Ritt die nötige ~1%-Bewegung)
-    plus neu die Trefferquote. GESTRICHEN sind die Profit-Größen-Gates des
-    Hauptbuchs (Lucky-Punch-Anteil, Wochen-Profit-Konsistenz, Drawdown,
-    Swing-Cap, Netto-PnL): für einen +10%-und-raus-Ritt irrelevant, und
+    ZWEI Qualifikations-Pfade - Richtung kann man auf zwei Arten beweisen:
+
+    A) Aktiv-Pfad (genug geschlossene Trades): Trefferquote >= 52%, halbierte
+       Stichproben-Hürde, Aktivität, Scalper-Boden (unter ~30min Haltedauer
+       erreicht kein Ritt die nötige ~1%-Bewegung).
+    B) Positions-Pfad (Live-Befund: 25 von 34 LARP-Toten waren 'netto
+       unprofitabel', weil Positions-Trader ihren Gewinn UNREALISIERT in
+       offenen Positionen halten - Fills-Metriken bestrafen 'Gewinner laufen
+       lassen'): offenes Buch mehrheitlich im Plus (>=60% wertgewichtet) UND
+       Gesamt-PnL des Fensters inkl. unrealisiert positiv.
+
+    GESTRICHEN bleiben die Profit-Größen-Gates des Hauptbuchs (Lucky-Punch,
+    Wochen-Konsistenz, Drawdown, Swing-Cap): für +10%-und-raus irrelevant.
     Strikes/Bans räumen schwache Leader ohnehin nach 2 Verlust-Ritten ab."""
     c = cfg or LarpConfig()
-    reasons: list[str] = []
 
-    if m.round_trips < c.min_round_trips:
-        reasons.append(f"nur {m.round_trips} Round-Trips (< {c.min_round_trips})")
+    # --- Pfad A: aktiver Trader ---
+    a: list[str] = []
+    min_trips = max(10, c.min_round_trips // 2)
+    if m.round_trips < min_trips:
+        a.append(f"nur {m.round_trips} Round-Trips (< {min_trips})")
     # Bei verkürztem Messfenster (7d-Retry sehr aktiver Trader) anteilig fordern
     min_days = min(c.min_active_days, max(1, int(m.days * 0.6)))
     if m.active_days < min_days:
-        reasons.append(f"nur {m.active_days} aktive Tage (< {min_days})")
+        a.append(f"nur {m.active_days} aktive Tage (< {min_days})")
     if 0 < m.median_holding_minutes < c.min_median_holding_minutes:
-        reasons.append(
+        a.append(
             f"Scalper: mediane Haltedauer {m.median_holding_minutes:.0f}min "
             f"(< {c.min_median_holding_minutes:.0f}min) - zu kurz für ~1% Bewegung"
         )
     if m.win_rate < SPRINT_MIN_WIN_RATE:
-        reasons.append(
+        a.append(
             f"Trefferquote {m.win_rate:.0%} (< {SPRINT_MIN_WIN_RATE:.0%}) - "
             f"erkennt die Richtung nicht besser als der Münzwurf"
         )
+    if not a:
+        return LarpVerdict(passed=True)
 
-    return LarpVerdict(passed=not reasons, reasons=reasons)
+    # --- Pfad B: Positions-Trader mit grünem offenem Buch ---
+    b: list[str] = []
+    if m.open_positions < 1:
+        b.append("keine offenen Positionen")
+    if m.open_green_share < 0.60:
+        b.append(f"offenes Buch nur {m.open_green_share:.0%} im Plus (< 60%)")
+    if m.net_pnl + m.open_unrealized <= 0:
+        b.append("Fenster-PnL inkl. unrealisiert <= 0")
+    if not b:
+        return LarpVerdict(passed=True)
+
+    return LarpVerdict(passed=False, reasons=[
+        "Aktiv: " + "; ".join(a), "Positions: " + "; ".join(b)])
