@@ -111,6 +111,51 @@ def test_tracked_addresses_sprint_off_stays_narrow():
     assert ap._tracked_addresses() == ["0xa", "0xb"]
 
 
+def test_force_analysis_flag_triggers_once():
+    """/analyze setzt nur ein Flag; der Loop-Thread konsumiert es EINMAL -
+    so gibt es keine parallele Analyse aus dem Telegram-Thread (Race)."""
+    import time as _t
+
+    ap = _autopilot()
+    calls = []
+    ap._reanalyze = lambda: calls.append(1)
+    ap._last_analysis = _t.time()   # Zeit-Trigger aus - nur das Flag zählt
+    ap._maybe_reanalyze()
+    assert calls == [], "ohne Flag und ohne Fälligkeit keine Analyse"
+    ap._force_analysis = True
+    ap._maybe_reanalyze()
+    assert calls == [1], "Flag löst genau eine Analyse aus"
+    assert ap._force_analysis is False, "Flag wird konsumiert"
+    ap._maybe_reanalyze()
+    assert calls == [1], "kein Dauerfeuer nach der erzwungenen Analyse"
+
+
+def test_cmd_analyze_sets_flag_only_when_running():
+    ap = _autopilot()
+    assert "läuft nicht" in ap._cmd_analyze(), "ohne laufenden Autopilot nur Hinweis"
+    assert ap._force_analysis is False
+
+    class _T:
+        def is_alive(self): return True
+
+    ap._thread = _T()   # running-Property simulieren
+    out = ap._cmd_analyze()
+    assert ap._force_analysis is True and "angestoßen" in out
+
+
+def test_status_shows_analysis_funnel_and_pool():
+    ap = _autopilot()
+    import time as _t
+
+    ap._last_analysis = _t.time() - 3600   # vor 1h
+    ap._analysis_note = "50 Kandidaten → 1 Haupt(≥35) / 9 Pool(≥25)"
+    ap.leaders = [leader("0xa")]
+    ap.sprint_leaders = [{"address": a} for a in ("0xa", "0xb", "0xc")]
+    s = ap._cmd_status()
+    assert "vor 1.0h" in s and "Kandidaten" in s
+    assert "Pool: 3" in s, "Sprint-Pool-Größe sichtbar"
+
+
 def test_setup_retries_until_success():
     """Setup-Fehler (z.B. 429 beim Hochfahren) dürfen den Autopilot nie endgültig
     töten: er probiert mit Backoff weiter und läuft beim nächsten Erfolg los."""

@@ -141,6 +141,8 @@ class Autopilot:
         self._status: dict = {"state": "stopped"}
         self._lock = threading.Lock()
         self._last_analysis = 0.0
+        self._force_analysis = False   # /analyze: nächster Loop-Tick analysiert sofort
+        self._analysis_note = ""       # Trichter der letzten Analyse (für /status)
         self.leaders: list[dict] = []
         # Eigener, breiterer Leader-Pool nur fürs Sprint-Buch (siehe sprint.pool_size).
         # Obermenge der Haupt-Leader; das Hauptbuch bleibt bei self.leaders.
@@ -195,6 +197,7 @@ class Autopilot:
             "/lighter": self._cmd_lighter,
             "/cmm": self._cmd_cmm,
             "/setcmm": self._cmd_setcmm,
+            "/analyze": self._cmd_analyze,
             "/help": self._cmd_help,
         })
 
@@ -211,6 +214,7 @@ class Autopilot:
                 "/lighter &lt;ref&gt; – Lighter-Konto prüfen (Verifikation)\n"
                 "/setcmm &lt;token&gt; – HyperTracker-API-Token setzen\n"
                 "/cmm – HyperTracker-Leaderboard live proben\n"
+                "/analyze – Leader-Analyse sofort anstoßen\n"
                 "/stop /start /resume – Autopilot/Halt steuern")
 
     def _cmd_status(self) -> str:
@@ -219,11 +223,20 @@ class Autopilot:
         day_t = int(time.time()) - 86_400
         orders = sum(1 for e in self.journal.tail(2000)
                      if e.get("kind") == "order" and e.get("t", 0) >= day_t)
+        age_h = (time.time() - self._last_analysis) / 3600 if self._last_analysis else None
+        next_h = max(0.0, self.cfg.autopilot.reanalyze_hours - age_h) if age_h is not None else None
+        analysis = (f"Analyse: vor {age_h:.1f}h (nächste in {next_h:.1f}h)"
+                    if age_h is not None else "Analyse: läuft noch/nie")
+        if self._analysis_note:
+            analysis += f"\n{self._analysis_note}"
         return (f"<b>Status</b>: {s.get('state', '?')}\n"
                 f"Equity: {f'{eq:,.2f}' if eq else 'n/a'}\n"
                 f"Orders (24h): {orders}\n"
                 f"Risiko: {self.guard.last_level.name if self.guard else 'NORMAL'}\n"
-                f"Leader: {len(self.leaders)} | WS: {'an' if self.feed and self.feed.connected else 'aus'}")
+                f"Leader: {len(self.leaders)} | Pool: {len(self.sprint_leaders)} | "
+                f"WS: {'an' if self.feed and self.feed.connected else 'aus'}\n"
+                f"{analysis}\n"
+                f"<i>/analyze = Analyse sofort anstoßen</i>")
 
     def _cmd_report(self) -> str:
         from .report import summarize
@@ -479,6 +492,17 @@ class Autopilot:
 
         threading.Thread(target=run, daemon=True, name="cmm-probe").start()
         return f"🔎 CMM-Probe läuft ({period}) … Ergebnis kommt gleich als Nachricht."
+
+    def _cmd_analyze(self) -> str:
+        """Leader-Analyse sofort anstoßen statt auf den 6h-Takt zu warten. Läuft
+        thread-sicher im Loop (nächster Tick), nicht im Telegram-Thread - zwei
+        gleichzeitige Analysen würden sich sonst die Leader-Liste zerschreiben."""
+        if not self.running:
+            return "Autopilot läuft nicht - erst /start."
+        self._force_analysis = True
+        return ("🔬 Analyse angestoßen - läuft im nächsten Tick (dauert ~1-2 Min "
+                "bei vielen Kandidaten).\nDanach: /status zeigt den Trichter, "
+                "/leaders die Auswahl, /sprint den Pool.")
 
     def _cmd_update(self) -> str:
         """Zieht das neueste Update (git pull) und startet neu - per Telegram vom
@@ -836,7 +860,8 @@ class Autopilot:
 
     def _maybe_reanalyze(self) -> None:
         hours = self.cfg.autopilot.reanalyze_hours
-        if time.time() - self._last_analysis >= hours * 3600:
+        if self._force_analysis or time.time() - self._last_analysis >= hours * 3600:
+            self._force_analysis = False   # /analyze: einmalig, im Loop-Thread (kein Race)
             self._reanalyze()
 
     def _discover_candidates(self, an) -> list[str]:
@@ -868,19 +893,30 @@ class Autopilot:
     def _reanalyze(self) -> None:
         log.info("Starte Leaderboard-Analyse (Funnel + LARP-Filter) ...")
         an = self.cfg.copytrade.analysis
+        # Weicher Boden NUR für den Sprint-Pool: die Analyse rankt ab pool_min_score,
+        # das Hauptbuch wählt weiter strikt ab an.min_score (rotate_leaders floort
+        # NEUE Kandidaten nicht selbst - deshalb wird hier vorgefiltert).
+        floor = an.min_score
+        if self.cfg.sprint.enabled:
+            floor = min(floor, self.cfg.sprint.pool_min_score)
         try:
             addresses = self._discover_candidates(an)
             info = Info(api_url(testnet=False), skip_ws=True)
             analyzer = TraderAnalyzer(info, days=an.days)
             larp = LarpFilter(LarpConfig(**(an.larp or {})))
-            ranked = analyzer.rank(addresses, min_score=an.min_score, larp=larp)
+            ranked = analyzer.rank(addresses, min_score=floor, larp=larp)
         except Exception:
             log.exception("Analyse fehlgeschlagen - behalte bisherige Leader")
             self._last_analysis = time.time()
             return
 
+        main_ranked = [m for m in ranked if m.score >= an.min_score]
+        self._analysis_note = (f"{len(addresses)} Kandidaten → {len(main_ranked)} Haupt"
+                               f"(≥{an.min_score:g}) / {len(ranked)} Pool(≥{floor:g})")
+        log.info("Analyse-Trichter: %s", self._analysis_note)
+
         new_leaders = rotate_leaders(
-            self.leaders, ranked, self.cfg.copytrade.max_leaders, self.cfg.autopilot.min_keep_score,
+            self.leaders, main_ranked, self.cfg.copytrade.max_leaders, self.cfg.autopilot.min_keep_score,
         )
         if not new_leaders:
             log.warning("Analyse fand keine geeigneten Leader - behalte bisherige")
@@ -900,17 +936,21 @@ class Autopilot:
                 )
             self.leaders = new_leaders
             Path(self.cfg.copytrade.leaders_file).write_text(json.dumps(new_leaders, indent=2))
+            if self.copier:
+                self.copier.weights = {l["address"]: float(l["weight"]) for l in new_leaders}
+            if self.feed:
+                self.feed.resubscribe([l["address"] for l in new_leaders])
+        # Sprint-Pool UNABHÄNGIG vom Haupt-Rotations-Ausgang aktualisieren - sonst
+        # bleibt der Pool bei einer leeren Haupt-Auswahl auf dem alten Stand hängen.
+        if ranked:
             self.sprint_leaders = self._build_sprint_pool(ranked)
             try:
                 (RUNTIME / self._SPRINT_POOL_FILE).write_text(
                     json.dumps(self.sprint_leaders, indent=2))
             except OSError:
                 log.debug("sprint_leaders.json nicht schreibbar", exc_info=True)
-            if self.copier:
-                self.copier.weights = {l["address"]: float(l["weight"]) for l in new_leaders}
-                self.copier.tracker.addresses = self._tracked_addresses()
-            if self.feed:
-                self.feed.resubscribe([l["address"] for l in new_leaders])
+        if self.copier:
+            self.copier.tracker.addresses = self._tracked_addresses()
         self._last_analysis = time.time()
 
     # ---------- Status für das Frontend ----------
