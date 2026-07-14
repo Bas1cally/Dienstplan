@@ -383,6 +383,7 @@ class Autopilot:
             pos_lines = "\n".join(
                 f"  {'LONG' if p['size'] > 0 else 'SHORT'} {p['coin']}: "
                 f"{abs(p['size']):.4f} @ {p['entry']:.4f} (PnL {p['unrealized_pnl']:+,.2f} $)"
+                + (f" — <code>{p['leader']}…</code>" if p.get("leader") else "")
                 for p in s["positions"])
             pos_block = f"Positionen:\n{pos_lines}"
         else:

@@ -236,8 +236,10 @@ class SprintBook:
                 self._settle_one(coin, prices, "leader_exit")
             elif (leader_sz > 0) != (our_size > 0):
                 # Flip = neue Richtung, neue Überzeugung -> neuer Mess-Ritt
+                # (das Settle hat den Leader-Slot gerade freigegeben)
                 self._settle_one(coin, prices, "leader_flip")
-                self._enter(coin, snap, prices, parallel=True)
+                if self._leader_rides(snap.address) < self.cfg.max_rides_per_leader:
+                    self._enter(coin, snap, prices, parallel=True)
             elif abs(leader_sz) <= (1 - self.cfg.partial_exit_frac) * entry_sz:
                 self._settle_one(coin, prices, "leader_scaleout")
         # 4. Frische Signale ALLER Leader - jeder darf (s)einen Ritt eröffnen,
@@ -264,6 +266,12 @@ class SprintBook:
                 if opened:
                     self._reject(coin, snap.address, "korb_begrenzt")
                     continue
+                if self._leader_rides(snap.address) >= self.cfg.max_rides_per_leader:
+                    # 1 Position PRO TRADER: sonst füllt ein aktiver Leader über
+                    # mehrere Ticks alle Slots und 7 korrelierte Wetten sähen
+                    # aus wie 7 unabhängige Messpunkte (Nutzer-Befund)
+                    self._reject(coin, snap.address, "leader_belegt")
+                    continue
                 if coin in self.paper.sizes():
                     self._reject(coin, snap.address, "coin_belegt")
                     continue
@@ -273,6 +281,10 @@ class SprintBook:
                 before = len(self.paper.sizes())
                 self._enter(coin, snap, prices, parallel=True)
                 opened = len(self.paper.sizes()) > before
+
+    def _leader_rides(self, addr: str) -> int:
+        key = addr.lower()
+        return sum(1 for a in self.ride_leaders.values() if a.lower() == key)
 
     def _ride_pnl(self, coin: str, prices: dict[str, float]) -> float | None:
         """PnL eines Mess-Ritts auf seiner eigenen 1000$-Basis, konservativ
@@ -592,7 +604,11 @@ class SprintBook:
         positions = self.paper.position_rows(prices)
         if self.cfg.parallel_rides:
             # Mess-Modus: je Ritt eigene 1000$-Basis - Equity/PnL sind die SUMME
-            # der Ritt-PnLs auf equity-Basis, nicht das (driftende) Sammelbuch
+            # der Ritt-PnLs auf equity-Basis, nicht das (driftende) Sammelbuch.
+            # Jede Zeile bekommt IHREN Leader - sonst ist nicht zuordenbar, ob
+            # 7 Ritte von 7 Tradern oder von einem stammen (Nutzer-Befund).
+            for p in positions:
+                p["leader"] = self.ride_leaders.get(p["coin"], "")[:10]
             ride_pnls = sum(p["unrealized_pnl"] for p in positions)
             eq = self.cfg.equity + ride_pnls
         else:

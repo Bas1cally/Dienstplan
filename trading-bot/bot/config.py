@@ -351,6 +351,10 @@ class SprintConfig:
     # POOL -> EIN GUTER RITT -> +10% -> RAUS, eine Position.
     parallel_rides: bool = False
     max_rides: int = 8            # Deckel für gleichzeitige Mess-Ritte
+    # 1 Position PRO TRADER (Nutzer): ohne diesen Deckel könnte EIN Leader über
+    # mehrere Ticks alle Ritt-Slots füllen - 7 korrelierte Wetten eines Traders
+    # sähen in der Messung wie 7 unabhängige Datenpunkte aus.
+    max_rides_per_leader: int = 1
     # Krypto-only: Builder-DEX-Assets (Aktien/Gold, Coins mit ':' wie
     # 'xyz:INTC') sind außerhalb der Börsenzeiten reine Spekulation auf HL -
     # stören die Messlatte für halbwegs stabile Trader.

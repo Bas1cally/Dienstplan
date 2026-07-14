@@ -389,6 +389,45 @@ def test_parallel_coin_belegt_and_max_rides():
         assert b2.stats(P)["scan"]["rejected"].get("coin_belegt") == 1
 
 
+def test_parallel_one_ride_per_leader_across_ticks():
+    """Nutzer-Befund: '7 Ritte laufen - ist das ein Leader oder 8?' Ohne Deckel
+    füllt EIN aktiver Leader über mehrere Ticks alle Slots - 7 korrelierte
+    Wetten sähen aus wie 7 unabhängige Messpunkte. Jetzt: 1 Position pro Trader;
+    erst wenn sein Ritt beendet ist, darf er den nächsten eröffnen."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, parallel_rides=True)
+        b.tick(LED, [snap("0xbest", 50_000)], P)                    # Baseline
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)           # Ritt 1
+        assert list(b.paper.sizes()) == ["BTC"]
+        # Nächster Tick: DERSELBE Leader eröffnet frisch ETH -> abgelehnt
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500, ETH=300)], P)
+        assert "ETH" not in b.paper.sizes(), "1 Position pro Trader"
+        assert b.stats(P)["scan"]["rejected"].get("leader_belegt") == 1
+        # Leader steigt aus BTC aus -> Ritt 1 verbucht, Slot frei
+        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], P)
+        assert "BTC" not in b.paper.sizes()
+        # ETH ist jetzt sein LAUFENDER Bestand (Baseline kennt ihn) - erst ein
+        # NEUES Signal öffnet den nächsten Ritt
+        b.tick(LED, [snap("0xbest", 50_000, ETH=300, SOL=200)],
+               {"BTC": 100.0, "ETH": 100.0, "SOL": 100.0})
+        assert "SOL" in b.paper.sizes(), "Slot nach Ritt-Ende wieder frei"
+        assert b.ride_leaders == {"SOL": "0xbest"}
+
+
+def test_parallel_stats_show_leader_per_ride():
+    """Jede Positions-Zeile trägt ihren Leader - sonst ist die Herkunft der
+    Ritte vom Handy aus nicht zuordenbar."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, parallel_rides=True)
+        two = leaders(("0xbest", 90), ("0xsecond", 70))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000, BTC=500),
+                     snap("0xsecond", 50_000, ETH=300)], P)
+        rows = {p["coin"]: p for p in b.stats(P)["positions"]}
+        assert rows["BTC"]["leader"] == "0xbest"
+        assert rows["ETH"]["leader"] == "0xsecond"
+
+
 def test_parallel_manual_close_settles_each_ride():
     with tempfile.TemporaryDirectory() as tmp:
         b = book(tmp, parallel_rides=True)
