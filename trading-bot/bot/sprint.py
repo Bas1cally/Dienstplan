@@ -143,7 +143,7 @@ class SprintBook:
             if prev is None:
                 continue  # erster Blick: _refresh_baselines legt die Baseline an
             book = self._book_of(snap)
-            fresh = [c for c, sz in book.items() if sz != 0 and prev.get(c, 0.0) == 0.0]
+            fresh = self._fresh_coins(book, prev)
             if not fresh:
                 continue
             self._note_fresh(len(fresh))
@@ -157,6 +157,28 @@ class SprintBook:
                 self._enter(coin, snap, prices)
             if self.paper.sizes():
                 return  # eingestiegen: dieser Leader ist der Ritt
+
+    def _fresh_coins(self, book: dict[str, float], prev: dict[str, float]) -> list[str]:
+        """Frische Richtungs-Signale eines Leaders (nur im FLACH-Scan genutzt):
+        - klassisch: Übergang 0 -> Position (neuer Trade)
+        - Aufstockung >= add_signal_frac: Positions-Trader eröffnen selten neu,
+          ihr Überzeugungs-Moment ist das Vergrößern (Live-Befund: 8/8 Feed-
+          Abdeckung, aber 0 frische Signale an einem vollen Handelstag - der
+          Pool hält und stockt auf, statt neu zu eröffnen)
+        - Richtungs-Flip im Bestand (Long -> Short): stärkstes Signal überhaupt."""
+        out = []
+        add_frac = self.cfg.add_signal_frac
+        for c, sz in book.items():
+            if sz == 0:
+                continue
+            prev_sz = prev.get(c, 0.0)
+            if prev_sz == 0.0:
+                out.append(c)                                   # neuer Trade
+            elif add_frac > 0 and (sz > 0) != (prev_sz > 0):
+                out.append(c)                                   # Flip im Bestand
+            elif add_frac > 0 and abs(sz) >= (1 + add_frac) * abs(prev_sz):
+                out.append(c)                                   # deutliche Aufstockung
+        return out
 
     # ---------- IM RITT: halten, nur dem Ride-Leader folgen ----------
 

@@ -170,6 +170,12 @@ sprint:
   bust_frac: 0.05           # Liquidations-Modell: unter 5% Rest ist der Zyklus geplatzt
   rebalance_threshold: 0.02
   partial_exit_frac: 0.75   # Leader baut >=75% ab -> wir gehen mit raus (Scale-out)
+  add_signal_frac: 0.5      # Aufstockung >=50% oder Richtungs-Flip im Bestand zählt
+                            # als frisches Signal (nur im FLACH-Scan). Grund: der
+                            # Richtungs-Pool besteht aus Positions-Tradern - die
+                            # eröffnen selten neu (Live: voller Handelstag, 0 frische
+                            # Signale bei 8/8 Feed-Abdeckung), ihr Überzeugungs-
+                            # Moment ist das AUFSTOCKEN. 0 = aus (nur 0->Position).
   strike_ban: 2             # 2 Verlust-Ritte -> Leader fürs Sprint-Buch gesperrt
   exclude_coins: [BTC]      # BTC = Beta statt Leader-Alpha; bei fixem +10%-Ziel
                             # (10x ~1% Move) stoppt ein BTC-Scalper oft mehrfach
@@ -212,9 +218,11 @@ coinmarketman:
   max_turnover: 120         # Monatsvolumen/Equity-Deckel (Day-Trader ~5-100x)
   max_exposure: 6           # |offenes Notional / Equity| (Hebel-Deckel)
   max_equity: 5000000       # darüber fast nur Fonds/MMs (Slippage-Realität)
-  pages: 3                  # so viele Board-Seiten je Scan durchblättern (je 1
+  pages: 5                  # so viele Board-Seiten je Scan durchblättern (je 1
                             # Request), weil die gefilterte Spitze Platz macht.
-                            # Budget: 3 Seiten x 4 Analysen/Tag = 12 von 100/Tag
+                            # 5 Seiten = 500 Kandidaten roh -> mehr Sprint-taugliche
+                            # (zuletzt nur 8 von 300). Budget: 5 x ~5 Analysen/Tag
+                            # (inkl. /analyze) = ~25 von 100/Tag - reichlich Puffer.
 
 # === Strategie-Labor: eigene Signale parallel im Paper-Schatten messen ===
 # Der Copy-Bot folgt fremden Tradern (kein originäres Alpha). Hier laufen EIGENE

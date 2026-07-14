@@ -316,6 +316,39 @@ def test_ride_leader_rotated_out_closes():
         assert abs(b.paper.equity(P) - 1000.0) < 1e-6, "Zyklus-Equity resettet"
 
 
+def test_add_signal_on_significant_increase():
+    """Positions-Trader eröffnen selten neu - Aufstockung >= add_signal_frac
+    ist ihr Überzeugungs-Moment und zählt als frisches Signal (nur FLACH-Scan)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)   # add_signal_frac default 0.5
+        b.tick(LED, [snap("0xbest", 50_000, BTC=400)], P)   # Baseline: hält 400
+        assert b.paper.sizes() == {}, "Bestand allein ist kein Signal"
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # +25%: zu wenig
+        assert b.paper.sizes() == {}, "kleine Aufstockung ist Rauschen"
+        b.tick(LED, [snap("0xbest", 50_000, BTC=800)], P)   # +60% vs Baseline 500
+        assert b.paper.sizes().get("BTC", 0) > 0, "deutliche Aufstockung = Einstieg"
+
+
+def test_add_signal_on_direction_flip_in_holdings():
+    """Leader dreht eine BESTEHENDE Position (Long -> Short): stärkstes
+    Richtungs-Signal - wir steigen in die neue Richtung ein."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], P)    # Baseline: long 300
+        b.tick(LED, [snap("0xbest", 50_000, ETH=-250)], P)   # Flip auf short
+        assert b.paper.sizes().get("ETH", 0) < 0, "Flip im Bestand = Short-Einstieg"
+
+
+def test_add_signal_disabled_keeps_strict_fresh_only():
+    """add_signal_frac 0 = altes Verhalten: NUR 0->Position zählt."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, add_signal_frac=0)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=400)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=900)], P)    # +125% Aufstockung
+        b.tick(LED, [snap("0xbest", 50_000, BTC=-900)], P)   # sogar Flip
+        assert b.paper.sizes() == {}, "aus = nur klassische 0->Position-Signale"
+
+
 def test_scan_telemetry_makes_rejections_visible():
     """Audit-Befund: verworfene Signale verschwanden spurlos - 'kein Signal kam'
     und 'Signal kam, wurde verworfen' waren von außen identisch. Jetzt zählt

@@ -356,6 +356,12 @@ class SprintConfig:
     # Teil-Exit-Folge: hat der Leader >= partial_exit_frac seiner Einstiegsgröße
     # abgebaut, steigen wir aus (Scalper skalieren gestaffelt raus).
     partial_exit_frac: float = 0.75
+    # Aufstockungs-Signal (nur im FLACH-Scan): Positions-Trader eröffnen selten
+    # neu - ihr Überzeugungs-Moment ist das AUFSTOCKEN. Vergrößert ein Leader
+    # eine bestehende Position um >= add_signal_frac (0.5 = +50%), gilt das als
+    # frisches Richtungs-Signal; ebenso ein Richtungs-FLIP (Long->Short) im
+    # Bestand. 0 = aus (dann zählt nur der klassische 0->Position-Übergang).
+    add_signal_frac: float = 0.5
     # LARP-Strikes: Verlust-Ritt -> Strike +1, Gewinn-Ritt -> Strike -1 (min 0).
     # Bei strike_ban Strikes wird der Leader fürs Sprint-Buch gesperrt.
     strike_ban: int = 2
