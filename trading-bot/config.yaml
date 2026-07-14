@@ -154,6 +154,11 @@ sprint:
   equity: 1000
   leverage: 10
   target_profit: 100
+  max_positions: 1          # EIN Ritt = EINE Position. Live-Vorfall: Leader
+                            # eröffnete einen 7-Coin-Aktien-Korb, der Bot fraß
+                            # alle 7 und verschmierte die 10x-Kapazität. Jetzt
+                            # gewinnt das stärkste Signal (|exposure| des
+                            # Leaders), der Rest wird sichtbar verworfen.
   pool_size: 20             # Sprint scannt einen breiteren Leader-Pool als das
                             # Hauptbuch (max_leaders: 6). Sprint hält immer nur EINE
                             # Position -> mehr Quellen = weniger Leerlauf, ohne die

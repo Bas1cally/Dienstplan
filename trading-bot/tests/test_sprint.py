@@ -316,6 +316,45 @@ def test_ride_leader_rotated_out_closes():
         assert abs(b.paper.equity(P) - 1000.0) < 1e-6, "Zyklus-Equity resettet"
 
 
+def test_basket_open_takes_only_strongest_signal():
+    """Live-Vorfall: Leader eröffnet 7 Coins auf einmal (Aktien-Korb), Bot fraß
+    alle 7. Jetzt: EIN Ritt = EINE Position - das Signal mit der größten
+    relativen Überzeugung (|exposure|) gewinnt, der Rest wird sichtbar verworfen."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        prices = {"BTC": 100.0, "ETH": 100.0, "SOL": 100.0}
+        b.tick(LED, [snap("0xbest", 50_000)], prices)                   # Baseline
+        # Korb: ETH ist mit Abstand die größte Position (stärkste Überzeugung)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=150, ETH=600, SOL=90)], prices)
+        sizes = b.paper.sizes()
+        assert list(sizes) == ["ETH"], f"nur das stärkste Signal wird geritten: {sizes}"
+        assert b.paper.trades == 1
+        sc = b.stats(prices)["scan"]
+        assert sc["fresh_seen"] == 3, "alle 3 Korb-Signale wurden GESEHEN"
+        assert sc["rejected"].get("korb_begrenzt") == 2, "Rest sichtbar verworfen"
+
+
+def test_no_extra_coin_added_mid_ride():
+    """Auch mitten im Ritt gilt: eine Position. Frische Zusatz-Coins desselben
+    Leaders werden verworfen statt aufgesattelt."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)   # reitet BTC
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500, ETH=400)], P)   # ETH frisch
+        assert "ETH" not in b.paper.sizes(), "kein Zusatz-Coin im Ritt"
+        assert b.stats(P)["scan"]["rejected"].get("korb_begrenzt") == 1
+
+
+def test_excluded_coin_does_not_block_the_slot():
+    """Der stärkste Korb-Coin ist ausgeschlossen (BTC) -> der nächststärkste
+    rückt nach, der Slot verfällt nicht."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = SprintConfig()   # BTC default ausgeschlossen
+        b = SprintBook(cfg, FEE, runtime_dir=Path(tmp))
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=800, ETH=300)], P)   # BTC stärker
+        assert list(b.paper.sizes()) == ["ETH"], "ETH rückt nach, BTC blockt nicht"
+
+
 def test_add_signal_on_significant_increase():
     """Positions-Trader eröffnen selten neu - Aufstockung >= add_signal_frac
     ist ihr Überzeugungs-Moment und zählt als frisches Signal (nur FLACH-Scan)."""

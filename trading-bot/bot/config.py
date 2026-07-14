@@ -338,6 +338,12 @@ class SprintConfig:
     equity: float = 1000.0          # frisches Kapital je Zyklus
     leverage: float = 10.0          # Exposure-Multiplikator auf den besten Leader
     target_profit: float = 100.0    # Take-Profit je Zyklus (+10%)
+    # EIN Ritt = EINE Position (Nutzer-Vorgabe). Live-Vorfall: ein Leader hat
+    # einen 7-Coin-Aktien-Korb auf einmal eröffnet und der Bot hat ALLE 7
+    # gefressen - die 10x-Kapazität auf 7 Coins verschmiert statt EIN starkes
+    # Signal zu reiten. Bei Körben gewinnt das Signal mit der größten relativen
+    # Überzeugung des Leaders (|exposure|), der Rest wird sichtbar verworfen.
+    max_positions: int = 1
     bust_frac: float = 0.05         # Liquidations-Modell: darunter ist der Zyklus geplatzt
     # Eigener, breiterer Leader-Pool als das Hauptbuch: Sprint hält immer nur EINE
     # Position und steigt beim bestbewerteten Leader mit frischem Signal ein. Mehr

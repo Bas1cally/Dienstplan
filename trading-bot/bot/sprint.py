@@ -153,7 +153,16 @@ class SprintBook:
                 for coin in fresh:
                     self._reject(coin, snap.address, "leader_gesperrt")
                 continue
+            # EIN Ritt = EINE Position: bei Korb-Eröffnungen (Leader macht z.B.
+            # 7 Aktien-Shorts auf einmal auf) reiten wir nur das STÄRKSTE Signal
+            # (größte relative Überzeugung), statt die 10x-Kapazität auf den
+            # ganzen Korb zu verschmieren. Abgelehnte Coins füllen den Slot
+            # nicht (z.B. BTC-Ausschluss) - der nächststärkste rückt nach.
+            fresh.sort(key=lambda c: abs(snap.exposure(c)), reverse=True)
             for coin in fresh:
+                if len(self.paper.sizes()) >= self.cfg.max_positions:
+                    self._reject(coin, snap.address, "korb_begrenzt")
+                    continue
                 self._enter(coin, snap, prices)
             if self.paper.sizes():
                 return  # eingestiegen: dieser Leader ist der Ritt
@@ -222,6 +231,10 @@ class SprintBook:
             if fresh:
                 self._note_fresh(len(fresh))
             for coin in fresh:
+                if len(self.paper.sizes()) >= self.cfg.max_positions:
+                    # Ein Ritt = eine Position: keine Zusatz-Coins mitten im Ritt
+                    self._reject(coin, snap.address, "korb_begrenzt")
+                    continue
                 self._enter(coin, snap, prices)
 
         if not self.paper.sizes():
