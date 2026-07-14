@@ -326,6 +326,39 @@ def test_discover_candidates_union_and_fallback():
         cmm.os.environ.update(orig_env)
 
 
+def test_discover_hl_not_crowded_out_and_current_leaders_kept():
+    """Audit-Befund (Live: '50 Kandidaten (CMM 96 + HL 38)' -> alle 50 Plätze an
+    CMM): CMM-Masse verdrängte die HL-Day-Trader (= die Häufig-Öffner, Sprints
+    Signalquelle) komplett aus dem top_n-Deckel, und der Bestands-Leader wurde
+    gar nicht mehr analysiert (rotate_leaders wirft Verschwundene raus).
+    Jetzt: Bestands-Leader zuerst, dann Interleave beider Quellen."""
+    import bot.autopilot as ap_mod
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+
+    ap = Autopilot(load_config())
+    ap.cfg.coinmarketman.enabled = True
+    ap.cfg.coinmarketman.pages = 1
+    ap.leaders = [{"address": "0xcurrent", "weight": 1.0, "score": 50}]
+    an = ap.cfg.copytrade.analysis
+
+    class _C:
+        def __init__(self, a): self.address = a
+
+    rows = [{**_COPYABLE, "address": f"0x{i:040x}"} for i in range(1, 101)]
+    orig_hl = ap_mod.fetch_candidates
+    ap_mod.fetch_candidates = lambda **kw: [_C("0xHL1"), _C("0xHL2"), _C("0xHL3")]
+    try:
+        (addrs, note), _ = _with_fake_board(rows, lambda: ap._discover_candidates(an))
+    finally:
+        ap_mod.fetch_candidates = orig_hl
+    assert addrs[0] == "0xcurrent", "Bestands-Leader wird IMMER mit-analysiert"
+    assert all(h in addrs for h in ("0xHL1", "0xHL2", "0xHL3")), \
+        "HL-Kandidaten überleben den Deckel trotz CMM-Masse"
+    assert len(addrs) <= an.top_n
+    assert sum(a.startswith("0x00") for a in addrs) < an.top_n, "CMM füllt nur den Rest"
+
+
 def test_rank_report_counts_truncated_and_reasons():
     """rank() zählt, WARUM Kandidaten sterben (zu aktiv/LARP/Fehler) und
     sammelt die Scores - Basis der /status-Trichter-Diagnose."""

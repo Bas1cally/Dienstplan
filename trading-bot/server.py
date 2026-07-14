@@ -127,7 +127,8 @@ def paper_reset():
                  "shadows.json", "shadow_ohne_validator.json", "shadow_validator_locker.json",
                  "shadow_validator_crash_only.json", "labs.json", "lab_trend.json",
                  "lab_funding.json", "lab_funding_returns.json", "sprint_book.json",
-                 "sprint_cycles.json", "lighter_shadow.json", "lighter_leaders.json",
+                 "sprint_cycles.json", "sprint_leaders.json", "sprint_baselines.json",
+                 "lighter_shadow.json", "lighter_leaders.json",
                  "anomalies.jsonl", "orderbook.jsonl", "twap.jsonl",
                  "polymarket.jsonl", "signals.jsonl"):
         (Path(__file__).parent / "runtime" / name).unlink(missing_ok=True)

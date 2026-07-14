@@ -948,11 +948,27 @@ class Autopilot:
                         str(e)[:150])
         seen: set[str] = set()
         union: list[str] = []
-        for a in cmm_addrs + hl_addrs:          # CMM zuerst (PnL-Rangfolge)
+
+        def add(a: str) -> None:
             k = a.lower()
             if k not in seen:
                 seen.add(k)
                 union.append(a)
+
+        # 1. Bestands-Leader IMMER analysieren: rotate_leaders behält Verschwundene
+        #    nicht ('vanished leader not kept') - ohne Analyse flöge der bewährte
+        #    Leader blind raus, nur weil der Kandidaten-Deckel ihn verdrängt hat.
+        for l in self.leaders:
+            add(l["address"])
+        # 2. INTERLEAVE statt Anhängen: bei 96 CMM + 38 HL und top_n=50 gingen
+        #    sonst ALLE Plätze an CMM (grüne Positions-Trader = Selten-Öffner),
+        #    die HL-Day-Trader (= Häufig-Öffner, Sprints Signalquelle!) fielen
+        #    komplett raus - ein Hunger-Verstärker fürs Sprint-Buch.
+        for i in range(max(len(cmm_addrs), len(hl_addrs))):
+            if i < len(cmm_addrs):
+                add(cmm_addrs[i])
+            if i < len(hl_addrs):
+                add(hl_addrs[i])
         note = f"CMM {len(cmm_addrs)} + HL {len(hl_addrs)}"
         return union[: an.top_n], note
 
