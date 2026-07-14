@@ -185,6 +185,64 @@ def test_resume_clears_halt_and_rebaselines():
     assert reloaded.halted is False, "Resume wird persistiert"
 
 
+# ---------- Tracker: kein Phantom-Snapshot, Cache statt Lücke ----------
+
+def _state(equity, **positions):
+    return {"marginSummary": {"accountValue": str(equity)},
+            "assetPositions": [
+                {"position": {"coin": c, "szi": str(s), "entryPx": "100",
+                              "positionValue": str(abs(s) * 100), "leverage": {"value": 2}}}
+                for c, s in positions.items()]}
+
+
+class _FlakyInfo:
+    """Haupt-DEX-Call schlägt für konfigurierbare Adressen fehl (429-Simulation)."""
+
+    def __init__(self, fail: set):
+        self.fail = fail
+
+    def user_state(self, address, dex=None):
+        if address in self.fail:
+            raise RuntimeError("429 Too Many Requests")
+        return _state(50_000, BTC=500)
+
+
+def test_tracker_no_phantom_flat_snapshot():
+    """Audit-Befund: schlug der Haupt-DEX fehl, lieferte snapshot() ein Phantom
+    (Equity 0, leeres Buch) statt eines Fehlers - falsche 'Leader raus'-Exits
+    und zerstörte Baselines (alles sähe danach 'frisch' aus). Jetzt: raise."""
+    from bot.copytrade.tracker import LeaderTracker
+
+    t = LeaderTracker(_FlakyInfo(fail={"0xdead"}), ["0xdead"], throttle_s=0)
+    try:
+        t.snapshot("0xdead")
+        assert False, "Haupt-DEX-Fehler muss raisen, kein Phantom-Snapshot"
+    except RuntimeError:
+        pass
+
+
+def test_tracker_snapshot_all_uses_last_good_cache():
+    """Fällt eine Adresse aus (429), liefert der Cache den letzten guten Stand -
+    Weglassen hieße: Copier flattened fälschlich (Ziel 0) und Sprint verliert
+    die Baseline. Abdeckungszähler machen den Zustand sichtbar."""
+    from bot.copytrade.tracker import LeaderTracker
+
+    info = _FlakyInfo(fail=set())
+    t = LeaderTracker(info, ["0xa", "0xb"], throttle_s=0)
+    snaps = t.snapshot_all()
+    assert len(snaps) == 2 and t.last_fresh == 2 and t.last_stale == 0
+
+    info.fail = {"0xb"}                       # 0xb fällt aus
+    snaps = t.snapshot_all()
+    assert len(snaps) == 2, "Cache hält 0xb im Feed"
+    assert t.last_fresh == 1 and t.last_stale == 1 and t.last_total == 2
+    assert snaps[1].positions.get("BTC") is not None, "letzter guter Stand, kein Phantom"
+
+    t2 = LeaderTracker(_FlakyInfo(fail={"0xa"}), ["0xa"], throttle_s=0)
+    assert t2.snapshot_all() == [], "ohne je einen guten Stand: überspringen"
+    assert t2.last_fresh == 0 and t2.last_stale == 0
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

@@ -36,18 +36,29 @@ class LeaderSnapshot:
 
 
 class LeaderTracker:
-    def __init__(self, info, addresses: list[str], dexs: list[str] | None = None):
+    def __init__(self, info, addresses: list[str], dexs: list[str] | None = None,
+                 throttle_s: float = 0.05):
         self.info = info
         self.addresses = addresses
         self.dexs = dexs or [""]  # Haupt-DEX + Builder-DEXs (Aktien, Gold, Öl)
+        self.throttle_s = throttle_s     # Burst-Glättung: 14+ Adressen x DEXs je Tick
+        self._last_good: dict[str, LeaderSnapshot] = {}   # Cache statt Phantom-Daten
+        self.last_fresh = 0              # Abdeckung der letzten Runde (Diagnose)
+        self.last_stale = 0
+        self.last_total = 0
 
     def snapshot(self, address: str) -> LeaderSnapshot:
         equity = 0.0
         raw_positions: list = []
-        for dex in self.dexs:
+        for i, dex in enumerate(self.dexs):
             try:
                 state = self.info.user_state(address, dex=dex) if dex else self.info.user_state(address)
             except Exception:
+                if i == 0:
+                    # Haupt-DEX weg -> KEIN Phantom-Snapshot (Equity 0, leeres
+                    # Buch) zurückgeben: der würde falsche 'Leader raus'-Exits
+                    # auslösen und Baselines zerstören (alles sähe 'frisch' aus).
+                    raise
                 log.debug("Leader %s: DEX %r nicht abrufbar", address[:10], dex, exc_info=True)
                 continue
             equity += float(state["marginSummary"]["accountValue"])
@@ -68,10 +79,31 @@ class LeaderTracker:
         return LeaderSnapshot(address=address, equity=equity, positions=positions)
 
     def snapshot_all(self) -> list[LeaderSnapshot]:
-        snaps = []
-        for addr in self.addresses:
+        """Alle Adressen snapshotten. Schlägt eine fehl (429/Netz), liefert der
+        Cache den LETZTEN GUTEN Stand statt sie still wegzulassen - Weglassen
+        hieße: Copier plant Ziel 0 (falsches Flatten) und Sprint verliert die
+        Baseline. Stale ist ehrlich besser als falsch-leer; die Abdeckung
+        (fresh/stale/total) ist für /sprint sichtbar."""
+        import time as _time
+
+        snaps: list[LeaderSnapshot] = []
+        fresh = stale = 0
+        for i, addr in enumerate(self.addresses):
+            if i and self.throttle_s:
+                _time.sleep(self.throttle_s)   # Bursts glätten (Rate-Limit-Hygiene)
             try:
-                snaps.append(self.snapshot(addr))
+                s = self.snapshot(addr)
+                self._last_good[addr] = s
+                fresh += 1
             except Exception:
-                log.exception("Snapshot fehlgeschlagen für %s - überspringe diese Runde", addr)
+                s = self._last_good.get(addr)
+                if s is None:
+                    log.exception("Snapshot fehlgeschlagen für %s - überspringe diese Runde", addr)
+                    continue
+                stale += 1
+                log.warning("Snapshot %s fehlgeschlagen - nutze letzten guten Stand",
+                            addr[:10])
+            snaps.append(s)
+        self.last_fresh, self.last_stale = fresh, stale
+        self.last_total = len(self.addresses)
         return snaps

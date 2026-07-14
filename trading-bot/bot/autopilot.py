@@ -398,6 +398,12 @@ class Autopilot:
         feed = (f"vor {feed_age:.0f}s" if feed_age is not None and feed_age < 120
                 else f"⚠️ vor {feed_age / 60:.0f} min" if feed_age is not None
                 else "n/a")
+        tracker = getattr(self.copier, "tracker", None)
+        if tracker is not None and getattr(tracker, "last_total", 0):
+            cov = f" | Abdeckung {tracker.last_fresh}/{tracker.last_total}"
+            if tracker.last_stale:
+                cov += f" ({tracker.last_stale} stale)"
+            feed += cov
         return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']}): {s['state']}\n"
                 f"{pos_block}\n"
                 f"Equity: {s['equity']:,.2f} / Ziel {s['target']:,.0f} "
