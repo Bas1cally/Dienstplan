@@ -166,9 +166,14 @@ sprint:
                             # Messung anderer Signale. ENDZIEL danach: false =
                             # POOL -> EIN GUTER RITT -> +10% -> RAUS, 1 Position.
   max_rides: 8              # Deckel für gleichzeitige Mess-Ritte
-  crypto_only: true         # Builder-DEX-Assets (Aktien/Gold, 'xyz:INTC' & Co.)
-                            # raus: außerhalb der Börsenzeiten reine Spekulation
-                            # auf HL - stört die Messlatte für stabile Trader.
+  crypto_only: false        # MESS-WOCHE: Aktien-Perps ERLAUBT (Nutzer: '14
+                            # frische Signale, aber sie traden alle kein Krypto -
+                            # ich will Daten'). Im Parallel-Modus blockt ein
+                            # Aktien-Ritt nichts, und jeder Ritt wird im Journal
+                            # mit Coin-Namen verbucht ('xyz:' = Aktie) - die
+                            # Sonntags-Auswertung kann Krypto vs. Aktien sauber
+                            # trennen. NACH der Mess-Woche wieder true (Aktien
+                            # außerhalb der Börsenzeiten = reine Spekulation).
   pool_size: 20             # Sprint scannt einen breiteren Leader-Pool als das
                             # Hauptbuch (max_leaders: 6). Sprint hält immer nur EINE
                             # Position -> mehr Quellen = weniger Leerlauf, ohne die
