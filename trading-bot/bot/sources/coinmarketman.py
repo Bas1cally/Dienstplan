@@ -111,50 +111,59 @@ def _f(v) -> float:
 
 
 def fetch_cmm_candidates(cfg) -> list[CMMCandidate]:
-    """KOPIERBARE Kandidaten aus dem perp-pnl-Leaderboard (`pages` Requests).
+    """KOPIERBARE Kandidaten aus dem perp-pnl-Leaderboard, über MEHRERE
+    Zeitfenster (`periods` x `pages` Requests).
 
-    Live-Befund: die Board-Spitze nach Monats-PnL sind MM/HFT-Whales (z.B. 408x
-    Monats-Umsatz zur Equity) - zum Kopieren ungeeignet und fuer die Tiefen-
-    analyse unlesbar (HL deckelt userFills auf ~2000). Deshalb hier neben den
-    Grob-Filtern (Equity-Spanne, Fenster-PnL) auch Umsatz- und Hebel-Deckel,
-    und es wird tiefer geblaettert, weil die Spitze rausfaellt. Das echte
-    Qualitaets-Gate bleibt die 30-Tage-Tiefenanalyse + LARP auf HL-Daten."""
+    Warum mehrere Fenster: das Monats-Board wird von Positions-Sitzern
+    dominiert - die AKTIVEN Richtungs-Trader (viele kleine Treffer) stehen
+    dort auf Rang 300+. Auf dem WOCHEN-Board stehen sie vorn, denn wer diese
+    Woche vorne ist, hat diese Woche gehandelt. pnlWeek zuerst = Aktive
+    bekommen die vorderen Plätze im Kandidaten-Interleave.
+
+    Live-Befund bleibt: Board-Spitzen sind MM/HFT-Whales (408x Umsatz) - daher
+    Umsatz-/Hebel-/Equity-Deckel VOR der teuren Analyse. Das echte Qualitäts-
+    Gate bleibt die Tiefenanalyse + LARP/Sprint-Gate auf HL-Daten."""
     client = CMMClient(cfg.base_url, cfg.timeout)
     out: list[CMMCandidate] = []
     seen: set[str] = set()
     pages = max(1, int(getattr(cfg, "pages", 1)))
-    for page in range(pages):
-        payload = client.leaderboard(board="perp-pnl", rank_by=cfg.period,
-                                     limit=cfg.limit, offset=page * cfg.limit)
-        rows = rows_of(payload)
-        if not rows:
-            break
-        for r in rows:
-            if not isinstance(r, dict):
-                continue
-            addr = str(r.get("address", "")).strip()
-            if not addr.startswith("0x") or addr.lower() in seen:
-                continue
-            c = CMMCandidate(
-                address=addr,
-                equity=_f(r.get("perpEquity")),
-                pnl_month=_f(r.get("pnlMonth")),
-                pnl_week=_f(r.get("pnlWeek")),
-                pnl_day=_f(r.get("pnlDay")),
-                exposure_ratio=_f(r.get("exposureRatio")),
-                volume_month=_f(r.get("volumeMonth")),
-                rank=int(_f(r.get("rank"))),
-            )
-            if not (cfg.min_equity <= c.equity <= cfg.max_equity):
-                continue
-            if c.pnl_month <= cfg.min_pnl:
-                continue
-            if abs(c.exposure_ratio) > cfg.max_exposure:
-                continue
-            if c.equity > 0 and c.volume_month / c.equity > cfg.max_turnover:
-                continue
-            seen.add(addr.lower())
-            out.append(c)
+    periods = list(getattr(cfg, "periods", None) or [cfg.period])
+    for period in periods:
+        for page in range(pages):
+            payload = client.leaderboard(board="perp-pnl", rank_by=period,
+                                         limit=cfg.limit, offset=page * cfg.limit)
+            rows = rows_of(payload)
+            if not rows:
+                break
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                addr = str(r.get("address", "")).strip()
+                if not addr.startswith("0x") or addr.lower() in seen:
+                    continue
+                c = CMMCandidate(
+                    address=addr,
+                    equity=_f(r.get("perpEquity")),
+                    pnl_month=_f(r.get("pnlMonth")),
+                    pnl_week=_f(r.get("pnlWeek")),
+                    pnl_day=_f(r.get("pnlDay")),
+                    exposure_ratio=_f(r.get("exposureRatio")),
+                    volume_month=_f(r.get("volumeMonth")),
+                    rank=int(_f(r.get("rank"))),
+                )
+                if not (cfg.min_equity <= c.equity <= cfg.max_equity):
+                    continue
+                # Fenster-PnL passend zum Board: Wochen-Board -> Wochen-PnL zählt
+                window_pnl = c.pnl_week if period == "pnlWeek" else \
+                    c.pnl_day if period == "pnlDay" else c.pnl_month
+                if window_pnl <= cfg.min_pnl:
+                    continue
+                if abs(c.exposure_ratio) > cfg.max_exposure:
+                    continue
+                if c.equity > 0 and c.volume_month / c.equity > cfg.max_turnover:
+                    continue
+                seen.add(addr.lower())
+                out.append(c)
     return out
 
 

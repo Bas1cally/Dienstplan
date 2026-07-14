@@ -260,7 +260,8 @@ def test_fetch_candidates_filters_and_dedupes():
         "garbage",                                                        # kein dict
         {**_COPYABLE, "address": "0xcc" + "1" * 38, "perpEquity": None},  # None
     ]
-    cands, _ = _with_fake_board(rows, lambda: fetch_cmm_candidates(_cmm_cfg()))
+    cands, _ = _with_fake_board(
+        rows, lambda: fetch_cmm_candidates(_cmm_cfg(periods=["pnlMonth"])))
     assert [c.address for c in cands] == [_COPYABLE["address"]], \
         "nur die eine saubere Zeile überlebt Filter+Dedupe"
 
@@ -272,10 +273,37 @@ def test_fetch_candidates_paginates_with_offsets():
     page2 = [{**_COPYABLE, "address": f"0x{i:040x}"} for i in range(100, 103)]
     cands, calls = _with_fake_board(None,
                                     lambda: fetch_cmm_candidates(
-                                        _cmm_cfg(pages=3, limit=100)),
+                                        _cmm_cfg(pages=3, limit=100,
+                                                 periods=["pnlMonth"])),
                                     pages=[page1, page2, []])
     assert [c["offset"] for c in calls] == [0, 100, 200], "Seiten via offset"
     assert len(cands) == 6, "beide Seiten eingesammelt, leere Seite stoppt"
+
+
+def test_fetch_candidates_scans_multiple_windows_week_first():
+    """Aktive Richtungs-Trader stehen auf dem WOCHEN-Board vorn - Discovery
+    zieht aus beiden Fenstern, Woche zuerst, dedupliziert über Fenster hinweg,
+    und filtert je Board nach dem PASSENDEN Fenster-PnL."""
+    from bot.sources.coinmarketman import fetch_cmm_candidates
+
+    week_hero = {**_COPYABLE, "address": "0xaa" + "1" * 38,
+                 "pnlWeek": "9000", "pnlMonth": "-2000"}    # Woche top, Monat rot
+    both = {**_COPYABLE, "address": _COPYABLE["address"]}    # auf beiden Boards
+    month_only = {**_COPYABLE, "address": "0xbb" + "1" * 38,
+                  "pnlWeek": "-50", "pnlMonth": "30000"}     # Sitzer: nur Monat grün
+    cands, calls = _with_fake_board(None,
+                                    lambda: fetch_cmm_candidates(
+                                        _cmm_cfg(pages=1, limit=100)),
+                                    pages=[[week_hero, both, month_only],
+                                           [both, month_only]])
+    assert [c["rankBy"] for c in calls] == ["pnlWeek", "pnlMonth"], "Woche zuerst"
+    addrs = [c.address for c in cands]
+    assert addrs[0] == week_hero["address"], "Wochen-Held vorn (Monats-Rot egal)"
+    assert month_only["address"] in addrs, "Monats-Sitzer kommt über sein Board"
+    assert addrs.count(both["address"]) == 1, "über Fenster hinweg dedupliziert"
+    # month_only ist auf dem WOCHEN-Board rot (pnlWeek -50) -> dort gefiltert,
+    # kommt erst über das Monats-Board rein
+    assert addrs.index(month_only["address"]) > addrs.index(both["address"])
 
 
 def test_discover_candidates_union_and_fallback():

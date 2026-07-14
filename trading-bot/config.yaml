@@ -78,7 +78,9 @@ copytrade:
     min_account_value: 10000   # Mindest-Kontogröße der Kandidaten
     min_volume: 500000         # Mindest-Monatsvolumen (statistische Aussagekraft)
     top_percent: 2.0           # Top-2% (nach Monats-ROI) gehen in die Tiefenanalyse
-    top_n: 50                  # harter Deckel für die Tiefenanalyse (API-Calls je Wallet)
+    top_n: 70                  # harter Deckel für die Tiefenanalyse (API-Calls je
+                               # Wallet; 70 statt 50: mehr Interleave-Plätze für die
+                               # aktiven Wochen-Board-Kandidaten, ~+40s je Analyse)
     min_score: 35              # Mindest-Score, um als Leader infrage zu kommen
     larp:                      # harte K.O.-Gates gegen Blender (bot/copytrade/larp.py)
       min_round_trips: 30            # weniger Trades = Zufall nicht ausschließbar
@@ -218,11 +220,16 @@ coinmarketman:
   max_turnover: 120         # Monatsvolumen/Equity-Deckel (Day-Trader ~5-100x)
   max_exposure: 6           # |offenes Notional / Equity| (Hebel-Deckel)
   max_equity: 5000000       # darüber fast nur Fonds/MMs (Slippage-Realität)
-  pages: 5                  # so viele Board-Seiten je Scan durchblättern (je 1
-                            # Request), weil die gefilterte Spitze Platz macht.
-                            # 5 Seiten = 500 Kandidaten roh -> mehr Sprint-taugliche
-                            # (zuletzt nur 8 von 300). Budget: 5 x ~5 Analysen/Tag
-                            # (inkl. /analyze) = ~25 von 100/Tag - reichlich Puffer.
+  periods: [pnlWeek, pnlMonth]  # Discovery über ZWEI Fenster: das Wochen-Board
+                            # fördert die AKTIVEN Richtungs-Trader zutage (wer diese
+                            # Woche vorn ist, hat diese Woche gehandelt) - das
+                            # Monats-Board allein ist von Positions-Sitzern dominiert
+                            # (Live-Befund: voller Handelstag, 0 frische Signale).
+                            # pnlWeek zuerst = Aktive vorn im Kandidaten-Interleave.
+  pages: 3                  # Board-Seiten JE FENSTER je Scan (je 1 Request):
+                            # 2 Fenster x 3 Seiten = 600 Kandidaten roh, 6 Requests
+                            # je Analyse. Budget: 6 x ~5 Analysen/Tag = ~30 von
+                            # 100/Tag - weiter Puffer für /cmm-Proben.
 
 # === Strategie-Labor: eigene Signale parallel im Paper-Schatten messen ===
 # Der Copy-Bot folgt fremden Tradern (kein originäres Alpha). Hier laufen EIGENE

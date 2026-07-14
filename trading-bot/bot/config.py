@@ -420,7 +420,13 @@ class CoinMarketManConfig:
     """
     enabled: bool = False   # erst nach Live-Probe (/cmm) scharf schalten
     base_url: str = "https://ht-api.coinmarketman.com/api/external"
-    period: str = "pnlMonth"   # pnlDay | pnlWeek | pnlMonth | pnlAllTime
+    period: str = "pnlMonth"   # Standard-Fenster für die /cmm-Probe
+    # Discovery zieht aus MEHREREN Fenstern: pnlWeek fördert die AKTIVEN
+    # Richtungs-Trader zutage (wer diese Woche vorne ist, hat diese Woche
+    # gehandelt), pnlMonth die bewährten. Ein reines Monats-Board ist von
+    # Sitzern dominiert - aktive Trader mit vielen kleinen Treffern stehen
+    # dort auf Rang 300+, wo wir nie hinschauen.
+    periods: list = None       # default: ["pnlWeek", "pnlMonth"]
     limit: int = 100           # Leaderboard-Zeilen pro Abruf (25 | 50 | 100)
     timeout: float = 20.0
     min_equity: float = 10_000     # Wegwerf-/Mini-Konten aussortieren
@@ -433,8 +439,12 @@ class CoinMarketManConfig:
     max_turnover: float = 120.0    # Monatsvolumen / Equity (Day-Trader ~5-100x)
     max_exposure: float = 6.0      # |exposureRatio| (offenes Notional / Equity)
     max_equity: float = 5_000_000  # darüber fast nur Fonds/MMs (Slippage-Realität)
-    pages: int = 3                 # Board-Seiten je Scan (je 1 Request), tiefer
-                                   # blättern, weil die Spitze rausgefiltert wird
+    pages: int = 3                 # Board-Seiten je FENSTER und Scan (je 1 Request),
+                                   # tiefer blättern, weil die Spitze rausgefiltert wird
+
+    def __post_init__(self):
+        if self.periods is None:
+            self.periods = ["pnlWeek", "pnlMonth"]
 
 
 @dataclass
