@@ -65,7 +65,10 @@ class SprintBook:
         self.journal = journal
         self.clock = clock
         self.paper = PaperBroker(cfg.equity, fee_rate, path=runtime / "sprint_book.json")
+        self.fee_rate = fee_rate
         self.state_path = runtime / "sprint_cycles.json"
+        # Mess-Modus (parallel_rides): Coin -> Leader-Adresse des jeweiligen Ritts
+        self.ride_leaders: dict[str, str] = {}
         self.banked = 0.0
         self.won = 0
         self.busted = 0
@@ -99,6 +102,13 @@ class SprintBook:
     def tick(self, leaders: list[dict], snapshots: list, prices: dict[str, float],
              risk_off: bool = False) -> None:
         if not prices:
+            return
+        if self.cfg.parallel_rides:
+            # MESS-MODUS: jedes Signal = eigener Ritt auf 1000$-Basis, parallel.
+            # Endziel (parallel_rides: false) bleibt der Einzel-Ritt unten.
+            self._tick_parallel(leaders, snapshots, prices, risk_off)
+            if leaders and snapshots:
+                self._refresh_baselines(leaders, snapshots)
             return
         # 1. Ziel/Bust hat Vorrang - Zyklus=Ritt, also sofort abrechnen+resetten
         eq = self.paper.equity(prices)
@@ -188,6 +198,107 @@ class SprintBook:
             elif add_frac > 0 and abs(sz) >= (1 + add_frac) * abs(prev_sz):
                 out.append(c)                                   # deutliche Aufstockung
         return out
+
+    # ---------- MESS-MODUS: parallele Ritte, jedes Signal = eigener Zyklus ----------
+
+    def _tick_parallel(self, leaders: list[dict], snapshots: list,
+                       prices: dict[str, float], risk_off: bool) -> None:
+        # 1. Ziel/Bust JE RITT (eigene 1000$-Basis, nicht das Sammelbuch)
+        for coin in list(self.paper.sizes()):
+            pnl = self._ride_pnl(coin, prices)
+            if pnl is None:
+                continue
+            if pnl >= self.cfg.target_profit:
+                self._settle_one(coin, prices, "tp")
+            elif self.cfg.equity + pnl <= self.cfg.equity * self.cfg.bust_frac:
+                self._settle_one(coin, prices, "bust")
+        # 2. Markt-Schutz: alle Mess-Ritte glattstellen, jeder = eigener Zyklus
+        if risk_off:
+            if self.paper.sizes():
+                log.warning("Sprint: RISK_OFF - stelle alle Mess-Ritte glatt")
+                for coin in list(self.paper.sizes()):
+                    self._settle_one(coin, prices, "risk_off")
+            return
+        if not leaders or not snapshots:
+            return
+        by_addr = {s.address.lower(): s for s in snapshots}
+        # 3. Exit-Folge je Ritt über SEINEN Leader
+        for coin, our_size in list(self.paper.sizes().items()):
+            leader = self.ride_leaders.get(coin, "")
+            snap = by_addr.get(leader.lower()) if leader else None
+            if snap is None:
+                self._settle_one(coin, prices, "leader_rotated")
+                continue
+            book = self._book_of(snap)
+            leader_sz = book.get(coin, 0.0)
+            entry_sz = self._ride_entry_sizes.get(coin, abs(leader_sz))
+            if leader_sz == 0.0:
+                self._settle_one(coin, prices, "leader_exit")
+            elif (leader_sz > 0) != (our_size > 0):
+                # Flip = neue Richtung, neue Überzeugung -> neuer Mess-Ritt
+                self._settle_one(coin, prices, "leader_flip")
+                self._enter(coin, snap, prices, parallel=True)
+            elif abs(leader_sz) <= (1 - self.cfg.partial_exit_frac) * entry_sz:
+                self._settle_one(coin, prices, "leader_scaleout")
+        # 4. Frische Signale ALLER Leader - jeder darf (s)einen Ritt eröffnen,
+        #    je Leader und Tick nur das stärkste Signal (Korb-Regel bleibt)
+        for l in sorted(leaders, key=lambda l: float(l.get("score", 0)), reverse=True):
+            addr = str(l.get("address", "")).lower()
+            snap = by_addr.get(addr)
+            if snap is None:
+                continue
+            prev = self._baselines.get(addr)
+            if prev is None:
+                continue
+            fresh = self._fresh_coins(self._book_of(snap), prev)
+            if not fresh:
+                continue
+            self._note_fresh(len(fresh))
+            if addr in self.banned:
+                for coin in fresh:
+                    self._reject(coin, snap.address, "leader_gesperrt")
+                continue
+            fresh.sort(key=lambda c: abs(snap.exposure(c)), reverse=True)
+            opened = False
+            for coin in fresh:
+                if opened:
+                    self._reject(coin, snap.address, "korb_begrenzt")
+                    continue
+                if coin in self.paper.sizes():
+                    self._reject(coin, snap.address, "coin_belegt")
+                    continue
+                if len(self.paper.sizes()) >= self.cfg.max_rides:
+                    self._reject(coin, snap.address, "max_ritte")
+                    continue
+                before = len(self.paper.sizes())
+                self._enter(coin, snap, prices, parallel=True)
+                opened = len(self.paper.sizes()) > before
+
+    def _ride_pnl(self, coin: str, prices: dict[str, float]) -> float | None:
+        """PnL eines Mess-Ritts auf seiner eigenen 1000$-Basis, konservativ
+        inkl. Eröffnungs- UND (hypothetischer) Schließungs-Fee."""
+        row = next((r for r in self.paper.position_rows(prices)
+                    if r["coin"] == coin), None)
+        if row is None:
+            return None
+        px = prices.get(coin, row["entry"]) or row["entry"]
+        fees = abs(row["size"]) * (row["entry"] + px) * self.fee_rate
+        return row["size"] * (px - row["entry"]) - fees
+
+    def _settle_one(self, coin: str, prices: dict[str, float], reason: str) -> None:
+        """Mess-Ritt beenden = EIGENER Zyklus: Position im Sammelbuch schließen,
+        PnL auf 1000$-Basis verbuchen, Strike/Heilung für DIESEN Leader."""
+        pnl = self._ride_pnl(coin, prices)
+        size = self.paper.sizes().get(coin, 0.0)
+        if size:
+            row = next((r for r in self.paper.position_rows(prices)
+                        if r["coin"] == coin), None)
+            px = prices.get(coin) or (row["entry"] if row else 0.0)
+            if px:
+                self.paper.execute(coin, -size, px)
+        leader = self.ride_leaders.pop(coin, "")
+        self._ride_entry_sizes.pop(coin, None)
+        self._book_cycle(leader, pnl if pnl is not None else 0.0, reason, coin=coin)
 
     # ---------- IM RITT: halten, nur dem Ride-Leader folgen ----------
 
@@ -306,28 +417,44 @@ class SprintBook:
 
     # ---------- Ein-/Ausstieg ----------
 
-    def _enter(self, coin: str, snap, prices: dict[str, float]) -> None:
+    def _enter(self, coin: str, snap, prices: dict[str, float],
+               parallel: bool = False) -> None:
         if coin in self.cfg.exclude_coins:
             self._reject(coin, snap.address, "coin_ausgeschlossen")
             return  # Beta statt Leader-Alpha (z.B. BTC) - kein Signal
+        if self.cfg.crypto_only and ":" in coin:
+            # Builder-DEX-Asset (Aktien/Gold, z.B. 'xyz:INTC'): außerhalb der
+            # Börsenzeiten reine Spekulation - stört die Messlatte (Nutzer)
+            self._reject(coin, snap.address, "kein_krypto")
+            return
         price = prices.get(coin)
         if not price or price <= 0:
             self._reject(coin, snap.address, "kein_hl_preis")
             return
-        equity = self.paper.equity(prices)
-        target = snap.exposure(coin) * self.cfg.leverage * equity
-        # Gross-Cap: Gesamtbuch bleibt unter leverage x Equity
-        gross = sum(abs(s) * prices.get(c, 0.0) for c, s in self.paper.sizes().items())
-        headroom = max(0.0, self.cfg.leverage * equity - gross)
-        notional = max(-headroom, min(headroom, target))
+        if parallel:
+            # Mess-Modus: JEDER Ritt startet auf frischer equity-Basis (1000$),
+            # unabhängig vom Sammelbuch - 1 Signal = 1 Ritt = 1k (Nutzer)
+            cap = self.cfg.leverage * self.cfg.equity
+            target = snap.exposure(coin) * self.cfg.leverage * self.cfg.equity
+            notional = max(-cap, min(cap, target))
+        else:
+            equity = self.paper.equity(prices)
+            target = snap.exposure(coin) * self.cfg.leverage * equity
+            # Gross-Cap: Gesamtbuch bleibt unter leverage x Equity
+            gross = sum(abs(s) * prices.get(c, 0.0) for c, s in self.paper.sizes().items())
+            headroom = max(0.0, self.cfg.leverage * equity - gross)
+            notional = max(-headroom, min(headroom, target))
         if abs(notional) < self.cfg.min_notional:
             self._reject(coin, snap.address, "unter_min_notional")
             return
         self._last_entry_t = self.clock()
-        if self._ride_start_equity is None:
-            self._ride_start_equity = equity   # erster Einstieg des Ritts -> PnL-Basis
+        if not parallel and self._ride_start_equity is None:
+            self._ride_start_equity = self.paper.equity(prices)  # PnL-Basis des Ritts
         self.paper.execute(coin, notional / price, price)
-        self.ride_leader = snap.address
+        if parallel:
+            self.ride_leaders[coin] = snap.address
+        else:
+            self.ride_leader = snap.address
         self._ride_entry_sizes[coin] = abs(self._book_of(snap).get(coin, 0.0))
         side = "LONG" if notional > 0 else "SHORT"
         cycle = self.won + self.busted + 1
@@ -367,6 +494,11 @@ class SprintBook:
         n = len(self.paper.sizes())
         if n == 0:
             return 0
+        if self.cfg.parallel_rides:
+            # Mess-Modus: jeder Ritt wird als EIGENER Zyklus verbucht
+            for coin in list(self.paper.sizes()):
+                self._settle_one(coin, prices, "manual")
+            return n
         for coin in list(self.paper.sizes()):
             self._close_coin(coin, prices, "manual")
         self._settle_ride(prices, "manual")
@@ -383,9 +515,20 @@ class SprintBook:
         self.paper.flatten(prices)
         leader = self.ride_leader
         pnl = self.paper.equity(prices) - self.cfg.equity
+        self.total_trades += self.paper.trades
+        self._book_cycle(leader, pnl, reason)
+        self.paper.reset()
+        self.ride_leader = ""
+        self._ride_start_equity = None
+        self._ride_entry_sizes.clear()
+        self._save_state()
+
+    def _book_cycle(self, leader: str, pnl: float, reason: str,
+                    coin: str | None = None) -> None:
+        """Gemeinsames Zyklus-Ende beider Modi: verbuchen (banked/won/busted),
+        Strike/Heilung für den Ritt-Leader, Journal + Telegram."""
         cycle = self.won + self.busted + 1
         self.banked += pnl
-        self.total_trades += self.paper.trades
         won = pnl > 0
         if won:
             self.won += 1
@@ -419,21 +562,18 @@ class SprintBook:
         icon = "🏁" if reason == "tp" else "💥" if reason == "bust" else ("✅" if won else "🔻")
         reason_txt = _REASON_TXT.get(reason, reason)
         kind = {"tp": "sprint_tp", "bust": "sprint_bust"}.get(reason, "sprint_cycle_end")
-        log.warning("Sprint-Zyklus %d %s (%s): PnL %+.2f (banked gesamt %+.2f)",
-                    cycle, "gewonnen" if won else "verloren", reason_txt, pnl, self.banked)
+        what = f"Zyklus {cycle}" + (f" ({coin})" if coin else "")
+        log.warning("Sprint-%s %s (%s): PnL %+.2f (banked gesamt %+.2f)",
+                    what, "gewonnen" if won else "verloren", reason_txt, pnl, self.banked)
         if self.journal:
             self.journal.record(kind, cycle=cycle, pnl=round(pnl, 2), reason=reason,
-                                banked=round(self.banked, 2), leader=leader)
+                                banked=round(self.banked, 2), leader=leader,
+                                **({"coin": coin} if coin else {}))
         if self.notifier:
             self.notifier.send(
-                f"{icon} <b>Zyklus {cycle} beendet</b> ({reason_txt}): {pnl:+,.2f} $\n"
-                f"Bilanz: {self.won}✅ {self.busted}💥 | banked {self.banked:+,.2f} $\n"
-                f"Nächster Zyklus wartet auf frisches Signal."
+                f"{icon} <b>{what} beendet</b> ({reason_txt}): {pnl:+,.2f} $\n"
+                f"Bilanz: {self.won}✅ {self.busted}💥 | banked {self.banked:+,.2f} $"
             )
-        self.paper.reset()
-        self.ride_leader = ""
-        self._ride_start_equity = None
-        self._ride_entry_sizes.clear()
         self._save_state()
 
     # ---------- Status & Persistenz ----------
@@ -445,12 +585,18 @@ class SprintBook:
         # ECHTE offene Position kurz nach einem Neustart (bevor frische Preise
         # da sind) fälschlich als 'wartet auf frisches Signal' zeigen - genau
         # der Bug, der hier gefunden wurde.
-        eq = self.paper.equity(prices)
         # EINE Abfrage des Positionsbestands, held/state/positions leiten sich alle
         # daraus ab - der Hintergrund-Loop (eigener Thread) kann jederzeit einen
         # Ritt schließen; zwei getrennte self.paper-Aufrufe könnten sonst
         # auseinanderlaufen (state="hält" während positions bereits leer ist).
         positions = self.paper.position_rows(prices)
+        if self.cfg.parallel_rides:
+            # Mess-Modus: je Ritt eigene 1000$-Basis - Equity/PnL sind die SUMME
+            # der Ritt-PnLs auf equity-Basis, nicht das (driftende) Sammelbuch
+            ride_pnls = sum(p["unrealized_pnl"] for p in positions)
+            eq = self.cfg.equity + ride_pnls
+        else:
+            eq = self.paper.equity(prices)
         held = [f"{p['coin']} {'LONG' if p['size'] > 0 else 'SHORT'}" for p in positions]
         cycles_done = self.won + self.busted
         # Zyklus = Ritt (v3): cycle_pnl IST die PnL des laufenden Ritts, es gibt
@@ -463,8 +609,11 @@ class SprintBook:
             "positions": positions,
             "target": round(self.cfg.equity + self.cfg.target_profit, 2),
             "progress_pct": round((eq - self.cfg.equity) / self.cfg.target_profit * 100, 1),
-            "state": "hält" if positions else "wartet auf frisches Signal",
+            "state": (f"{len(positions)} Mess-Ritte laufen"
+                      if positions and self.cfg.parallel_rides
+                      else "hält" if positions else "wartet auf frisches Signal"),
             "held": held,
+            "parallel": self.cfg.parallel_rides,
             "banked": round(self.banked, 2),
             "won": self.won,
             "busted": self.busted,
@@ -499,6 +648,8 @@ class SprintBook:
             self.busted = int(raw.get("busted", 0))
             self.total_trades = int(raw.get("total_trades", 0))
             self.ride_leader = str(raw.get("ride_leader", ""))
+            self.ride_leaders = {str(c): str(a) for c, a in
+                                 (raw.get("ride_leaders") or {}).items()}
             self.strikes = {str(k): int(v) for k, v in (raw.get("strikes") or {}).items()}
             self.banned = {str(a).lower() for a in (raw.get("banned") or [])}
         # v1-Migration: altes Buch hat mit Dauer-Reconciliation gechurnt (139 Trades)
@@ -519,6 +670,7 @@ class SprintBook:
                 "updated": int(self.clock()), "banked": round(self.banked, 2),
                 "won": self.won, "busted": self.busted,
                 "total_trades": self.total_trades, "ride_leader": self.ride_leader,
+                "ride_leaders": self.ride_leaders,
                 "strikes": self.strikes, "banned": sorted(self.banned),
             }))
         except OSError:

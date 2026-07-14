@@ -405,10 +405,15 @@ class Autopilot:
             if tracker.last_stale:
                 cov += f" ({tracker.last_stale} stale)"
             feed += cov
+        equity_line = (f"Ritte: {len(s.get('positions') or [])} offen "
+                       f"(je 1.000$-Basis, Ziel +100$/Ritt) | "
+                       f"Σ offene PnL {s['cycle_pnl']:+,.2f} $"
+                       if s.get("parallel") else
+                       f"Equity: {s['equity']:,.2f} / Ziel {s['target']:,.0f} "
+                       f"(Zyklus-PnL {s['cycle_pnl']:+,.2f} $)")
         return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']}): {s['state']}\n"
                 f"{pos_block}\n"
-                f"Equity: {s['equity']:,.2f} / Ziel {s['target']:,.0f} "
-                f"(Zyklus-PnL {s['cycle_pnl']:+,.2f} $)\n"
+                f"{equity_line}\n"
                 f"Bilanz: {s['won']}✅ {s['busted']}💥 | banked {s['banked']:+,.2f} $\n"
                 f"Strikes: {strikes} | 🚫 gesperrt: {banned}\n"
                 f"Leader: {lead} | Pool: {len(self.sprint_leaders)} scanbar | "

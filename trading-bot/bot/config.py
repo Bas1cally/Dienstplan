@@ -344,6 +344,17 @@ class SprintConfig:
     # Signal zu reiten. Bei Körben gewinnt das Signal mit der größten relativen
     # Überzeugung des Leaders (|exposure|), der Rest wird sichtbar verworfen.
     max_positions: int = 1
+    # MESS-MODUS (Nutzer, Mess-Woche): Ritte laufen PARALLEL - jedes Signal
+    # öffnet seinen eigenen Ritt auf equity-Basis (1000$) und bewertet seinen
+    # Trader unabhängig (Strike/Heilung je Ritt). Kein Ritt blockiert mehr die
+    # Messung anderer Signale. Das ENDZIEL bleibt False:
+    # POOL -> EIN GUTER RITT -> +10% -> RAUS, eine Position.
+    parallel_rides: bool = False
+    max_rides: int = 8            # Deckel für gleichzeitige Mess-Ritte
+    # Krypto-only: Builder-DEX-Assets (Aktien/Gold, Coins mit ':' wie
+    # 'xyz:INTC') sind außerhalb der Börsenzeiten reine Spekulation auf HL -
+    # stören die Messlatte für halbwegs stabile Trader.
+    crypto_only: bool = True
     bust_frac: float = 0.05         # Liquidations-Modell: darunter ist der Zyklus geplatzt
     # Eigener, breiterer Leader-Pool als das Hauptbuch: Sprint hält immer nur EINE
     # Position und steigt beim bestbewerteten Leader mit frischem Signal ein. Mehr

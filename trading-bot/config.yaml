@@ -159,6 +159,16 @@ sprint:
                             # alle 7 und verschmierte die 10x-Kapazität. Jetzt
                             # gewinnt das stärkste Signal (|exposure| des
                             # Leaders), der Rest wird sichtbar verworfen.
+  parallel_rides: true      # MESS-MODUS für diese Woche (Nutzer): jedes Signal
+                            # öffnet seinen EIGENEN Ritt auf 1000$-Basis, Ritte
+                            # laufen parallel, jeder bewertet seinen Trader
+                            # (Strike/Heilung je Ritt) - kein Ritt blockiert die
+                            # Messung anderer Signale. ENDZIEL danach: false =
+                            # POOL -> EIN GUTER RITT -> +10% -> RAUS, 1 Position.
+  max_rides: 8              # Deckel für gleichzeitige Mess-Ritte
+  crypto_only: true         # Builder-DEX-Assets (Aktien/Gold, 'xyz:INTC' & Co.)
+                            # raus: außerhalb der Börsenzeiten reine Spekulation
+                            # auf HL - stört die Messlatte für stabile Trader.
   pool_size: 20             # Sprint scannt einen breiteren Leader-Pool als das
                             # Hauptbuch (max_leaders: 6). Sprint hält immer nur EINE
                             # Position -> mehr Quellen = weniger Leerlauf, ohne die

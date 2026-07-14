@@ -316,6 +316,110 @@ def test_ride_leader_rotated_out_closes():
         assert abs(b.paper.equity(P) - 1000.0) < 1e-6, "Zyklus-Equity resettet"
 
 
+# ---------- MESS-MODUS: parallele Ritte (1 Signal = 1 Ritt = 1k) ----------
+
+def test_parallel_two_leaders_two_rides_same_tick():
+    """Mess-Woche: zwei Leader feuern gleichzeitig -> BEIDE Ritte laufen
+    parallel (vorher blockte die eine Position alles andere)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, parallel_rides=True)
+        two = leaders(("0xbest", 90), ("0xsecond", 70))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000, BTC=500),
+                     snap("0xsecond", 50_000, ETH=300)], P)
+        sizes = b.paper.sizes()
+        assert "BTC" in sizes and "ETH" in sizes, "beide Signale werden geritten"
+        assert b.ride_leaders == {"BTC": "0xbest", "ETH": "0xsecond"}
+
+
+def test_parallel_ride_settles_independently_with_own_strike():
+    """Ein Ritt endet (Leader-Exit, Verlust) -> NUR dieser wird als Zyklus
+    verbucht und NUR sein Leader gestriked; der andere Ritt läuft weiter."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, parallel_rides=True)
+        two = leaders(("0xbest", 90), ("0xsecond", 70))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000, BTC=500),
+                     snap("0xsecond", 50_000, ETH=300)], P)
+        # 0xsecond steigt aus (Preis unverändert -> Fee-Verlust), 0xbest hält
+        b.tick(two, [snap("0xbest", 50_000, BTC=500),
+                     snap("0xsecond", 50_000)], P)
+        assert "ETH" not in b.paper.sizes() and "BTC" in b.paper.sizes()
+        assert b.busted == 1 and b.won == 0, "nur der beendete Ritt zählt"
+        assert b.strikes.get("0xsecond") == 1, "Strike für DEN Ritt-Leader"
+        assert "0xbest" not in b.strikes, "der laufende Ritt bleibt unberührt"
+        assert "ETH" not in b.ride_leaders and b.ride_leaders.get("BTC") == "0xbest"
+
+
+def test_parallel_tp_per_ride_own_base():
+    """Ziel je Ritt auf EIGENER 1000$-Basis: +1% Kursbewegung bei 10x = +100$
+    -> dieser Ritt bankt, der andere läuft weiter."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, parallel_rides=True)
+        two = leaders(("0xbest", 90), ("0xsecond", 70))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000, BTC=500),
+                     snap("0xsecond", 50_000, ETH=300)], P)
+        # BTC +1.5% -> Ritt-PnL ~ +150$ > +100$-Ziel; ETH unverändert
+        b.tick(two, [snap("0xbest", 50_000, BTC=500),
+                     snap("0xsecond", 50_000, ETH=300)],
+               {"BTC": 101.5, "ETH": 100.0})
+        assert "BTC" not in b.paper.sizes(), "TP-Ritt ist gebankt"
+        assert "ETH" in b.paper.sizes(), "anderer Ritt läuft weiter"
+        assert b.won == 1 and b.banked > 90
+
+
+def test_parallel_coin_belegt_and_max_rides():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, parallel_rides=True, max_rides=1)
+        two = leaders(("0xbest", 90), ("0xsecond", 70))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000, ETH=500),
+                     snap("0xsecond", 50_000, ETH=300, BTC=200)], P)
+        assert list(b.paper.sizes()) == ["ETH"], "max_rides deckelt"
+        rej = b.stats(P)["scan"]["rejected"]
+        assert rej.get("max_ritte", 0) >= 1, "Deckel sichtbar"
+    with tempfile.TemporaryDirectory() as tmp2:
+        b2 = book(tmp2, parallel_rides=True)
+        two = leaders(("0xbest", 90), ("0xsecond", 70))
+        b2.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)
+        b2.tick(two, [snap("0xbest", 50_000, ETH=500),
+                      snap("0xsecond", 50_000, ETH=300)], P)
+        assert b2.ride_leaders.get("ETH") == "0xbest", "höherer Score gewinnt den Coin"
+        assert b2.stats(P)["scan"]["rejected"].get("coin_belegt") == 1
+
+
+def test_parallel_manual_close_settles_each_ride():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, parallel_rides=True)
+        two = leaders(("0xbest", 90), ("0xsecond", 70))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000, BTC=500),
+                     snap("0xsecond", 50_000, ETH=300)], P)
+        n = b.close(P)
+        assert n == 2 and b.paper.sizes() == {}
+        assert b.won + b.busted == 2, "jeder Ritt = eigener Zyklus"
+        assert b.strikes == {}, "manuell = strike-frei"
+
+
+def test_crypto_only_rejects_stock_coins():
+    """Aktien-Perps (Builder-DEX, 'xyz:INTC') stören die Messlatte außerhalb
+    der Börsenzeiten -> raus, sichtbar verworfen. Gilt in BEIDEN Modi."""
+    from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot as LS
+
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, parallel_rides=True)
+        flat = LS(address="0xbest", equity=50_000, positions={})
+        stock = LS(address="0xbest", equity=50_000, positions={
+            "xyz:INTC": LeaderPosition(coin="xyz:INTC", size=100.0, entry=100.0,
+                                       position_value=10_000.0, leverage=2)})
+        prices = {"xyz:INTC": 100.0}
+        b.tick(LED, [flat], prices)
+        b.tick(LED, [stock], prices)
+        assert b.paper.sizes() == {}, "Aktien-Perp wird nicht geritten"
+        assert b.stats(prices)["scan"]["rejected"].get("kein_krypto") == 1
+
+
 def test_basket_open_takes_only_strongest_signal():
     """Live-Vorfall: Leader eröffnet 7 Coins auf einmal (Aktien-Korb), Bot fraß
     alle 7. Jetzt: EIN Ritt = EINE Position - das Signal mit der größten
