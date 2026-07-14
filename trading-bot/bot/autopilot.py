@@ -143,8 +143,9 @@ class Autopilot:
         self._last_analysis = 0.0
         self._force_analysis = False   # /analyze: nächster Loop-Tick analysiert sofort
         self._analysis_note = ""       # Trichter der letzten Analyse (für /status)
-        self._analysis_running = False # Analyse blockiert den Loop minutenlang -
-        self._analysis_started = 0.0   # /status muss "läuft gerade" zeigen können
+        self._analysis_running = False # Analyse läuft im Hintergrund-Thread -
+        self._analysis_started = 0.0   # /status zeigt "läuft seit X min"
+        self._analysis_thread: threading.Thread | None = None
         self._stale_feed_warned = False  # Sprint scannt Standbilder -> einmal warnen
         self.leaders: list[dict] = []
         # Eigener, breiterer Leader-Pool nur fürs Sprint-Buch (siehe sprint.pool_size).
@@ -913,14 +914,31 @@ class Autopilot:
     def _maybe_reanalyze(self) -> None:
         hours = self.cfg.autopilot.reanalyze_hours
         forced = self._force_analysis
-        if forced or time.time() - self._last_analysis >= hours * 3600:
-            self._force_analysis = False   # /analyze: einmalig, im Loop-Thread (kein Race)
-            self._reanalyze()
-            if forced:
-                # Explizit angefordert -> Ergebnis aktiv pushen statt den Nutzer
-                # /status pollen zu lassen (Analyse dauert Minuten, mobil nervig)
-                self.notifier.send("🔬 <b>Analyse fertig</b>\n"
-                                   + (self._analysis_note or "keine Diagnose (Logs prüfen)"))
+        if not (forced or time.time() - self._last_analysis >= hours * 3600):
+            return
+        if self._analysis_running:
+            return   # läuft bereits - kein Parallel-Lauf (würde Leader-Listen zerschreiben)
+        self._force_analysis = False
+        # Analyse in den HINTERGRUND: sie dauert Minuten (70 Wallets x Drossel +
+        # 429-Backoffs) und blockierte vorher den ganzen Loop - Copier/Sprint
+        # waren währenddessen blind (Live-Befund: 'Snapshots ⚠️ vor 5 min').
+        # Der Loop scannt mit dem alten Pool weiter; die Ergebnisse werden am
+        # Ende als GANZE Objekte eingewechselt (self.leaders = ..., weights = {...},
+        # tracker.addresses = [...]) - atomare Referenz-Swaps, kein Teilzustand.
+        self._analysis_running = True   # sofort setzen: Loop-Tick soll nicht doppelt starten
+
+        def run() -> None:
+            try:
+                self._reanalyze()
+            finally:
+                if forced:
+                    # Explizit angefordert -> Ergebnis aktiv pushen statt den Nutzer
+                    # /status pollen zu lassen
+                    self.notifier.send("🔬 <b>Analyse fertig</b>\n"
+                                       + (self._analysis_note or "keine Diagnose (Logs prüfen)"))
+
+        self._analysis_thread = threading.Thread(target=run, daemon=True, name="analyse")
+        self._analysis_thread.start()
 
     def _discover_candidates(self, an) -> tuple[list[str], str]:
         """Kandidaten-Adressen für die Tiefenanalyse: UNION aus HyperTracker-Board

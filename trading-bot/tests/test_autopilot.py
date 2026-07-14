@@ -121,27 +121,52 @@ def test_tracked_addresses_sprint_off_stays_narrow():
     assert ap._tracked_addresses() == ["0xa", "0xb"]
 
 
-def test_force_analysis_flag_triggers_once_and_pushes_result():
-    """/analyze setzt nur ein Flag; der Loop-Thread konsumiert es EINMAL und
-    pusht danach das Ergebnis (mobil soll niemand /status pollen müssen)."""
+def test_force_analysis_runs_in_background_once_and_pushes_result():
+    """/analyze setzt nur ein Flag; der Loop startet die Analyse EINMAL im
+    HINTERGRUND (sie blockierte vorher minutenlang den ganzen Loop - Copier
+    und Sprint waren blind) und pusht danach das Ergebnis."""
     import time as _t
 
     ap = _autopilot()
     calls, sent = [], []
-    ap._reanalyze = lambda: (calls.append(1),
-                             setattr(ap, "_analysis_note", "50 Kandidaten → 3/9"))
+
+    def fake_reanalyze():
+        calls.append(1)
+        ap._analysis_note = "50 Kandidaten → 3/9"
+        ap._analysis_running = False   # wie das finally des echten _reanalyze
+
+    ap._reanalyze = fake_reanalyze
     ap.notifier.send = sent.append
     ap._last_analysis = _t.time()   # Zeit-Trigger aus - nur das Flag zählt
     ap._maybe_reanalyze()
     assert calls == [], "ohne Flag und ohne Fälligkeit keine Analyse"
     ap._force_analysis = True
     ap._maybe_reanalyze()
+    assert ap._analysis_thread is not None, "läuft im eigenen Thread, nicht im Loop"
+    ap._analysis_thread.join(timeout=5)
     assert calls == [1], "Flag löst genau eine Analyse aus"
     assert ap._force_analysis is False, "Flag wird konsumiert"
     assert sent and "Analyse fertig" in sent[0] and "50 Kandidaten" in sent[0], \
         "erzwungene Analyse pusht ihr Ergebnis"
     ap._maybe_reanalyze()
+    if ap._analysis_thread:
+        ap._analysis_thread.join(timeout=5)
     assert calls == [1] and len(sent) == 1, "kein Dauerfeuer, kein Push-Spam"
+
+
+def test_no_parallel_analysis_while_running():
+    """Loop-Tick während laufender Analyse darf keinen zweiten Lauf starten -
+    zwei parallele Läufe würden sich die Leader-Listen zerschreiben."""
+    import time as _t
+
+    ap = _autopilot()
+    calls = []
+    ap._reanalyze = lambda: calls.append(1)   # setzt running NICHT zurück
+    ap.notifier.send = lambda *a: None
+    ap._last_analysis = 0.0                   # Zeit-Trigger AN (uralt)
+    ap._analysis_running = True               # Analyse "läuft gerade"
+    ap._maybe_reanalyze()
+    assert calls == [], "kein Parallel-Start während laufender Analyse"
 
 
 def test_cmd_analyze_sets_flag_only_when_running():
