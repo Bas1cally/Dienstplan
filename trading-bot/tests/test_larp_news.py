@@ -222,9 +222,11 @@ def test_sprint_score_ranks_direction_over_profit():
     assert _sprint_score(sniper) > _sprint_score(whale)
 
 
-def test_analyzer_retries_shorter_window_for_active_traders():
-    """30d-Fenster voll (HL-Deckel ~2000 Fills) -> automatisch auf 7 Tagen neu
-    messen statt ungewertet wegwerfen. Nur wer AUCH 7d sprengt, ist 'zu aktiv'."""
+def test_analyzer_window_ladder_for_active_traders():
+    """Fenster-LEITER 30->7->2->1 Tage: wir messen in FILLS, nicht Trades -
+    aktive Trader mit vielen Teil-Ausführungen sprengen auch 7d. Statt sie
+    ungewertet wegzuwerfen ('zu aktiv'), wird das Fenster verkürzt, bis es
+    passt. Nur wer selbst EINEN Tag sprengt, ist wirklich HFT."""
     from bot.copytrade.analyzer import TraderAnalyzer
 
     def mk_fills(n):
@@ -232,28 +234,34 @@ def test_analyzer_retries_shorter_window_for_active_traders():
                 for i in range(n)]
 
     class _Info:
-        def __init__(self, second_batch):
+        def __init__(self, batches):
             self.calls = []
-            self.second = second_batch
+            self.batches = batches
 
         def user_fills_by_time(self, addr, start, end):
             self.calls.append((start, end))
-            return mk_fills(2000) if len(self.calls) == 1 else self.second
+            return self.batches[min(len(self.calls) - 1, len(self.batches) - 1)]
 
         def user_state(self, addr):
             return {"marginSummary": {"accountValue": "50000"}}
 
-    info = _Info(mk_fills(300))
-    a = TraderAnalyzer(info, days=30, throttle_s=0)
-    m = a.analyze("0xactive")
-    assert len(info.calls) == 2, "zweiter Abruf mit kürzerem Fenster"
+    # 30d voll -> 7d misst sauber
+    info = _Info([mk_fills(2000), mk_fills(300)])
+    m = TraderAnalyzer(info, days=30, throttle_s=0).analyze("0xactive")
+    assert len(info.calls) == 2 and m.days == 7 and not m.fills_truncated
     assert (info.calls[0][1] - info.calls[0][0]) > (info.calls[1][1] - info.calls[1][0])
-    assert m.days == 7 and not m.fills_truncated, "7d-Messung zählt"
     assert m.open_positions == 0 and m.open_green_share == 0.0
 
-    info2 = _Info(mk_fills(2000))   # auch 7d voll -> echtes HFT
-    m2 = TraderAnalyzer(info2, days=30, throttle_s=0).analyze("0xhft")
-    assert m2.fills_truncated, "wer auch 7d sprengt, bleibt 'zu aktiv'"
+    # 30d UND 7d voll -> 2d misst sauber (vorher: ungewertet 'zu aktiv')
+    info2 = _Info([mk_fills(2000), mk_fills(2000), mk_fills(500)])
+    m2 = TraderAnalyzer(info2, days=30, throttle_s=0).analyze("0xbusy")
+    assert len(info2.calls) == 3 and m2.days == 2 and not m2.fills_truncated
+
+    # selbst 1d voll (2000+ Fills/Tag) -> wirklich HFT, bleibt 'zu aktiv'
+    info3 = _Info([mk_fills(2000)])
+    m3 = TraderAnalyzer(info3, days=30, throttle_s=0).analyze("0xhft")
+    assert len(info3.calls) == 4, "Leiter komplett durchprobiert (30/7/2/1)"
+    assert m3.days == 1 and m3.fills_truncated
 
 
 def test_analyzer_parses_open_book_from_user_state():

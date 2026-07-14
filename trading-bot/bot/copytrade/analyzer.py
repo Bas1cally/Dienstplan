@@ -279,13 +279,19 @@ class TraderAnalyzer:
         start = end - self.days * 86_400_000
         fills = self._call(self.info.user_fills_by_time, address, start, end)
         days = self.days
-        if len(fills or []) >= 2000:
-            # 30-Tage-Fenster gesprengt (HL-Deckel ~2000 Fills): aktive Trader
-            # nicht ungewertet wegwerfen, sondern auf 7 Tagen neu vermessen.
-            # Wer AUCH 7 Tage sprengt (~285+ Fills/Tag), ist echtes HFT/MM.
+        # Fenster-LEITER statt Wegwerfen: HL deckelt userFills auf ~2000, und
+        # wir messen in FILLS, nicht Trades - ein aktiver Trader mit 50 Trades/
+        # Tag erzeugt über Teil-Ausführungen locker 500+ Fills/Tag und sprengt
+        # sogar 7 Tage (Live-Befund: 27 von 70 Kandidaten 'zu aktiv', darunter
+        # genau die Wochen-Board-Aktiven, die wir holen wollten). Also so lange
+        # verkürzen, bis das Fenster passt: 30 -> 7 -> 2 -> 1 Tage. Nur wer
+        # selbst EINEN Tag sprengt (2000+ Fills/Tag), ist wirklich HFT/MM.
+        for shorter in (7, 2, 1):
+            if len(fills or []) < 2000 or shorter >= days:
+                break
             fills = self._call(self.info.user_fills_by_time,
-                               address, end - 7 * 86_400_000, end)
-            days = 7
+                               address, end - shorter * 86_400_000, end)
+            days = shorter
         state = self._call(self.info.user_state, address)
         account_value = float(state["marginSummary"]["accountValue"])
         m = analyze_fills(address, fills, account_value, days)
