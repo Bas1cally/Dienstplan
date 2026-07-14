@@ -243,6 +243,31 @@ def test_tracker_snapshot_all_uses_last_good_cache():
     assert t2.last_fresh == 0 and t2.last_stale == 0
 
 
+def test_tracker_coverage_consistent_when_analysis_swaps_addresses_mid_round():
+    """Live-Anzeige 'Abdeckung 13/11': die Hintergrund-Analyse tauschte die
+    Adressliste MITTEN in einer Snapshot-Runde. Die Runde muss gegen ihre
+    EIGENE Listen-Kopie zählen, nicht gegen die schon getauschte."""
+    from bot.copytrade.tracker import LeaderTracker
+
+    class _SwappingInfo:
+        def __init__(self):
+            self.tracker = None
+
+        def user_state(self, address, dex=None):
+            if self.tracker is not None:
+                self.tracker.addresses = ["0xnur-noch-einer"]   # Analyse swappt
+            return _state(50_000, BTC=500)
+
+    info = _SwappingInfo()
+    t = LeaderTracker(info, ["0xa", "0xb", "0xc"], throttle_s=0)
+    info.tracker = t
+    snaps = t.snapshot_all()
+    assert len(snaps) == 3, "laufende Runde arbeitet ihre Liste komplett ab"
+    assert t.last_fresh == 3 and t.last_total == 3, \
+        "Zähler konsistent zur eigenen Runde (nie wieder '13/11')"
+    assert t.addresses == ["0xnur-noch-einer"], "Swap selbst bleibt wirksam"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

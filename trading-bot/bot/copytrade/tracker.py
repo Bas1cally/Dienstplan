@@ -86,9 +86,13 @@ class LeaderTracker:
         (fresh/stale/total) ist für /sprint sichtbar."""
         import time as _time
 
+        # Eigene Listen-Kopie: der Analyse-Thread darf self.addresses jederzeit
+        # atomar tauschen - die laufende Runde zählt gegen IHRE Liste, sonst
+        # entstehen unmögliche Anzeigen wie 'Abdeckung 13/11' (Live-Befund).
+        addrs = list(self.addresses)
         snaps: list[LeaderSnapshot] = []
         fresh = stale = 0
-        for i, addr in enumerate(self.addresses):
+        for i, addr in enumerate(addrs):
             if i and self.throttle_s:
                 _time.sleep(self.throttle_s)   # Bursts glätten (Rate-Limit-Hygiene)
             try:
@@ -105,5 +109,5 @@ class LeaderTracker:
                             addr[:10])
             snaps.append(s)
         self.last_fresh, self.last_stale = fresh, stale
-        self.last_total = len(self.addresses)
+        self.last_total = len(addrs)
         return snaps
