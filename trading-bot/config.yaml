@@ -154,21 +154,22 @@ sprint:
   equity: 1000
   leverage: 10
   target_profit: 100
-  pool_size: 12             # Sprint scannt einen breiteren Leader-Pool als das
+  pool_size: 20             # Sprint scannt einen breiteren Leader-Pool als das
                             # Hauptbuch (max_leaders: 6). Sprint hält immer nur EINE
                             # Position -> mehr Quellen = weniger Leerlauf, ohne die
                             # Qualität der Einstiege zu senken (bestbewerteter Leader
                             # mit frischem Signal gewinnt immer). Betrifft NUR Sprint,
                             # das Hauptbuch bleibt bei seinen 6 konzentriert.
-  pool_min_score: 25        # Mindest-RICHTUNGS-Score (0..100) für den Sprint-Pool.
-                            # Der Pool hat ein EIGENES Gate (larp.check_sprint):
-                            # Trefferquote >=52%, >=30 Trades, Aktivität, kein
-                            # Scalper - aber KEINE Profit-Größen-Gates (Lucky-
-                            # Punch, Wochen-Konsistenz, Drawdown, Swing-Cap).
-                            # Sprint reitet EINE Position bis +10% und ist raus:
-                            # es zählt, dass der Leader die Richtung erkennt,
-                            # nicht wie viel er selbst am Trade verdient.
-                            # Hauptbuch wählt weiter strikt ab analysis.min_score.
+  pool_min_score: 10        # Mindest-RICHTUNGS-Score (0..100) - bewusst nur ein
+                            # Anti-Müll-Boden, KEIN Vorab-Urteil. Philosophie
+                            # (Nutzer): das Sprint-Buch ist Papier mit Strike-
+                            # Maschine - ob ein Leader gut/schlecht/Flipper ist,
+                            # zeigen 1-2 Ritte (2 Strikes = Bann), Über-Filterung
+                            # dagegen kostet die ganze Messung (Live: Pool auf 6
+                            # geschrumpft, tagelange Dürre). Gate-Rest: Trefferquote
+                            # >=45% (nur systematische Falsch-Trader raus), >=8
+                            # Trades, halber Scalper-Boden, ODER grünes offenes
+                            # Buch >=55%. Hauptbuch bleibt strikt bei min_score 35.
   bust_frac: 0.05           # Liquidations-Modell: unter 5% Rest ist der Zyklus geplatzt
   rebalance_threshold: 0.02
   partial_exit_frac: 0.75   # Leader baut >=75% ab -> wir gehen mit raus (Scale-out)

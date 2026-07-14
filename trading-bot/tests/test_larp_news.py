@@ -141,21 +141,27 @@ def test_sprint_gate_passes_main_larp_kos():
     assert v.passed, f"Sprint-Gate muss durchlassen: {v.reasons}"
 
 
-def test_sprint_gate_rejects_coinflip():
-    """Trefferquote ~50% = Münzwurf: erkennt die Richtung nicht -> raus,
-    egal wie profitabel die Gewinne waren (Asymmetrie hilft Sprint nicht)."""
+def test_sprint_gate_rejects_systematic_loser_allows_coinflip():
+    """Philosophie-Wechsel (Nutzer): Strikes sind der echte Filter - ein
+    Münzwurf-Trader (50%) darf in den PAPIER-Pool (max. 2 Verlust-Ritte, dann
+    Bann), nur SYSTEMATISCHE Falsch-Trader (deutlich unter 45%) bleiben draußen."""
     from bot.copytrade.larp import check_sprint
 
-    fills = []
-    for i in range(40):   # 40 Trades, exakt jeder zweite gewinnt
-        t = i * 18 * 3600 * 1000
-        pnl = 300.0 if i % 2 else -30.0
-        fills.append(fill(t, side="B", sz=1.0, start=0, fee=0.1))
-        fills.append(fill(t + 120 * MIN, side="A", sz=1.0, closed=pnl, start=1, fee=0.1))
-    m = analyze_fills("0xflip", fills, account_value=10000, days=30)
-    v = check_sprint(m)
-    assert not v.passed
-    assert any("Trefferquote" in r for r in v.reasons)
+    def trader(win_every):
+        fills = []
+        for i in range(40):
+            t = i * 18 * 3600 * 1000
+            pnl = 300.0 if i % win_every == 0 else -30.0
+            fills.append(fill(t, side="B", sz=1.0, start=0, fee=0.1))
+            fills.append(fill(t + 120 * MIN, side="A", sz=1.0, closed=pnl, start=1, fee=0.1))
+        return analyze_fills("0x", fills, account_value=10000, days=30)
+
+    loser = trader(win_every=3)     # ~33% Trefferquote: systematisch falsch
+    v = check_sprint(loser)
+    assert not v.passed and any("Trefferquote" in r for r in v.reasons)
+
+    coinflip = trader(win_every=2)  # 50%: rein damit, Strikes urteilen
+    assert check_sprint(coinflip).passed, "Münzwurf darf in den Papier-Pool"
 
 
 def test_sprint_gate_still_rejects_scalper_and_thin_history():

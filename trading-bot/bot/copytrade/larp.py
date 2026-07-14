@@ -77,8 +77,15 @@ class LarpFilter:
         return LarpVerdict(passed=not reasons, reasons=reasons)
 
 
-# Sprint-Buch: Münzwurf wäre 50% - darunter erkennt niemand "die Richtung".
-SPRINT_MIN_WIN_RATE = 0.52
+# Sprint-Buch: bewusst WEIT unter Münzwurf-Niveau angesetzt (0.45 statt 0.52).
+# Philosophie-Wechsel nach Live-Befund (Pool schrumpfte auf 6, totale Signal-
+# Dürre): das Sprint-Buch ist PAPIER mit Strike-Maschine - ein schwacher
+# Leader kostet maximal 2 Verlust-Ritte und fliegt dann gebannt raus, aber
+# Über-Filterung kostet die komplette Messung. Das Gate soll nur noch
+# systematische Falsch-Trader und Müll blocken; die Wahrheitsfindung
+# (gut/schlecht/Flipper) übernehmen Strikes/Bans im Betrieb.
+SPRINT_MIN_WIN_RATE = 0.45
+SPRINT_MIN_GREEN_SHARE = 0.55
 
 
 def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict:
@@ -102,24 +109,27 @@ def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict
     Strikes/Bans räumen schwache Leader ohnehin nach 2 Verlust-Ritten ab."""
     c = cfg or LarpConfig()
 
-    # --- Pfad A: aktiver Trader ---
+    # --- Pfad A: aktiver Trader (lockere Anti-Müll-Gates, Strikes urteilen) ---
     a: list[str] = []
-    min_trips = max(10, c.min_round_trips // 2)
+    min_trips = max(8, c.min_round_trips // 4)
     if m.round_trips < min_trips:
         a.append(f"nur {m.round_trips} Round-Trips (< {min_trips})")
     # Bei verkürztem Messfenster (7d-Retry sehr aktiver Trader) anteilig fordern
     min_days = min(c.min_active_days, max(1, int(m.days * 0.6)))
     if m.active_days < min_days:
         a.append(f"nur {m.active_days} aktive Tage (< {min_days})")
-    if 0 < m.median_holding_minutes < c.min_median_holding_minutes:
+    # Halber Scalper-Boden des Hauptbuchs: Ritte brauchen Zeit für ~1% Bewegung,
+    # aber der Leader-Exit-Folge sei Dank ist ein Schnell-Trader kein Desaster
+    min_hold = c.min_median_holding_minutes * 0.5
+    if 0 < m.median_holding_minutes < min_hold:
         a.append(
             f"Scalper: mediane Haltedauer {m.median_holding_minutes:.0f}min "
-            f"(< {c.min_median_holding_minutes:.0f}min) - zu kurz für ~1% Bewegung"
+            f"(< {min_hold:.0f}min) - zu kurz für ~1% Bewegung"
         )
     if m.win_rate < SPRINT_MIN_WIN_RATE:
         a.append(
             f"Trefferquote {m.win_rate:.0%} (< {SPRINT_MIN_WIN_RATE:.0%}) - "
-            f"erkennt die Richtung nicht besser als der Münzwurf"
+            f"systematisch falsche Richtung"
         )
     if not a:
         return LarpVerdict(passed=True)
@@ -128,8 +138,9 @@ def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict
     b: list[str] = []
     if m.open_positions < 1:
         b.append("keine offenen Positionen")
-    if m.open_green_share < 0.60:
-        b.append(f"offenes Buch nur {m.open_green_share:.0%} im Plus (< 60%)")
+    if m.open_green_share < SPRINT_MIN_GREEN_SHARE:
+        b.append(f"offenes Buch nur {m.open_green_share:.0%} im Plus "
+                 f"(< {SPRINT_MIN_GREEN_SHARE:.0%})")
     if m.net_pnl + m.open_unrealized <= 0:
         b.append("Fenster-PnL inkl. unrealisiert <= 0")
     if not b:

@@ -344,13 +344,14 @@ class SprintConfig:
     # Quellen = weniger Leerlauf, OHNE Qualitätsverlust bei den genommenen Einstiegen
     # (der Top-Leader gewinnt immer, wenn er aktiv ist). Das Hauptbuch bleibt
     # konzentriert bei copytrade.max_leaders - dieser Pool betrifft nur das Sprint-Buch.
-    pool_size: int = 12
+    pool_size: int = 20
     # Mindest-RICHTUNGS-Score (TraderMetrics.sprint_score, 0..100) für den Pool.
-    # Der Pool nutzt ein eigenes LARP-Gate (larp.check_sprint) und eine eigene
-    # Skala: Trefferquote/Konsistenz/Stichprobe statt Profit-Größe - Sprint
-    # nimmt +10% und ist raus, der Profit des Leaders selbst ist egal
-    # (Nutzer-Vorgabe). Hauptbuch bleibt strikt bei analysis.min_score.
-    pool_min_score: float = 25.0
+    # Bewusst NIEDRIG (Anti-Müll-Boden, kein Vorab-Urteil): das Sprint-Buch ist
+    # Papier mit Strike-Maschine - schwache Leader fliegen nach max. 2 Verlust-
+    # Ritten gebannt raus, Über-Filterung dagegen kostet die ganze Messung
+    # (Live-Befund: Pool schrumpfte auf 6, tagelange Signal-Dürre).
+    # Hauptbuch bleibt strikt bei analysis.min_score.
+    pool_min_score: float = 10.0
     rebalance_threshold: float = 0.02
     min_notional: float = 10.0
     # Teil-Exit-Folge: hat der Leader >= partial_exit_frac seiner Einstiegsgröße
