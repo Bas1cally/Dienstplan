@@ -9,6 +9,14 @@ ist da; Chat-Verlauf ist es nicht.
 > CMM-Discovery + 12er-Pool. Danach hat der Sprint-Ausbau Vorrang — zuerst
 > das Confidence-Points/Star-System (Spec unten), dann ggf. Lighter-Promotion
 > in den Sprint-Pool, je nach Lighter-Schatten-Zahlen.
+>
+> **UPDATE 15.07. — MESS-MODUS aktiv:** `sprint.parallel_rides: true`
+> (config.yaml) lässt für die Mess-Woche JEDES Signal als eigenen Ritt auf
+> 1000$-Basis parallel laufen (Trader-Bewertung je Ritt, nichts blockiert).
+> **ENDZIEL danach (Nutzer wörtlich): „POOL -> EIN GUTER RITT -> 10% -> RAUS,
+> eine Position"** — nach der Mess-Woche `parallel_rides: false` setzen und
+> mit den gesammelten Strike-/Winrate-Daten den EINEN guten Ritt fahren.
+> Krypto-only bleibt in beiden Modi (Aktien-Perps stören die Messlatte).
 
 ---
 
