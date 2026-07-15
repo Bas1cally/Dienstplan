@@ -498,13 +498,18 @@ class Autopilot:
                 for p in pending)
             pending_block = f"\n⏳ Bestätigung läuft:\n{p_lines}"
 
-        # Strikes/Bann/Stars nur zeigen, wenn's dazu etwas zu sagen gibt -
-        # ein leeres 'Strikes: - | gesperrt: - | Stars: -' ist reines Rauschen.
+        # Strikes/Bann nur als ZAHL - die einzelnen Adressen sind fürs
+        # Tagesgeschäft Rauschen (Nutzer-Feedback), Details stehen in
+        # /sprint pool. Stars bleiben namentlich, das ist die positive,
+        # kurze Liste, die man tatsächlich lesen will.
         badges = []
-        if s.get("strikes"):
-            badges.append("Strikes: " + ", ".join(f"{a}:{n}" for a, n in s["strikes"].items()))
-        if s.get("banned"):
-            badges.append("🚫 Gesperrt: " + ", ".join(s["banned"]))
+        n_strikes = len(s.get("strikes") or {})
+        n_banned = len(s.get("banned") or [])
+        if n_strikes or n_banned:
+            bits = [f"{n_strikes} mit Strikes"] if n_strikes else []
+            if n_banned:
+                bits.append(f"🚫 {n_banned} gesperrt")
+            badges.append(", ".join(bits) + " (Details: /sprint pool)")
         if s.get("stars"):
             badges.append("⭐ Stars: " + ", ".join(s["stars"]))
         badges_block = f"\n{' | '.join(badges)}" if badges else ""
@@ -819,7 +824,9 @@ class Autopilot:
             f"🚀 <b>Autopilot gestartet</b>\n"
             f"Modus: {'DRY-RUN' if self.cfg.dry_run else 'LIVE'} auf "
             f"{'Testnet' if self.cfg.is_testnet else 'Mainnet'}\n"
-            f"Leader: {len(self.leaders)} | max {self.cfg.risk.max_leverage}x"
+            f"Haupt-Buch: {len(self.leaders)} Leader | max {self.cfg.risk.max_leverage}x"
+            + (f"\nSprint-Pool: {len(self.sprint_leaders)} Leader"
+               if self.cfg.sprint.enabled else "")
         )
         while not self._stop.is_set():
             try:

@@ -240,6 +240,22 @@ def test_stats_immune_to_concurrent_close_race():
             and s["positions"] == [], "stats() darf sich nicht mehr auf sizes() stützen"
 
 
+def test_stats_hides_stale_leader_when_flat():
+    """Nutzer-Befund: /sprint zeigte 'wartet auf frisches Signal' UND trotzdem
+    einen Leader an - self.ride_leader wird separat von der positions-
+    Momentaufnahme gelesen, kann also (Hintergrund-Loop, anderer Thread) kurz
+    hinter 'schon geschlossen' zurückbleiben. leader/leader_is_star müssen wie
+    held/state aus DERSELBEN positions-Abfrage abgeleitet werden."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.ride_leader = "0xghost"   # simuliert: schon geschlossen, aber noch nicht geräumt
+        b.confidence["0xghost"] = STAR_THRESHOLD
+        s = b.stats(P)
+        assert s["state"] == "wartet auf frisches Signal"
+        assert s["leader"] == "", "kein Leader, solange wir nicht wirklich reiten"
+        assert s["leader_is_star"] is False
+
+
 def test_stats_survives_empty_prices_right_after_restart():
     """Regression: direkt nach einem Neustart (/update) sind self.copier.last_prices
     noch leer, bevor der erste Tick frische Preise holt - stats(prices={}) darf

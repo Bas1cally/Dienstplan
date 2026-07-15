@@ -860,6 +860,14 @@ class SprintBook:
         else:
             eq = self.paper.equity(prices)
         held = [f"{p['coin']} {'LONG' if p['size'] > 0 else 'SHORT'}" for p in positions]
+        # Leader NUR zeigen, solange wir wirklich reiten (aus derselben
+        # positions-Momentaufnahme abgeleitet wie held/state) - self.ride_leader
+        # separat zu lesen könnte sonst denselben Cross-Thread-Race wie oben
+        # zeigen: Hintergrund-Loop räumt zwischen dem Schließen der Positionen
+        # und dem Leader-Reset in _settle_ride() kurz auf, ein zeitgleicher
+        # /sprint-Aufruf sähe dann 'wartet auf frisches Signal' UND einen
+        # (bereits stillgelegten) Leader gleichzeitig - genau der beobachtete Bug.
+        leader = self.ride_leader if positions else ""
         cycles_done = self.won + self.busted
         # Zyklus = Ritt (v3): cycle_pnl IST die PnL des laufenden Ritts, es gibt
         # keine separate "Ritt-PnL" mehr (die beiden waren vorher unterschiedlich,
@@ -885,8 +893,8 @@ class SprintBook:
             "trades": self.paper.trades,
             "avg_trades_per_cycle": round((self.total_trades + self.paper.trades)
                                           / max(1, cycles_done + 1), 1),
-            "leader": self.ride_leader,
-            "leader_is_star": self.is_star(self.ride_leader) if self.ride_leader else False,
+            "leader": leader,
+            "leader_is_star": self.is_star(leader) if leader else False,
             "strikes": {a[:10]: n for a, n in self.strikes.items() if n > 0},
             "banned": [a[:10] for a in self.banned],
             # Confidence nur für Leader mit Punkten (0 sind uninteressant);
