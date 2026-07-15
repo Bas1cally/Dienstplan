@@ -296,38 +296,30 @@ class Autopilot:
                 f"<i>/quest = Details | /analyze = Analyse sofort anstoßen</i>")
 
     def _cmd_report(self) -> str:
-        from .report import summarize
-        journal = self.journal.tail(5000)
-        history = []
-        try:
-            hist_path = RUNTIME / "history.jsonl"
-            if hist_path.exists():
-                for line in hist_path.read_text().splitlines()[-1000:]:
-                    try:
-                        history.append(json.loads(line))
-                    except ValueError:
-                        continue
-        except OSError:
-            pass
-        paper = None
-        if self.copier and self.copier.paper:
-            b = self.copier.paper
-            paper = {"trades": b.trades, "realized_pnl": round(b.realized_pnl, 2),
-                     "fees_paid": round(b.fees_paid, 2)}
-        s = summarize(journal, history, paper)
-        lines = [f"<b>Report</b>"]
-        if "days" in s:
-            lines.append(f"{s['days']}T: {s['equity_start']:,.0f}→{s['equity_end']:,.0f} "
-                         f"({s['return_pct']:+.2f}%)")
-        lines.append(f"Orders: {s['orders']} | Vetos: {s['vetoes']}")
-        if s.get("maker_share") is not None:
-            lines.append(f"Maker-Quote: {s['maker_share']:.0%}")
-        if paper:
-            lines.append(f"PnL: {s.get('realized_pnl', 0):+,.2f} | Fees: {s.get('fees_paid', 0):,.2f}")
-        if self.labs and self.copier and self.copier.last_prices:
-            lines.append("<b>Spuren:</b>")
-            for name, st in self.labs.stats(self.copier.last_prices).items():
-                lines.append(f"  {name}: {st['realized_pnl']:+,.2f} ({st['trades']} Tr.)")
+        """Quest-Auswertung: es gibt nur noch den Quest-Bot, der Report dreht
+        sich ausschließlich um ihn und die Schatztruhe."""
+        if not self.sprint:
+            return "Quest-Bot nicht aktiv (sprint.enabled / dry_run prüfen)."
+        s = self.sprint.stats(self.copier.last_prices if self.copier else {})
+        total = s["won"] + s["busted"]
+        wr = (s["won"] / total * 100) if total else 0.0
+        lines = [
+            "<b>Quest-Report</b>",
+            f"Schatztruhe: {s['banked']:+,.2f} $",
+            f"Zyklen: {total} abgeschlossen ({s['won']}✅ {s['busted']}💥"
+            + (f", Trefferquote {wr:.0f}%" if total else "") + ")",
+            f"Ø {s['avg_trades_per_cycle']} Trades/Zyklus | Pool {len(self.sprint_leaders)}",
+        ]
+        badges = []
+        if s.get("stars"):
+            badges.append(f"⭐ {', '.join(s['stars'])}")
+        n_str, n_ban = len(s.get("strikes") or {}), len(s.get("banned") or [])
+        if n_str or n_ban:
+            badges.append(f"{n_str} mit Strikes, 🚫 {n_ban} gesperrt")
+        if badges:
+            lines.append(" | ".join(badges))
+        lines += ["", self._sprint_asset_breakdown(),
+                  "\n<i>/fullreport = ausführlich zum Copy-Paste</i>"]
         return "\n".join(lines)
 
     def _cmd_fullreport(self, arg: str = "") -> str:

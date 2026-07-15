@@ -240,58 +240,61 @@ def test_build_report_no_data():
 
     with tempfile.TemporaryDirectory() as tmp:
         text = report_mod.build_report(offline=True, runtime_dir=Path(tmp))
-    assert "Noch keine Daten" in text
+    assert "Noch keine Quest-Daten" in text
 
 
-def test_build_report_offline_includes_all_active_tracks():
-    """Volle Fixture (Haupt-Buch + Sprint + Vetos) -> alle Abschnitte im
-    Text vorhanden, identisch zur bisherigen CLI-Ausgabe (Zeilen/Labels)."""
+def test_build_report_is_quest_only():
+    """Quest-Bot-Umstellung: der Report dreht sich NUR noch um den Quest-Bot -
+    Schatztruhe, Zyklen, Krypto-vs-Aktien, LARP-Filter. Kein Paper-Lauf-Report
+    des Kopier-Buchs, keine Veto-/Scout-Sektionen mehr."""
     import report as report_mod
 
     with tempfile.TemporaryDirectory() as tmp:
         rt = Path(tmp)
-        trades = [order(i * 3600) for i in range(5)]
-        trades.append(veto(999, coin="ETH"))
+        # Journal mit abgeschlossenen Quest-Zyklen (Krypto + Aktie), coin-Feld gesetzt
+        trades = [
+            {"kind": "sprint_tp", "coin": "ETH", "pnl": 100.0, "t": 1000},
+            {"kind": "sprint_bust", "coin": "xyz:TSLA", "pnl": -50.0, "t": 2000},
+            {"kind": "sprint_cycle_end", "coin": "SOL", "pnl": 30.0, "t": 3000},
+        ]
         (rt / "trades.jsonl").write_text("\n".join(json.dumps(t) for t in trades))
-        (rt / "history.jsonl").write_text(
-            "\n".join(json.dumps(h) for h in history(2, 10_000, 10_235)))
-        (rt / "paper_state.json").write_text(json.dumps(
-            {"trades": 5, "realized_pnl": 120.5, "fees_paid": 3.2, "initial_equity": 10_000}))
         (rt / "sprint_cycles.json").write_text(json.dumps(
-            {"won": 3, "busted": 2, "banked": 252.89,
-             "strikes": {"0xfd688aed": 2}, "banned": ["0xfd688aed"]}))
+            {"won": 3, "busted": 2, "banked": 252.89, "total_trades": 8,
+             "strikes": {"0xfd688aed": 2}, "banned": ["0xfd688aed"],
+             "confidence": {"0xbest": 100, "0xok": 15}}))
         (rt / "sprint_book.json").write_text(json.dumps(
             {"initial_equity": 1000, "realized_pnl": 0, "trades": 0}))
+        (rt / "sprint_leaders.json").write_text(json.dumps(
+            [{"address": f"0x{i}"} for i in range(21)]))
         text = report_mod.build_report(offline=True, runtime_dir=rt)
 
-    assert "=== Paper-Lauf-Report ===" in text
-    assert "Realisierter PnL" in text and "+120.50" in text
-    assert "Sprint-Buch" in text and "banked +252.89" in text
-    assert "Strikes {'0xfd688aed': 2}" in text and "gesperrt ['0xfd688aed']" in text
-    assert "=== Empfehlungen ===" in text
-    assert "Bewerte geblockte Trades" not in text, "offline darf keine Netz-Analyse anstoßen"
+    assert "=== Quest-Bot Report ===" in text
+    assert "Schatztruhe" in text and "+252.89" in text
+    assert "Krypto" in text and "Aktien" in text          # Asset-Aufschlüsselung
+    assert "⭐ Stars" in text and "0xbest" in text          # Star ab 100 Confidence
+    assert "Gesperrt" in text and "1 Leader" in text       # 1 gebannt
+    assert "Pool" in text and "21 Leader" in text
+    # KEINE Kopier-Buch-/Veto-/Empfehlungs-Sektionen mehr
+    assert "Paper-Lauf-Report" not in text
+    assert "Vetos" not in text and "Empfehlungen" not in text
 
 
-def test_build_report_offline_skips_network_veto_analysis():
-    """offline=True darf NIE versuchen, HyperliquidClient/Preise zu holen -
-    sonst würde /fullreport offline auf dem Server unnötig Netz-Last erzeugen."""
+def test_build_report_uses_no_network_at_all():
+    """Der Quest-Report ist rein lokal (Runtime-Dateien) - er darf NIE einen
+    HyperliquidClient bauen, auch nicht mit offline=False."""
     import report as report_mod
 
     with tempfile.TemporaryDirectory() as tmp:
         rt = Path(tmp)
-        trades = [order(1)] + [veto(i + 10) for i in range(5)]
-        (rt / "trades.jsonl").write_text("\n".join(json.dumps(t) for t in trades))
-        (rt / "history.jsonl").write_text(
-            "\n".join(json.dumps(h) for h in history(3, 10_000, 10_100)))
-        # Kein Netz-Client importierbar/aufrufbar in diesem Testlauf - würde
-        # build_report ihn dennoch bauen, flöge hier eine Exception
-        text = report_mod.build_report(offline=True, runtime_dir=rt)
-    assert "=== Empfehlungen ===" in text  # kein Crash, kein Netz-Versuch
+        (rt / "sprint_cycles.json").write_text(json.dumps({"won": 1, "busted": 0, "banked": 10.0}))
+        # offline=False - früher hätte das den Netz-Client gebaut; jetzt egal
+        text = report_mod.build_report(offline=False, runtime_dir=rt)
+    assert "=== Quest-Bot Report ===" in text
 
 
 def test_build_report_cli_main_prints_same_content():
     """main() (python report.py) muss weiterhin exakt das drucken, was
-    build_report() zurückgibt - reiner Verhaltens-Erhalt nach dem Refactor."""
+    build_report() zurückgibt - reiner Verhaltens-Erhalt."""
     import contextlib
     import io
     import sys as _sys
@@ -309,7 +312,7 @@ def test_build_report_cli_main_prints_same_content():
                 report_mod.main()
         finally:
             _sys.argv, report_mod.RUNTIME = orig_argv, orig_runtime
-    assert "Noch keine Daten in runtime/" in buf.getvalue()
+    assert "Noch keine Quest-Daten in runtime/" in buf.getvalue()
 
 
 # ---------- chunk_for_telegram (Telegram-4096-Zeichen-Limit) ----------
