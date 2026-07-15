@@ -69,6 +69,14 @@ STAR_THRESHOLD = 100
 # Downtime wäre der Einstieg dagegen längst verpasst -> lieber re-baselinen.
 _BASELINE_MAX_AGE_S = 600.0
 
+# Sicherheitsnetz gegen einen Live-Befund: fehlt für einen pending Coin
+# dauerhaft der Preis (z.B. Symbol nicht in all_mids(), Feed-Lücke für genau
+# diesen Coin), wartete der Kandidat bisher UNBEGRENZT - weder Promotion noch
+# Reject war möglich, "Bestätigung läuft" stand für immer bei X% des
+# Fensters. Nach dieser Zeit OHNE JEMALS einen Preis gesehen zu haben, wird
+# der Kandidat verworfen statt für immer zu hängen.
+_PENDING_MAX_AGE_S = 120.0
+
 
 class SprintBook:
     def __init__(self, cfg, fee_rate: float, notifier=None, journal=None,
@@ -309,7 +317,15 @@ class SprintBook:
                 continue
             price = prices.get(coin)
             if not price:
-                continue  # kein Preis diesen Tick - weder disqualifizieren noch promoten
+                # Kein Preis diesen Tick - weder disqualifizieren noch promoten,
+                # ABER nicht unbegrenzt: fehlt der Preis dauerhaft (Live-Befund:
+                # TAO blieb minutenlang "1 Signal(e) werden bestätigt", ohne
+                # jemals zu promoten oder zu verwerfen), löst das Sicherheitsnetz
+                # nach _PENDING_MAX_AGE_S aus, statt für immer zu hängen.
+                if self.clock() - info["since"] > _PENDING_MAX_AGE_S:
+                    self._pending.pop(coin, None)
+                    self._reject(coin, leader, "unbestaetigt_kein_preis")
+                continue
             if not pos.not_losing(price):
                 self._pending.pop(coin, None)
                 self._reject(coin, leader, "unbestaetigt_negativ")
@@ -924,8 +940,13 @@ class SprintBook:
             # Bestätigungs-Kandidaten (Flip-Flopper-Schutz): laufen gerade,
             # noch nicht promoted/verworfen - sonst wäre "wartet auf frisches
             # Signal" von "Signal wartet auf Bestätigung" ununterscheidbar.
+            # 'hat_preis' macht sofort sichtbar, WARUM ein Kandidat trotz
+            # abgelaufenem Fenster noch nicht promoted ist (Live-Befund: TAO
+            # blieb bei 62s/10s hängen, weil kein Preis ankam) - ohne
+            # 'hat_preis' sah das identisch zu 'wartet noch normal' aus.
             "pending": [{"coin": c, "leader": i["leader"][:10],
-                        "wait_s": round(self.clock() - i["since"], 1)}
+                        "wait_s": round(self.clock() - i["since"], 1),
+                        "hat_preis": bool(prices.get(c))}
                        for c, i in self._pending.items()],
             # Warm/kalt-Start (Nutzer-Nachfrage): unterscheidet 'echte Ruhe seit
             # dem letzten Save' von 'frischer Kaltstart, noch keine

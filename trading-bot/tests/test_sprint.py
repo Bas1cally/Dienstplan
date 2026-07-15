@@ -843,8 +843,33 @@ def test_no_price_neither_promotes_nor_rejects_pending():
         b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"ETH": 100.0})  # kein BTC-Preis
         assert b.paper.sizes() == {} and b.stats(P)["pending"], \
             "weder promoted noch verworfen - bleibt stehen"
+        assert b.stats({"ETH": 100.0})["pending"][0]["hat_preis"] is False, \
+            "sichtbar machen, DASS gerade kein Preis da ist"
         b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 100.0, "ETH": 100.0})
         assert "BTC" in b.paper.sizes(), "sobald der Preis wieder da ist, geht's normal weiter"
+
+
+def test_pending_candidate_times_out_if_price_never_arrives():
+    """Live-Befund: ein Kandidat (TAO) blieb minutenlang 'wird bestätigt',
+    weit über dem Fenster hinaus, weil nie ein Preis für den Coin ankam -
+    weder Promotion noch Reject war möglich. Sicherheitsnetz: nach
+    _PENDING_MAX_AGE_S OHNE JEMALS einen Preis gesehen zu haben, wird
+    verworfen statt für immer zu hängen."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert b.stats(P)["pending"]
+
+        t["now"] += 119   # knapp unter dem Sicherheitsnetz
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"ETH": 100.0})
+        assert b.stats(P)["pending"], "noch nicht so lange - bleibt stehen"
+
+        t["now"] += 2   # jetzt über 120s ohne jemals einen Preis gesehen zu haben
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"ETH": 100.0})
+        assert b.stats(P)["pending"] == [], "Sicherheitsnetz greift - hängt nicht ewig"
+        assert b.stats(P)["scan"]["rejected"].get("unbestaetigt_kein_preis") == 1
 
 
 def test_two_candidates_confirm_same_tick_highest_score_wins():

@@ -500,8 +500,13 @@ class Autopilot:
         pending_block = ""
         if pending:
             delay = self.sprint.cfg.confirm_delay_s
+            # Live-Befund: ein Kandidat blieb weit über dem Fenster hängen,
+            # weil kein Preis für den Coin ankam - weder Promotion noch
+            # Reject möglich. 'kein Preis' macht das sofort sichtbar, statt
+            # rätseln zu müssen, warum die Bestätigung ewig läuft.
             p_lines = "\n".join(
                 f"  {p['coin']} via <code>{p['leader']}…</code> ({p['wait_s']:.0f}s/{delay:.0f}s)"
+                + ("" if p.get("hat_preis", True) else " ⚠️ kein Preis")
                 for p in pending)
             pending_block = f"\n⏳ Bestätigung läuft:\n{p_lines}"
 
