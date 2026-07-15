@@ -103,6 +103,77 @@ def test_sprint_pool_always_contains_main_leaders():
     assert len(pool) == 6, "0xz zusätzlich zu den Top-5 angehängt"
 
 
+def _autopilot_with_sprint(tmp):
+    from bot.sprint import SprintBook
+    ap = _autopilot()
+    ap.sprint = SprintBook(ap.cfg.sprint, ap.cfg.backtest.fee_rate, runtime_dir=Path(tmp))
+    return ap
+
+
+def test_build_sprint_pool_evicts_banned_larp_next_candidate_rises():
+    """Nutzer-Kernbefund: der Sinn der Strikes ist 'LARPs raus, neue Wallets
+    rein'. Ein gebannter Leader darf keinen Pool-Slot mehr blockieren - der
+    nächstbeste frische Kandidat rückt auf den frei gewordenen Platz nach."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.sprint.pool_size = 3
+        ap.leaders = []
+        ap.sprint.banned.add("0xb")   # wäre nach Score der Zweitbeste, aber LARP
+        ranked = [metrics("0xa", 60), metrics("0xb", 55),
+                  metrics("0xc", 50), metrics("0xd", 45)]
+        pool = ap._build_sprint_pool(ranked)
+    addrs = [p["address"] for p in pool]
+    assert "0xb" not in addrs, "gebannter LARP fliegt aus dem Pool"
+    assert addrs == ["0xa", "0xc", "0xd"], \
+        "nächstbester (0xd) rückt auf den frei gewordenen Slot statt leer zu bleiben"
+
+
+def test_build_sprint_pool_does_not_force_in_banned_main_leader():
+    """Selbst ein Haupt-Leader wird NICHT in den Sprint-Pool gezwungen, wenn
+    Sprint ihn gebannt hat - der Ban ist das speziellere, stärkere Urteil."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.sprint.pool_size = 5
+        ap.leaders = [leader("0xz")]
+        ap.sprint.banned.add("0xz")
+        pool = ap._build_sprint_pool([metrics("0xa", 60), metrics("0xz", 36)])
+    assert "0xz" not in [p["address"] for p in pool]
+
+
+def test_prune_banned_from_pool_evicts_and_forces_fresh_analysis():
+    """Beim Start ist der Pool schon geladen, bevor das Sprint-Buch (mit Bans)
+    existiert - _prune_banned_from_pool wirft die Gebannten nachträglich raus
+    und fordert eine frische Analyse an, damit neue Wallets die freien Slots
+    füllen statt den Pool bloß schrumpfen zu lassen."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.leaders = []
+        ap._force_analysis = False
+        ap.sprint_leaders = [{"address": "0xa"}, {"address": "0xbad"}, {"address": "0xc"}]
+        ap.sprint.banned.add("0xbad")
+        ap._prune_banned_from_pool()
+    assert [l["address"] for l in ap.sprint_leaders] == ["0xa", "0xc"], "0xbad geworfen"
+    assert ap._force_analysis is True, "frische Analyse angefordert (neue Wallets rein)"
+
+
+def test_prune_banned_from_pool_noop_without_bans():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap._force_analysis = False
+        ap.sprint_leaders = [{"address": "0xa"}, {"address": "0xc"}]
+        ap._prune_banned_from_pool()
+    assert [l["address"] for l in ap.sprint_leaders] == ["0xa", "0xc"]
+    assert ap._force_analysis is False, "ohne Bans keine unnötige Analyse-Anforderung"
+
+
 def test_tracked_addresses_union_no_duplicates():
     ap = _autopilot()
     ap.cfg.sprint.enabled = True

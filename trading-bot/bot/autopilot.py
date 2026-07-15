@@ -1016,6 +1016,9 @@ class Autopilot:
             log.info("Sprint-Buch aktiv: %.0f$ x%.0f auf den besten Leader, Ziel +%.0f$/Zyklus",
                      self.cfg.sprint.equity, self.cfg.sprint.leverage,
                      self.cfg.sprint.target_profit)
+            # Gebannte Leader aus dem beim Start geladenen Pool werfen (das Buch
+            # mit seinen Bans existiert erst jetzt, nach _load_sprint_pool).
+            self._prune_banned_from_pool()
         # Lighter-Schatten: fremde Lighter-Trader auto-entdecken + auf HL messen
         self.lighter = None
         if self.cfg.dry_run and self.cfg.lighter.enabled:
@@ -1069,18 +1072,54 @@ class Autopilot:
                 addrs.append(a)
         return addrs
 
+    def _sprint_banned(self) -> set[str]:
+        """Adressen, die Sprint als LARP enttarnt hat (lowercase). Leer, wenn
+        Sprint aus ist oder das Buch noch nicht existiert."""
+        return self.sprint.banned if self.sprint else set()
+
     def _build_sprint_pool(self, sprint_ok) -> list[dict]:
         """Top-pool_size nach RICHTUNGS-Score (sprint_score) aus den Sprint-
         tauglichen Wallets; Haupt-Leader immer enthalten (sie sind bewiesen gut
-        genug fürs Hauptbuch - Sprint darf sie nie aus den Augen verlieren)."""
+        genug fürs Hauptbuch - Sprint darf sie nie aus den Augen verlieren).
+
+        Gebannte Leader fliegen RAUS - das ist der Sinn des Strike-Systems
+        (Nutzer): ein enttarnter LARP darf keinen Pool-Slot mehr blockieren,
+        der nächstbeste frische Kandidat rückt nach. Ohne diesen Filter blieb
+        ein gebannter Leader für immer im Pool sitzen (fraß Scan-/Snapshot-
+        Slot) und seine Signale wurden nur still verworfen, statt ersetzt."""
+        banned = self._sprint_banned()
         n = max(self.cfg.sprint.pool_size, len(self.leaders))
-        top = sorted(sprint_ok, key=lambda m: m.sprint_score, reverse=True)[:n]
+        top = sorted((m for m in sprint_ok if m.address.lower() not in banned),
+                     key=lambda m: m.sprint_score, reverse=True)[:n]
         pool = [{"address": m.address, "score": round(m.sprint_score, 1)} for m in top]
         have = {p["address"] for p in pool}
         for l in self.leaders:
-            if l["address"] not in have:
+            if l["address"] not in have and l["address"].lower() not in banned:
                 pool.append({"address": l["address"], "score": l.get("score", 0)})
         return pool
+
+    def _prune_banned_from_pool(self) -> None:
+        """Ein Sprint-Ban soll den LARP nicht nur stumm schalten, sondern seinen
+        Pool-Slot freigeben (Nutzer: 'LARPs raus, neue Wallets rein'). Beim Start
+        existiert das Sprint-Buch erst NACH _load_sprint_pool - hier also
+        nachträglich die gebannten aus dem geladenen Pool werfen. Wurden dadurch
+        Plätze frei, eine frische Analyse anfordern: die füllt sie mit NEUEN
+        Kandidaten (der _build_sprint_pool-Filter oben hält die Gebannten dann
+        dauerhaft draußen), statt den Pool bloß schrumpfen zu lassen."""
+        banned = self._sprint_banned()
+        if not banned:
+            return
+        before = len(self.sprint_leaders)
+        self.sprint_leaders = [l for l in self.sprint_leaders
+                               if str(l.get("address", "")).lower() not in banned]
+        removed = before - len(self.sprint_leaders)
+        if removed:
+            log.info("Sprint: %d gebannte Leader aus dem Pool geworfen - fordere "
+                     "frische Analyse an (neue Wallets rücken auf die freien Slots)",
+                     removed)
+            self._force_analysis = True
+            if self.copier:
+                self.copier.tracker.addresses = self._tracked_addresses()
 
     def _load_sprint_pool(self) -> None:
         """Sprint-Pool aus der letzten Analyse laden (überlebt Neustart), sonst auf

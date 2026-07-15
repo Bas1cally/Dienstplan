@@ -50,6 +50,24 @@ ist da; Chat-Verlauf ist es nicht.
 > crypto_only: false` in config.yaml wieder gesetzt (permanent, nicht mehr
 > Mess-Woche-befristet).
 >
+> **UPDATE 15.07. — Ban räumt jetzt den Pool-Slot frei (Nutzer-Kernbefund).**
+> Symptom: `/sprint` zeigte kaum noch Signale, `verworfen: leader_gesperrt`.
+> Ursache: ein Sprint-Ban hat den LARP bisher nur STUMM geschaltet (Signale
+> verworfen), aber seinen Pool-Slot NIE freigegeben - `_build_sprint_pool`
+> filterte gebannte Adressen nicht raus. Nach der Mess-Woche waren 15/21
+> Pool-Leader belastet (5 gebannt, 10 mit Strikes, alle unter dem harten
+> Parallel-Regime OHNE Bestätigungsfenster verdient), die aktivsten
+> Signalquellen also tot im Pool, ohne Ersatz. Nutzer: „das ist der Sinn der
+> Strikes - LARPs raus, neue Wallets rein". Fix (`bot/autopilot.py`):
+> `_build_sprint_pool` schließt gebannte Adressen aus (auch Haupt-Leader -
+> der Ban ist das speziellere Urteil), der nächstbeste frische Kandidat rückt
+> nach; `_prune_banned_from_pool` wirft beim Start die Gebannten aus dem
+> geladenen Pool und fordert eine frische Analyse an (neue Wallets füllen die
+> Slots). Selbstlimitierend: forced nur, solange der geladene Pool noch
+> Gebannte enthält - nach dem ersten sauberen Rebuild nicht mehr. Bans/
+> Strikes bleiben (legitime LARP-Enttarnung), müssen NICHT gelöscht werden -
+> der Fix lässt sie nur ihren zweiten Job (Ersetzen) endlich zu Ende machen.
+>
 > **UPDATE 15.07. — Voller Effort auf Sprint, Beobachter abgeschaltet.**
 > 33-Tage-`/fullreport` zeigte: Haupt-Buch −4,94 % (Veto-Outcome nicht
 > signifikant), Anomalie-/Orderbuch-Scout nicht signifikant, Strategie-Labor
