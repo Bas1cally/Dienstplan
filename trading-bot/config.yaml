@@ -164,21 +164,20 @@ sprint:
                             # alle 7 und verschmierte die 10x-Kapazität. Jetzt
                             # gewinnt das stärkste Signal (|exposure| des
                             # Leaders), der Rest wird sichtbar verworfen.
-  parallel_rides: true      # MESS-MODUS für diese Woche (Nutzer): jedes Signal
-                            # öffnet seinen EIGENEN Ritt auf 1000$-Basis, Ritte
-                            # laufen parallel, jeder bewertet seinen Trader
-                            # (Strike/Heilung je Ritt) - kein Ritt blockiert die
-                            # Messung anderer Signale. ENDZIEL danach: false =
+  parallel_rides: false     # ENDZIEL (nach der Mess-Woche, QOL-Runde 07/2026):
                             # POOL -> EIN GUTER RITT -> +10% -> RAUS, 1 Position.
-  max_rides: 8              # Deckel für gleichzeitige Mess-Ritte
-  crypto_only: false        # MESS-WOCHE: Aktien-Perps ERLAUBT (Nutzer: '14
-                            # frische Signale, aber sie traden alle kein Krypto -
-                            # ich will Daten'). Im Parallel-Modus blockt ein
-                            # Aktien-Ritt nichts, und jeder Ritt wird im Journal
-                            # mit Coin-Namen verbucht ('xyz:' = Aktie) - die
-                            # Sonntags-Auswertung kann Krypto vs. Aktien sauber
-                            # trennen. NACH der Mess-Woche wieder true (Aktien
-                            # außerhalb der Börsenzeiten = reine Spekulation).
+                            # true = Mess-Modus (jedes Signal eigener Ritt auf
+                            # 1000$-Basis, parallel) - für spätere Messungen
+                            # weiter verfügbar, aber nicht mehr der Normalbetrieb.
+  max_rides: 8              # Deckel für gleichzeitige Mess-Ritte (nur parallel_rides)
+  confirm_delay_s: 10       # Flip-Flopper-Schutz: frisches Signal erst nach 10s
+                            # durchgehend positiver Leader-PnL reiten, nicht
+                            # blind instant (Live-Befund: Leader schießt nach
+                            # Einstieg sofort ins Minus und flippt Sekunden
+                            # später zurück). 0 = aus (altes Sofort-Verhalten).
+  crypto_only: true         # Aktien-Perps (Builder-DEX, 'xyz:...') außerhalb
+                            # der Börsenzeiten sind reine Spekulation auf HL -
+                            # stören die Messlatte für stabile Trader.
   pool_size: 20             # Sprint scannt einen breiteren Leader-Pool als das
                             # Hauptbuch (max_leaders: 6). Sprint hält immer nur EINE
                             # Position -> mehr Quellen = weniger Leerlauf, ohne die

@@ -468,9 +468,6 @@ class Autopilot:
         s = self.sprint.stats(prices)
         lead = (f"<code>{s['leader'][:10]}…</code>" + (" ⭐" if s.get("leader_is_star") else "")
                 if s.get("leader") else "n/a")
-        strikes = ", ".join(f"{a}:{n}" for a, n in s.get("strikes", {}).items()) or "-"
-        banned = ", ".join(s.get("banned", [])) or "-"
-        stars = ", ".join(s.get("stars", [])) or "-"
         # Einzelne Positionen mit Entry + eigenem unrealisiertem PnL (nicht nur
         # 'LONG HYPE' ohne Zahlen). Zyklus = Ritt (v3): keine separate Ritt-PnL
         # mehr nötig, cycle_pnl IST die PnL des laufenden Ritts.
@@ -483,6 +480,35 @@ class Autopilot:
             pos_block = f"Positionen:\n{pos_lines}"
         else:
             pos_block = "Positionen: -"
+        equity_line = (f"Ritte: {len(s.get('positions') or [])} offen "
+                       f"(je 1.000$-Basis, Ziel +100$/Ritt) | "
+                       f"Σ offene PnL {s['cycle_pnl']:+,.2f} $"
+                       if s.get("parallel") else
+                       f"Equity: {s['equity']:,.2f} / Ziel {s['target']:,.0f} "
+                       f"(Zyklus-PnL {s['cycle_pnl']:+,.2f} $)")
+
+        # Bestätigungsfenster (Flip-Flopper-Schutz + Star-Preemption): nur
+        # anzeigen, wenn gerade wirklich etwas wartet - sonst reine Leerzeile.
+        pending = s.get("pending") or []
+        pending_block = ""
+        if pending:
+            delay = self.sprint.cfg.confirm_delay_s
+            p_lines = "\n".join(
+                f"  {p['coin']} via <code>{p['leader']}…</code> ({p['wait_s']:.0f}s/{delay:.0f}s)"
+                for p in pending)
+            pending_block = f"\n⏳ Bestätigung läuft:\n{p_lines}"
+
+        # Strikes/Bann/Stars nur zeigen, wenn's dazu etwas zu sagen gibt -
+        # ein leeres 'Strikes: - | gesperrt: - | Stars: -' ist reines Rauschen.
+        badges = []
+        if s.get("strikes"):
+            badges.append("Strikes: " + ", ".join(f"{a}:{n}" for a, n in s["strikes"].items()))
+        if s.get("banned"):
+            badges.append("🚫 Gesperrt: " + ", ".join(s["banned"]))
+        if s.get("stars"):
+            badges.append("⭐ Stars: " + ", ".join(s["stars"]))
+        badges_block = f"\n{' | '.join(badges)}" if badges else ""
+
         # Scan-Telemetrie: unterscheidet 'kein Signal kam' (gesund, nur ruhig)
         # von 'Signale kamen, wurden verworfen' und 'Feed eingefroren' (kaputt)
         sc = s.get("scan", {})
@@ -501,22 +527,22 @@ class Autopilot:
             if tracker.last_stale:
                 cov += f" ({tracker.last_stale} stale)"
             feed += cov
-        equity_line = (f"Ritte: {len(s.get('positions') or [])} offen "
-                       f"(je 1.000$-Basis, Ziel +100$/Ritt) | "
-                       f"Σ offene PnL {s['cycle_pnl']:+,.2f} $"
-                       if s.get("parallel") else
-                       f"Equity: {s['equity']:,.2f} / Ziel {s['target']:,.0f} "
-                       f"(Zyklus-PnL {s['cycle_pnl']:+,.2f} $)")
+
         return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']}): {s['state']}\n"
                 f"{pos_block}\n"
-                f"{equity_line}\n"
-                f"Bilanz: {s['won']}✅ {s['busted']}💥 | Schatztruhe {s['banked']:+,.2f} $\n"
-                f"Strikes: {strikes} | 🚫 gesperrt: {banned} | ⭐ Stars: {stars}\n"
+                f"{equity_line}"
+                f"{pending_block}\n"
+                f"\n"
+                f"Bilanz: {s['won']}✅ {s['busted']}💥 | Schatztruhe {s['banked']:+,.2f} $"
+                f"{badges_block}\n"
+                f"\n"
                 f"Leader: {lead} | Pool: {len(self.sprint_leaders)} scanbar | "
                 f"Trades: {s['trades']} (Ø {s['avg_trades_per_cycle']}/Zyklus)\n"
+                f"\n"
                 f"Scan seit Start: {seen} frische Signale (letztes: {last_fresh}) | "
                 f"verworfen: {rej}\n"
                 f"Feed: Snapshots {feed}\n"
+                f"\n"
                 f"<i>/sprint close = schließen | /sprint pool = Pool-Liste | "
                 f"/sprint assets = Krypto vs. Aktien</i>")
 
