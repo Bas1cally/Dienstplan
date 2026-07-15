@@ -1278,6 +1278,49 @@ def test_no_bilanz_reset_when_staying_in_parallel_mode():
             "kein Reset, solange der Mess-Modus weiterläuft"
 
 
+# ---------- Produktions-Settings-Smoke-Test (Nutzer-Sorge: "keine Signale
+# trotz vollem Pool" nach der QOL-Runde) ----------
+
+def test_fresh_signal_reaches_entry_under_production_settings_full_pool():
+    """Deckt genau die Sorge ab, die live nach dem Deploy aufkam: mit ALLEN
+    QOL-Runde-Einstellungen gleichzeitig scharf (confirm_delay_s=10,
+    crypto_only=true, exclude_coins=[BTC], parallel_rides=false) und einem
+    vollen 21er-Pool (wie live gemeldet) muss ein frisches Signal eines
+    NICHT-Top-Score-Leaders trotzdem zuverlässig durch die komplette Kette
+    (Entdeckung -> Bestätigungsfenster -> Promotion) bis zum echten Einstieg
+    kommen - keine der neuen Zustandsmaschinen darf das Signal verschlucken."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        cfg = SprintConfig(
+            enabled=True, equity=1000.0, leverage=10.0, target_profit=100.0,
+            max_positions=1, parallel_rides=False, max_rides=8,
+            max_rides_per_leader=1, crypto_only=True, bust_frac=0.05,
+            pool_size=20, pool_min_score=10.0, rebalance_threshold=0.02,
+            min_notional=10.0, partial_exit_frac=0.75, add_signal_frac=0.5,
+            confirm_delay_s=10.0, strike_ban=2, exclude_coins=["BTC"],
+        )
+        b = SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+
+        addrs = [f"0x{i:040x}" for i in range(21)]
+        pool = [{"address": a, "score": 10 + i, "weight": 1.0} for i, a in enumerate(addrs)]
+        flat = [snap(a, 50_000) for a in addrs]
+        prices = {"BTC": 100.0, "ETH": 100.0}
+
+        b.tick(pool, flat, prices)   # Baselines für alle 21
+        assert b.stats(prices)["pending"] == [] and b.paper.sizes() == {}
+
+        # Mittiger (nicht bester) Leader eröffnet ein frisches ETH-Signal
+        signalling = list(flat)
+        signalling[10] = snap(addrs[10], 50_000, ETH=300)
+        b.tick(pool, signalling, prices)
+        assert b.stats(prices)["pending"], "Signal wurde nicht als Kandidat registriert"
+
+        t["now"] += 20   # typischer Poll-Abstand (copytrade.poll_seconds=20) > 10s-Fenster
+        b.tick(pool, signalling, prices)
+        assert "ETH" in b.paper.sizes(), \
+            "Signal kam trotz voller Produktions-Kette nicht bis zum Einstieg durch"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
