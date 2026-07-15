@@ -17,6 +17,35 @@ ist da; Chat-Verlauf ist es nicht.
 > eine Position"** — nach der Mess-Woche `parallel_rides: false` setzen und
 > mit den gesammelten Strike-/Winrate-Daten den EINEN guten Ritt fahren.
 > Krypto-only bleibt in beiden Modi (Aktien-Perps stören die Messlatte).
+>
+> **UPDATE 15.07. — Voller Effort auf Sprint, Beobachter abgeschaltet.**
+> 33-Tage-`/fullreport` zeigte: Haupt-Buch −4,94 % (Veto-Outcome nicht
+> signifikant), Anomalie-/Orderbuch-Scout nicht signifikant, Strategie-Labor
+> negativ/nicht signifikant, Lighter-Schatten −8,22 %, alle Shadow-Varianten
+> schlechter als das rote Haupt-Buch. **Sprint-Buch: 26✅/23💥, banked
+> +1.370,63 $ über 50 Zyklen — einzige Spur mit echtem realisiertem Gewinn.**
+> Nutzer-Entscheidung: „nur Beobachter abschalten" (nicht das Haupt-Buch,
+> weil Sprints eigener Pool von derselben `_reanalyze`-Discovery-Pipeline
+> gebaut wird wie die Haupt-Leader). Per config.yaml deaktiviert:
+> `anomaly/orderbook/twap/labs/lighter.enabled: false`,
+> `autopilot.shadow_variants: false`. Bleiben an: Haupt-Buch + Copier/
+> Validator/MarketGuard (Sprint braucht deren Preise/Snapshots/RISK_OFF),
+> die Leader-Analyse (`_reanalyze`, füttert Haupt- UND Sprint-Pool), CMM-
+> Discovery, Sprint selbst. Kein Code gelöscht — reversibel per Config,
+> falls eine Spur später wieder Entwicklungsfokus verdient.
+>
+> Bekannter Report-Anzeige-Fehler (noch NICHT gefixt, nur dokumentiert):
+> `report.py`s Sprint-Block liest `sprint_book.json`s rohes
+> `realized_pnl`/`trades` als „Zyklus N läuft: Equity X" — das war unter
+> v3-Einzel-Ritt korrekt (Buch wird zwischen Zyklen resettet), ist aber unter
+> `parallel_rides: true` FALSCH: `_settle_one()` ruft nie `paper.reset()`
+> auf, die Zahl ist die kumulierte Realisierung seit dem letzten echten
+> Reset, nicht „der aktuelle Zyklus". Die verlässliche Zahl bleibt
+> `st['banked']` (ritt-scharf über `_book_cycle` berechnet, unabhängig vom
+> Reset-Verhalten). Fix: `report.py`s Sprint-Sektion um einen Parallel-Pfad
+> erweitern, der `sprint_cycles.json`s `won/busted/banked` zeigt statt der
+> Einzel-Ritt-Equity-Annahme — aufheben bis die Mess-Woche vorbei ist, dann
+> zusammen mit dem Confidence-Points/Star-System angehen.
 
 ---
 

@@ -122,7 +122,12 @@ autopilot:
   autostart: true         # 24/7-Betrieb (VPS/systemd): startet ohne Dashboard-Klick
   daily_digest: true      # Tagesbericht per Telegram/Log
   watchdog_hours: 24      # Alarm + Diagnose, wenn so lange keine Order kam
-  shadow_variants: true   # A/B-Tuning: Varianten parallel im Schatten
+  shadow_variants: false  # SPRINT-FOKUS (15.07.): aus. War A/B-Tuning fürs
+                          # Haupt-Buch (ohne_validator/validator_locker/
+                          # crash_only) - alle 3 Varianten liefen im 33-Tage-
+                          # Report schlechter als das eh schon rote Haupt-Buch.
+                          # Wieder an, falls das Haupt-Buch später wieder
+                          # Entwicklungs-Fokus bekommt.
   server_host: 127.0.0.1  # Web-UI nur lokal - NIE ungeschützt ins Internet!
   server_port: 8000
 
@@ -211,7 +216,10 @@ sprint:
 # gleichgewichtet in ein PAPER-Buch, gepreist mit HL-Preisen - reine Messung,
 # kein Einfluss aufs Haupt-Buch. Read-only, Ausführung bleibt Hyperliquid.
 lighter:
-  enabled: true
+  enabled: false           # SPRINT-FOKUS (15.07.): aus. Reine Mess-Spur ohne
+                          # Einfluss auf Haupt-Buch ODER Sprint (kein Promotion-
+                          # Pfad in den Sprint-Pool implementiert) - im 33-Tage-
+                          # Report -8.22%, kostet nur API-Last ohne Sprint-Nutzen.
   auto_discover: true
   coins: [BTC, ETH, SOL, HYPE, DOGE, AVAX, LINK, ARB]  # nur auf HL handelbare
   scan_seconds: 300
@@ -262,7 +270,10 @@ coinmarketman:
 #             extrem ist. KEIN delta-neutrales Arb (ohne Spot-Hedge bleibt
 #             Kursrisiko, durch Stop + Zeitlimit begrenzt) - der Carry ist der Edge.
 labs:
-  enabled: true
+  enabled: false           # SPRINT-FOKUS (15.07.): aus. Im 33-Tage-Report:
+                          # eigene_ta -85.60$ PnL, funding_capture +16.02$ auf
+                          # nur 7 Episoden (nicht signifikant) - kein Edge
+                          # bewiesen, kostet nur Entwicklungs-Aufmerksamkeit.
   trend:
     enabled: true
     coin: BTC
@@ -288,7 +299,8 @@ labs:
 # Tipp: bekannte Tron/Sun-Adressen unter extra_addresses eintragen für gezieltes
 # Tracking. Ehrlich: bis die Slice-Kadenz erkennbar ist, ist ein Teil gelaufen.
 twap:
-  enabled: true
+  enabled: false           # SPRINT-FOKUS (15.07.): aus (read-only Beobachter,
+                          # kein Einfluss auf Sprint - reine Aufmerksamkeit).
   poll_seconds: 120
   active_window_minutes: 20     # Slices in diesem Fenster = TWAP läuft gerade
   min_slices: 4                 # so viele jüngste Slices = aktiver TWAP
@@ -302,7 +314,9 @@ twap:
 # Report die Vorhersagekraft misst. Ehrlich: nicht-kolokiertes Polling fängt
 # nur langsame Signale, kein HFT/Spoofing; Follow-through im 1h-Raster ist grob.
 orderbook:
-  enabled: true
+  enabled: false            # SPRINT-FOKUS (15.07.): aus. Im 33-Tage-Report
+                            # -0.05% Follow-through auf 100 Episoden, nicht
+                            # signifikant - kein bewiesener Edge, kein Sprint-Bezug.
   notify: false             # KEIN Telegram-Spam - Daten landen still im Report
   coins: [BTC, ETH, SOL, HYPE]
   poll_seconds: 300         # 1h UND 15min ohne Edge -> seltener pollen, weniger Last
@@ -319,7 +333,10 @@ orderbook:
 # Ehrlich: viele Treffer sind nur Whales mit neuer Wallet - erst Treffer
 # sichten (python investigate.py <adresse>), bevor man daraus mehr macht.
 anomaly:
-  enabled: true
+  enabled: false                  # SPRINT-FOKUS (15.07.): aus. Im 33-Tage-
+                                  # Report +0.13% auf 20 Episoden, nicht
+                                  # signifikant ("noch nicht überzeugend") -
+                                  # kein Sprint-Bezug, reine Aufmerksamkeit.
   coins: [BTC, ETH, SOL, HYPE]    # dünne/neue Märkte ergänzen = mehr Insider-Flow, mehr Rauschen
   poll_seconds: 300
   min_trade_notional: 100000      # erst ab dieser Trade-Größe wird die Wallet geprüft
