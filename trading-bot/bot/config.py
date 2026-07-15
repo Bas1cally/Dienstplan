@@ -275,6 +275,11 @@ class CopytradeConfig:
     rebalance_threshold: float = 0.02
     min_notional: float = 10
     poll_seconds: int = 15
+    # Feed-Only (Quest-Bot-Umstellung): das Kopier-Buch handelt NICHT mehr selbst,
+    # es liefert nur noch Preise + Leader-Snapshots für den Quest-Bot und die
+    # Discovery. Der Copier snapshottet dann und kehrt sofort zurück, bevor er
+    # Targets rechnet oder Orders ausführt - kein eigenes Paper-Trading mehr.
+    feed_only: bool = False
     analysis: AnalysisConfig = None  # type: ignore[assignment]
 
 

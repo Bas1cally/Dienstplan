@@ -185,6 +185,65 @@ def test_resume_clears_halt_and_rebaselines():
     assert reloaded.halted is False, "Resume wird persistiert"
 
 
+# ---------- Feed-Only (Quest-Bot: Kopier-Buch handelt nicht mehr selbst) ----------
+
+class _FeedClient:
+    def all_mids(self):
+        return {"BTC": "100.0", "ETH": "100.0"}
+
+
+class _FeedTracker:
+    addresses = ["0xa"]
+    last_fresh = last_stale = last_total = 0
+
+    def snapshot_all(self):
+        # Große Position (50% Exposure) -> Ziel klar über rebalance_threshold,
+        # im Normalmodus also ein echter Trade (Gegenprobe unten braucht das).
+        return [snap("0xa", 10_000, BTC=50)]
+
+
+def _feed_cfg(feed_only):
+    from bot.config import load_config
+    cfg = load_config("config.yaml")
+    cfg.dry_run = True
+    cfg.copytrade.feed_only = feed_only
+    return cfg
+
+
+def _isolated_copier(feed_only):
+    """Copier mit eigenem Paper-Buch/Risk-State im Temp-Verzeichnis - sonst
+    schrieben die Tests in das gemeinsame runtime/paper_state.json und
+    verunreinigten sich gegenseitig über Läufe hinweg."""
+    from bot.copytrade.copier import CopyTrader
+    from bot.paper import PaperBroker
+
+    ct = CopyTrader(_feed_cfg(feed_only), _FeedClient(), _FeedTracker(), {"0xa": 1.0})
+    tmp = Path(tempfile.mkdtemp())
+    ct.paper = PaperBroker(10_000, 0.00045, path=tmp / "paper.json")
+    ct._risk_state_path = tmp / "risk.json"
+    ct.start_equity, ct.halted, ct.last_equity = None, False, None
+    return ct
+
+
+def test_feed_only_snapshots_but_does_not_trade():
+    """Quest-Bot-Umstellung: bei feed_only liefert der Copier weiter Preise UND
+    Leader-Snapshots (der Feed, von dem der Quest-Bot lebt), handelt aber NICHT
+    mehr selbst - kein eigenes Paper-Trade, obwohl ein frisches Signal anliegt."""
+    ct = _isolated_copier(feed_only=True)
+    ct.tick()
+    assert ct.last_prices.get("BTC") == 100.0, "Preise werden geliefert (Feed lebt)"
+    assert ct.last_snapshots, "Snapshots werden geliefert (Feed lebt)"
+    assert ct.paper.trades == 0, "aber KEIN eigenes Kopier-Trade im Feed-Only-Modus"
+
+
+def test_not_feed_only_still_trades():
+    """Gegenprobe: ohne feed_only handelt der Copier wie gehabt (sonst würde der
+    Test oben auch grün, wenn tick() aus einem anderen Grund nichts tut)."""
+    ct = _isolated_copier(feed_only=False)
+    ct.tick()
+    assert ct.paper.trades > 0, "im Normalmodus spiegelt der Copier das Leader-Signal"
+
+
 # ---------- Tracker: kein Phantom-Snapshot, Cache statt Lücke ----------
 
 def _state(equity, **positions):

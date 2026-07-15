@@ -73,6 +73,10 @@ copytrade:
   rebalance_threshold: 0.035   # erst ab 3.5% Equity-Abweichung handeln (Fees fraßen 42%)
   min_notional: 10             # Hyperliquid-Mindestordergröße
   poll_seconds: 20             # Frequenz-Drossel gegen Churn (Copy-Lag bei >30min-Holds egal)
+  feed_only: true              # QUEST-BOT: das Kopier-Buch handelt NICHT mehr selbst -
+                               # es liefert nur noch Preise + Leader-Snapshots für den
+                               # Quest-Bot und die Discovery. Es gibt nur noch den
+                               # Quest-Bot, der die Schatztruhe füllt (Nutzer 15.07.).
   analysis:
     days: 21                   # kürzeres Fenster - Day-Trader-Form ist schnelllebig
     min_account_value: 10000   # Mindest-Kontogröße der Kandidaten

@@ -250,6 +250,12 @@ class CopyTrader:
             return
         self.last_snapshots = snapshots
         self.last_snapshots_t = time.time()
+        if self.ct.feed_only:
+            # Quest-Bot-Modus: das Kopier-Buch handelt nicht mehr selbst, es
+            # liefert nur noch Preise + Leader-Snapshots (oben schon gesetzt)
+            # für den Quest-Bot und die Discovery. HIER Schluss - keine Targets,
+            # keine Shadows, keine Orders.
+            return
         targets = compute_targets(
             snapshots, self.weights, equity, self.ct, self.cfg.risk,
             convergence=self.convergence,

@@ -136,6 +136,11 @@ def main() -> None:
     cfg.news.enabled = False          # kein Netz: News aus, Schock-Detektor an
     cfg.validation.llm_enabled = False
     cfg.validation.cache_seconds = 0
+    # Im Normalbetrieb steht copytrade.feed_only=true (Quest-Bot: Kopier-Buch
+    # handelt nicht mehr selbst). Die Generalprobe prüft aber genau diese
+    # Kopier-/Reconciliation-/RISK_OFF-Maschinerie - die es als Code weiter gibt -
+    # also hier explizit einschalten, sonst hätte der Copier nichts zu tun.
+    cfg.copytrade.feed_only = False
 
     market = build_market()
     client = FakeClient(market)
