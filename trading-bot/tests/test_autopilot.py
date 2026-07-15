@@ -222,6 +222,20 @@ def test_cmd_fullreport_chunks_and_pushes_with_headers():
     assert sent[-1][0].startswith(f"📊 Report {len(sent)}/{len(sent)}")
 
 
+def test_cmd_fullreport_no_double_start_while_running():
+    """Verifikations-Fund: ohne Sperre startet ein Doppel-Tap (naheliegend in
+    der Panik-Situation, für die das Feature gebaut ist) einen zweiten,
+    parallelen Netz-Lauf. Jetzt: laufender Report -> zweiter Aufruf startet
+    keinen neuen Thread, sondern meldet 'läuft bereits'."""
+    ap = _autopilot()
+    ap.notifier.token, ap.notifier.chat_id = "t", "42"
+    ap.notifier.send = lambda text, html=True: None
+    ap._fullreport_running = True   # simuliert: erster Lauf ist noch aktiv
+    out = ap._cmd_fullreport()
+    assert "läuft bereits" in out
+    assert ap._fullreport_thread is None, "kein zweiter Thread wurde gestartet"
+
+
 def test_cmd_fullreport_offline_arg_passed_through():
     import report as report_mod
 

@@ -348,6 +348,17 @@ def test_chunk_empty_text():
     assert chunk_for_telegram("") == [""]
 
 
+def test_chunk_never_emits_a_spurious_empty_chunk():
+    """Verifikations-Fund: eine leere Zeile gefolgt von einer fast limit-langen
+    Folgezeile flushte die leere Zeile als EIGENEN, leeren Chunk - eine
+    Telegram-Nachricht nur mit '📊 Report i/N'-Header, ohne Inhalt, plus ein
+    aufgeblähtes N."""
+    text = "\n" + "x" * 3800
+    chunks = chunk_for_telegram(text, limit=3800)
+    assert "" not in chunks, f"kein Chunk darf leer sein: {chunks}"
+    assert chunks == ["x" * 3800]
+
+
 # ---------- Watchdog-Diagnose ----------
 
 class FakeCopier:

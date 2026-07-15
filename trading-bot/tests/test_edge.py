@@ -198,6 +198,55 @@ def test_broken_callbacks_never_crash():
     assert feed.fills_seen == 0
 
 
+# ---------- HyperliquidClient: Timeout-Weitergabe ----------
+
+class _FakeInfo:
+    """Ersetzt hyperliquid.info.Info: keine echten Netz-Calls, zeichnet nur
+    den übergebenen timeout je Konstruktion auf."""
+    calls: list = []
+
+    def __init__(self, base_url, skip_ws=False, perp_dexs=None, timeout=None):
+        _FakeInfo.calls.append(timeout)
+
+    def perp_dexs(self):
+        return [{"name": ""}]
+
+
+def test_hyperliquid_client_threads_timeout_to_every_info_construction():
+    """Verifikations-Fund: ohne expliziten Timeout wartet requests bei einem
+    degradierten HL-API UNBEGRENZT auf eine Antwort (kein Fehler, kein Crash -
+    der aufrufende Thread stirbt einfach nie). timeout=X muss bis zu JEDER
+    Info(...)-Konstruktion durchgereicht werden (Haupt-Client, DEX-Probe,
+    Markt-Client) - hier verifiziert für den /fullreport-Aufrufpfad."""
+    import bot.exchange as ex_mod
+
+    _FakeInfo.calls = []
+    orig_info = ex_mod.Info
+    ex_mod.Info = _FakeInfo
+    try:
+        ex_mod.HyperliquidClient(testnet=False, dexs="auto", timeout=20.0)
+    finally:
+        ex_mod.Info = orig_info
+    assert _FakeInfo.calls, "keine Info()-Konstruktion aufgezeichnet"
+    assert all(t == 20.0 for t in _FakeInfo.calls), \
+        f"jede Info()-Konstruktion braucht den Timeout: {_FakeInfo.calls}"
+
+
+def test_hyperliquid_client_default_timeout_stays_none():
+    """Ohne explizites timeout darf sich das Verhalten für den Rest des Bots
+    (24/7-Loop, Autopilot-Setup) NICHT ändern - Default bleibt None."""
+    import bot.exchange as ex_mod
+
+    _FakeInfo.calls = []
+    orig_info = ex_mod.Info
+    ex_mod.Info = _FakeInfo
+    try:
+        ex_mod.HyperliquidClient(testnet=False, dexs="auto")
+    finally:
+        ex_mod.Info = orig_info
+    assert all(t is None for t in _FakeInfo.calls)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

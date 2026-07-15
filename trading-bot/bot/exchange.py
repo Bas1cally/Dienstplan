@@ -30,20 +30,27 @@ class HyperliquidClient:
     """
 
     def __init__(self, testnet: bool, private_key: str | None = None,
-                 account_address: str | None = None, dexs: str | list = "auto"):
+                 account_address: str | None = None, dexs: str | list = "auto",
+                 timeout: float | None = None):
+        # timeout=None (Default) erhält das bisherige Verhalten überall im Bot -
+        # explizit gesetzt (z.B. report.py für /fullreport) verhindert es, dass
+        # ein degradiertes HL-API den aufrufenden Thread für immer hängen lässt
+        # (requests wartet sonst UNBEGRENZT auf eine Antwort, kein Timeout-Fehler,
+        # kein Crash - der Thread stirbt einfach nie, das try/except greift nie).
         self.base_url = api_url(testnet)
         self.testnet = testnet
         self.account_address = account_address
+        self.timeout = timeout
         # Account-/Order-Ebene (testnet oder mainnet)
-        self.info = Info(self.base_url, skip_ws=True)
+        self.info = Info(self.base_url, skip_ws=True, timeout=timeout)
         # Datenebene: Mainnet, alle gewünschten Perp-DEXs
-        self.dexs = self._resolve_dexs(dexs)
+        self.dexs = self._resolve_dexs(dexs, timeout=timeout)
         try:
-            self.market = Info(api_url(False), skip_ws=True, perp_dexs=self.dexs)
+            self.market = Info(api_url(False), skip_ws=True, perp_dexs=self.dexs, timeout=timeout)
         except Exception:
             log.exception("Multi-DEX-Marktdaten nicht ladbar - nur Haupt-DEX")
             self.dexs = [""]
-            self.market = Info(api_url(False), skip_ws=True)
+            self.market = Info(api_url(False), skip_ws=True, timeout=timeout)
         # Builder-DEXs existieren nur auf Mainnet - Testnet-Orders nur Haupt-DEX
         self.exec_dexs = self.dexs if not testnet else [""]
         self.exchange = None
@@ -56,13 +63,13 @@ class HyperliquidClient:
                                      perp_dexs=self.exec_dexs if self.exec_dexs != [""] else None)
 
     @staticmethod
-    def _resolve_dexs(dexs: str | list) -> list[str]:
+    def _resolve_dexs(dexs: str | list, timeout: float | None = None) -> list[str]:
         if isinstance(dexs, list):
             return dexs or [""]
         if dexs != "auto":
             return [""]
         try:
-            probe = Info(api_url(False), skip_ws=True)
+            probe = Info(api_url(False), skip_ws=True, timeout=timeout)
             names = [d["name"] for d in probe.perp_dexs()[1:] if d and d.get("name")]
             log.info("Perp-DEXs entdeckt: Haupt-DEX + %s", names or "keine Builder-DEXs")
             return [""] + names

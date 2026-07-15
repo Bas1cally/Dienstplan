@@ -87,12 +87,17 @@ def build_report(offline: bool = False, horizon: float = 24, fast_horizon: float
     def add(line: str = "") -> None:
         out.append(line)
 
-    # Preis-Lookups einmal bauen: 1h-Raster für langsame, 15m für schnelle Signale
+    # Preis-Lookups einmal bauen: 1h-Raster für langsame, 15m für schnelle Signale.
+    # Expliziter Timeout: build_report läuft u.a. im /fullreport-Hintergrund-Thread
+    # (genau für den Fall gebaut, dass das VPS-Netz/SSH gerade zickt) - ohne
+    # Timeout würde ein degradiertes HL-API den Thread für IMMER hängen lassen,
+    # statt eine Fehlermeldung zurückzugeben (schlechtestmöglicher Ausgang für
+    # einen Notfall-Fallback).
     _slow_pf = _fast_pf = None
     if not offline:
         from bot.exchange import HyperliquidClient
 
-        _client = HyperliquidClient(testnet=False, dexs="auto")
+        _client = HyperliquidClient(testnet=False, dexs="auto", timeout=20.0)
         _slow_pf = _price_fn_factory(_client, "1h")
         _fast_pf = _price_fn_factory(_client, "15m")
 

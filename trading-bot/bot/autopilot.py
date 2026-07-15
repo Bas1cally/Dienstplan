@@ -69,18 +69,30 @@ def chunk_for_telegram(text: str, limit: int = 3800) -> list[str]:
     chunks: list[str] = []
     cur: list[str] = []
     cur_len = 0
+
+    def flush() -> None:
+        # Eine geflushte Gruppe aus nur leeren Zeilen ergibt beim Join "" -
+        # das darf NIE als eigener (unsichtbarer) Chunk landen: eine Telegram-
+        # Nachricht nur mit '📊 Report i/N'-Header ohne Inhalt, plus ein
+        # aufgeblähtes N (Regressionsfund: führende Leerzeile + fast
+        # limit-lange Folgezeile).
+        if cur:
+            joined = "\n".join(cur)
+            if joined:
+                chunks.append(joined)
+            cur.clear()
+
     for line in text.split("\n"):
         if cur and cur_len + len(line) + 1 > limit:
-            chunks.append("\n".join(cur))
-            cur, cur_len = [], 0
+            flush()
+            cur_len = 0
         if len(line) > limit:
             for i in range(0, len(line), limit):
                 chunks.append(line[i:i + limit])
             continue
         cur.append(line)
         cur_len += len(line) + 1
-    if cur:
-        chunks.append("\n".join(cur))
+    flush()
     return chunks or [""]
 
 
@@ -172,6 +184,7 @@ class Autopilot:
         self._analysis_started = 0.0   # /status zeigt "läuft seit X min"
         self._analysis_thread: threading.Thread | None = None
         self._fullreport_thread: threading.Thread | None = None
+        self._fullreport_running = False
         self._stale_feed_warned = False  # Sprint scannt Standbilder -> einmal warnen
         self.leaders: list[dict] = []
         # Eigener, breiterer Leader-Pool nur fürs Sprint-Buch (siehe sprint.pool_size).
@@ -324,23 +337,34 @@ class Autopilot:
         Arg 'offline' = schnell, ohne die netzbasierte Signifikanz-Analyse."""
         if not (self.notifier and self.notifier.enabled):
             return "Voller Report braucht Telegram-Push (Ergebnis wird gesendet)."
+        if self._fullreport_running:
+            # Ohne Sperre würde ein Doppel-Tap (naheliegend genau in der Panik-
+            # Situation, für die dieses Feature gebaut ist - die Bestätigung
+            # verrät nicht, dass schon einer läuft) einen zweiten, parallelen
+            # Netz-Lauf gegen die HL-API starten und verschachtelte Telegram-
+            # Sends aus zwei Threads erzeugen.
+            return "⏳ Voller Report läuft bereits - Ergebnis kommt gleich."
         offline = arg.strip().lower() == "offline"
+        self._fullreport_running = True   # vor Thread-Start setzen (kein Race)
 
         def run():
             try:
-                import report as report_mod
+                try:
+                    import report as report_mod
 
-                text = report_mod.build_report(offline=offline)
-            except Exception as e:
-                text = f"⚠️ Voller Report fehlgeschlagen: {str(e)[:300]}"
-            chunks = chunk_for_telegram(text)
-            for i, chunk in enumerate(chunks, 1):
-                header = f"📊 Report {i}/{len(chunks)}\n\n" if len(chunks) > 1 else "📊 Report\n\n"
-                # html=False: der Report-Text ist ungeprüfter Freitext (Adressen,
-                # Prozentzeichen, Klammern) - ohne parse_mode gibt's kein 400-Risiko
-                self.notifier.send(header + chunk, html=False)
-                if i < len(chunks):
-                    time.sleep(0.4)   # Telegram-Rate-Limit-Hygiene zwischen Nachrichten
+                    text = report_mod.build_report(offline=offline)
+                except Exception as e:
+                    text = f"⚠️ Voller Report fehlgeschlagen: {str(e)[:300]}"
+                chunks = chunk_for_telegram(text)
+                for i, chunk in enumerate(chunks, 1):
+                    header = f"📊 Report {i}/{len(chunks)}\n\n" if len(chunks) > 1 else "📊 Report\n\n"
+                    # html=False: der Report-Text ist ungeprüfter Freitext (Adressen,
+                    # Prozentzeichen, Klammern) - ohne parse_mode gibt's kein 400-Risiko
+                    self.notifier.send(header + chunk, html=False)
+                    if i < len(chunks):
+                        time.sleep(0.4)   # Telegram-Rate-Limit-Hygiene zwischen Nachrichten
+            finally:
+                self._fullreport_running = False
 
         # Referenz auf self (statt nur lokal) - Tests können sauber .join(),
         # ohne den Thread per threading.enumerate() suchen zu müssen (race-anfällig
