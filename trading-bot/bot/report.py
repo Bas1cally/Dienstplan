@@ -20,6 +20,72 @@ from collections import Counter
 
 log = logging.getLogger(__name__)
 
+_QUEST_CYCLE_KINDS = {"sprint_tp", "sprint_bust", "sprint_cycle_end"}
+
+
+def quest_scorecard(journal: list[dict], state: dict) -> dict:
+    """Der Report, der den Bot besser macht (Nutzer): WELCHE Wallet hat über die
+    gesamte Quest-Historie verdient, welche verkackt? Das ist der Hebel, um das
+    tote Gewicht aus dem Pool zu erkennen.
+
+    - `leaders`: je Ride-Leader über die GESAMTE Historie - Ritte, Siege/
+      Niederlagen, Netto-PnL (Beitrag zur Schatztruhe), Ø je Ritt, plus der
+      aktuelle LARP-Status (Strikes/Stern/gesperrt aus dem persistenten State).
+      Nach Netto-PnL sortiert: beste Verdiener oben, größte Verlierer unten.
+    - `assets`: Krypto vs. Aktien NUR für die AKTUELLE Ära (die letzten
+      won+busted abgeschlossenen Zyklen, deren PnL-Summe = Schatztruhe) - so
+      ist die Asset-Frage nach jedem Reset frisch, nicht von der Mess-Woche
+      unter alten Regeln verwässert."""
+    strikes = state.get("strikes") or {}
+    banned = {str(a).lower() for a in (state.get("banned") or [])}
+    confidence = state.get("confidence") or {}
+    # Chronologisch sortieren (nach Zeitstempel), UNABHÄNGIG von der Reihenfolge
+    # des Aufrufers: journal.tail() liefert neueste-zuerst, load_jsonl() Datei-
+    # Reihenfolge (älteste zuerst) - ohne dieses Sortieren griffe cycles[-n:]
+    # (die aktuelle Ära) mal die richtigen, mal die falschen Zyklen ab.
+    cycles = sorted((e for e in journal if e.get("kind") in _QUEST_CYCLE_KINDS),
+                    key=lambda e: e.get("t", 0))
+
+    per: dict[str, dict] = {}
+    for e in cycles:
+        leader = str(e.get("leader", "")).lower()
+        if not leader:
+            continue
+        pnl = float(e.get("pnl", 0))
+        d = per.setdefault(leader, {"rides": 0, "wins": 0, "pnl": 0.0})
+        d["rides"] += 1
+        d["pnl"] += pnl
+        if pnl > 0:
+            d["wins"] += 1
+    leaders = []
+    for addr, d in per.items():
+        conf = int(confidence.get(addr, 0))
+        leaders.append({
+            "addr": addr, "rides": d["rides"], "wins": d["wins"],
+            "losses": d["rides"] - d["wins"], "pnl": round(d["pnl"], 2),
+            "avg": round(d["pnl"] / d["rides"], 2) if d["rides"] else 0.0,
+            "strikes": int(strikes.get(addr, 0)), "banned": addr in banned,
+            "confidence": conf, "star": conf >= 100,
+        })
+    leaders.sort(key=lambda x: x["pnl"], reverse=True)
+
+    # Aktuelle Ära = die letzten (won+busted) abgeschlossenen Zyklen. Braucht
+    # kein eigenes Reset-Feld: nach einem Bilanz-Reset stehen won/busted auf 0
+    # und wachsen nur mit NEUEN Zyklen, das Journal hängt neue Zyklen hinten an.
+    n_era = int(state.get("won", 0)) + int(state.get("busted", 0))
+    era = cycles[-n_era:] if n_era else []
+    assets = {k: {"n": 0, "pnl": 0.0, "won": 0} for k in ("Krypto", "Aktien", "unbekannt")}
+    for e in era:
+        coin = e.get("coin")
+        key = "unbekannt" if not coin else ("Aktien" if ":" in coin else "Krypto")
+        pnl = float(e.get("pnl", 0))
+        a = assets[key]
+        a["n"] += 1
+        a["pnl"] += pnl
+        if pnl > 0:
+            a["won"] += 1
+    return {"leaders": leaders, "assets": assets, "era_cycles": len(era)}
+
 
 def _dedup_episodes(entries: list[dict], horizon_hours: float) -> list[dict]:
     """Gegen Pseudo-Replikation: dieselbe Wallet/derselbe Coin/dieselbe Richtung

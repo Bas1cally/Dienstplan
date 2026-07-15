@@ -243,25 +243,24 @@ def test_build_report_no_data():
     assert "Noch keine Quest-Daten" in text
 
 
-def test_build_report_is_quest_only():
-    """Quest-Bot-Umstellung: der Report dreht sich NUR noch um den Quest-Bot -
-    Schatztruhe, Zyklen, Krypto-vs-Aktien, LARP-Filter. Kein Paper-Lauf-Report
-    des Kopier-Buchs, keine Veto-/Scout-Sektionen mehr."""
+def test_build_report_is_quest_only_with_leader_scorecard():
+    """Quest-Bot-Report: der eigentliche Nutzen ist die Leader-Scorecard (wer
+    verdient, wer verkackt) über die gesamte Historie + Krypto-vs-Aktien der
+    aktuellen Ära. Kein Paper-Lauf-Report/Veto/Scout mehr."""
     import report as report_mod
 
     with tempfile.TemporaryDirectory() as tmp:
         rt = Path(tmp)
-        # Journal mit abgeschlossenen Quest-Zyklen (Krypto + Aktie), coin-Feld gesetzt
         trades = [
-            {"kind": "sprint_tp", "coin": "ETH", "pnl": 100.0, "t": 1000},
-            {"kind": "sprint_bust", "coin": "xyz:TSLA", "pnl": -50.0, "t": 2000},
-            {"kind": "sprint_cycle_end", "coin": "SOL", "pnl": 30.0, "t": 3000},
+            {"kind": "sprint_tp", "coin": "ETH", "pnl": 100.0, "leader": "0xgood", "t": 5000},
+            {"kind": "sprint_bust", "coin": "xyz:TSLA", "pnl": -80.0, "leader": "0xbadwallet", "t": 5001},
+            {"kind": "sprint_cycle_end", "coin": "SOL", "pnl": 30.0, "leader": "0xgood", "t": 5002},
         ]
         (rt / "trades.jsonl").write_text("\n".join(json.dumps(t) for t in trades))
         (rt / "sprint_cycles.json").write_text(json.dumps(
-            {"won": 3, "busted": 2, "banked": 252.89, "total_trades": 8,
-             "strikes": {"0xfd688aed": 2}, "banned": ["0xfd688aed"],
-             "confidence": {"0xbest": 100, "0xok": 15}}))
+            {"won": 2, "busted": 1, "banked": 50.0, "total_trades": 3,
+             "strikes": {"0xbadwallet": 1}, "banned": [],
+             "confidence": {"0xgood": 100}}))
         (rt / "sprint_book.json").write_text(json.dumps(
             {"initial_equity": 1000, "realized_pnl": 0, "trades": 0}))
         (rt / "sprint_leaders.json").write_text(json.dumps(
@@ -269,12 +268,11 @@ def test_build_report_is_quest_only():
         text = report_mod.build_report(offline=True, runtime_dir=rt)
 
     assert "=== Quest-Bot Report ===" in text
-    assert "Schatztruhe" in text and "+252.89" in text
-    assert "Krypto" in text and "Aktien" in text          # Asset-Aufschlüsselung
-    assert "⭐ Stars" in text and "0xbest" in text          # Star ab 100 Confidence
-    assert "Gesperrt" in text and "1 Leader" in text       # 1 gebannt
-    assert "Pool" in text and "21 Leader" in text
-    # KEINE Kopier-Buch-/Veto-/Empfehlungs-Sektionen mehr
+    assert "Leader-Scorecard" in text
+    assert "0xgood" in text and "+130.00" in text          # Gewinner-Wallet, Netto über 2 Ritte
+    assert "0xbadwallet" in text and "Prune-Kandidat" in text  # größter Verlierer markiert
+    assert "⭐STAR" in text                                  # 0xgood hat 100 Confidence
+    assert "Krypto vs. Aktien-Perps (aktuelle Ära" in text
     assert "Paper-Lauf-Report" not in text
     assert "Vetos" not in text and "Empfehlungen" not in text
 

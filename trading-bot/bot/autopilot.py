@@ -295,31 +295,71 @@ class Autopilot:
                 f"{analysis}\n"
                 f"<i>/quest = Details | /analyze = Analyse sofort anstoßen</i>")
 
+    def _quest_state(self) -> dict:
+        """State-Dict für quest_scorecard aus dem laufenden Buch (statt die
+        JSON-Datei neu zu lesen) - so ist der Report immer taufrisch."""
+        return {
+            "won": self.sprint.won, "busted": self.sprint.busted,
+            "strikes": self.sprint.strikes, "banned": sorted(self.sprint.banned),
+            "confidence": self.sprint.confidence,
+        }
+
+    def _journal_chrono(self, n: int = 5000) -> list[dict]:
+        """Journal in CHRONOLOGISCHER Reihenfolge (älteste zuerst) - journal.tail()
+        liefert neueste-zuerst, quest_scorecard braucht aber die Zyklus-Folge in
+        echter Zeit-Ordnung (die letzten won+busted = aktuelle Ära). Bricht auch
+        Gleich-Sekunden-Ties korrekt (Datei-Anhänge-Reihenfolge = Zyklus-Folge)."""
+        return list(reversed(self.journal.tail(n)))
+
     def _cmd_report(self) -> str:
-        """Quest-Auswertung: es gibt nur noch den Quest-Bot, der Report dreht
-        sich ausschließlich um ihn und die Schatztruhe."""
+        """Quest-Auswertung mit dem eigentlichen Nutzen: welche Wallet hat
+        verdient, welche verkackt (gesamte Historie) + Krypto-vs-Aktien der
+        aktuellen Ära. Der Report, der den Bot besser macht."""
         if not self.sprint:
             return "Quest-Bot nicht aktiv (sprint.enabled / dry_run prüfen)."
+        from .report import quest_scorecard
+
         s = self.sprint.stats(self.copier.last_prices if self.copier else {})
+        sc = quest_scorecard(self._journal_chrono(), self._quest_state())
         total = s["won"] + s["busted"]
         wr = (s["won"] / total * 100) if total else 0.0
         lines = [
             "<b>Quest-Report</b>",
-            f"Schatztruhe: {s['banked']:+,.2f} $",
-            f"Zyklen: {total} abgeschlossen ({s['won']}✅ {s['busted']}💥"
-            + (f", Trefferquote {wr:.0f}%" if total else "") + ")",
-            f"Ø {s['avg_trades_per_cycle']} Trades/Zyklus | Pool {len(self.sprint_leaders)}",
+            f"Schatztruhe: {s['banked']:+,.2f} $ | Zyklen {total} "
+            f"({s['won']}✅ {s['busted']}💥" + (f", {wr:.0f}%" if total else "") + ")",
         ]
-        badges = []
-        if s.get("stars"):
-            badges.append(f"⭐ {', '.join(s['stars'])}")
-        n_str, n_ban = len(s.get("strikes") or {}), len(s.get("banned") or [])
-        if n_str or n_ban:
-            badges.append(f"{n_str} mit Strikes, 🚫 {n_ban} gesperrt")
-        if badges:
-            lines.append(" | ".join(badges))
-        lines += ["", self._sprint_asset_breakdown(),
-                  "\n<i>/fullreport = ausführlich zum Copy-Paste</i>"]
+
+        def _mark(l):
+            if l["banned"]:
+                return " 🚫"
+            if l["star"]:
+                return " ⭐"
+            return f" ({l['strikes']}S)" if l["strikes"] else ""
+
+        leaders = sc["leaders"]
+        if leaders:
+            lines.append("\n<b>Beste Leader</b> (Netto-PnL, gesamte Historie):")
+            for l in leaders[:3]:
+                lines.append(f"  <code>{l['addr'][:10]}…</code> {l['pnl']:+,.2f}$ "
+                             f"({l['rides']}R {l['wins']}-{l['losses']}){_mark(l)}")
+            losers = [l for l in leaders if l["pnl"] < 0]
+            if losers:
+                lines.append("<b>Schwächste</b> (Prune-Kandidaten):")
+                for l in losers[-3:][::-1]:
+                    lines.append(f"  <code>{l['addr'][:10]}…</code> {l['pnl']:+,.2f}$ "
+                                 f"({l['rides']}R {l['wins']}-{l['losses']}){_mark(l)}")
+
+        assets = sc["assets"]
+        if any(b["n"] for b in assets.values()):
+            lines.append(f"\n<b>Krypto vs. Aktien</b> (aktuelle Ära, {sc['era_cycles']} Zyklen):")
+            for name in ("Krypto", "Aktien", "unbekannt"):
+                b = assets[name]
+                if not b["n"]:
+                    continue
+                wr2 = b["won"] / b["n"] * 100
+                lines.append(f"  {name}: {b['n']} Zyklen, {b['pnl']:+,.2f}$ ({wr2:.0f}%)")
+
+        lines.append("\n<i>/fullreport = volle Leader-Tabelle zum Copy-Paste</i>")
         return "\n".join(lines)
 
     def _cmd_fullreport(self, arg: str = "") -> str:
@@ -535,42 +575,27 @@ class Autopilot:
                 f"/quest assets = Krypto vs. Aktien | /quest reset = Bilanz auf 0</i>")
 
     def _sprint_asset_breakdown(self) -> str:
-        """Krypto vs. Aktien-Perps (Nutzer-Frage: was brachte in der Mess-Woche
-        mehr?). Liest abgeschlossene Sprint-Zyklen aus dem Journal und bucketet
-        nach Coin-Präfix ('xyz:...' = Builder-DEX-Aktie). Fehlt das coin-Feld
-        (alte Einzel-Ritt-Zyklen vor dem coin-Fix), landet der Eintrag EXPLIZIT
-        in 'unbekannt' statt still als Krypto gezählt zu werden - sonst würde
-        die Zahl eine Genauigkeit vortäuschen, die die Daten nicht hergeben."""
-        kinds = {"sprint_tp", "sprint_bust", "sprint_cycle_end"}
-        buckets = {
-            "Krypto": {"n": 0, "pnl": 0.0, "won": 0},
-            "Aktien": {"n": 0, "pnl": 0.0, "won": 0},
-            "unbekannt": {"n": 0, "pnl": 0.0, "won": 0},
-        }
-        for e in self.journal.tail(5000):
-            if e.get("kind") not in kinds:
-                continue
-            coin = e.get("coin")
-            key = "unbekannt" if not coin else ("Aktien" if ":" in coin else "Krypto")
-            b = buckets[key]
-            b["n"] += 1
-            pnl = float(e.get("pnl", 0))
-            b["pnl"] += pnl
-            if pnl > 0:
-                b["won"] += 1
-        total_n = sum(b["n"] for b in buckets.values())
-        if not total_n:
-            return "Noch keine abgeschlossenen Quest-Zyklen im Journal."
-        lines = ["<b>Quest: Krypto vs. Aktien</b>"]
+        """Krypto vs. Aktien-Perps NUR für die aktuelle Ära (seit dem letzten
+        Reset) - die Mess-Woche-Zyklen unter alten Regeln verwässern die Frage
+        nicht mehr. Scoping über quest_scorecard (letzte won+busted Zyklen)."""
+        if not self.sprint:
+            return "Quest-Bot nicht aktiv."
+        from .report import quest_scorecard
+
+        sc = quest_scorecard(self._journal_chrono(), self._quest_state())
+        assets = sc["assets"]
+        if not any(b["n"] for b in assets.values()):
+            return "Noch keine abgeschlossenen Quest-Zyklen in dieser Ära."
+        lines = [f"<b>Quest: Krypto vs. Aktien</b> (aktuelle Ära, {sc['era_cycles']} Zyklen)"]
         for name in ("Krypto", "Aktien", "unbekannt"):
-            b = buckets[name]
+            b = assets[name]
             if b["n"] == 0:
                 continue
             wr = b["won"] / b["n"] * 100
             lines.append(f"{name}: {b['n']} Zyklen, PnL {b['pnl']:+,.2f} $ "
-                        f"(Trefferquote {wr:.0f}%)")
-        if buckets["unbekannt"]["n"]:
-            lines.append("<i>'unbekannt' = alte Zyklen vor dem coin-Tracking-Fix</i>")
+                         f"(Trefferquote {wr:.0f}%)")
+        if assets["unbekannt"]["n"]:
+            lines.append("<i>'unbekannt' = Zyklen ohne coin-Feld</i>")
         return "\n".join(lines)
 
     def _cmd_twap(self) -> str:

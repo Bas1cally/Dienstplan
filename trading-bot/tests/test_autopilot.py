@@ -325,31 +325,36 @@ def test_cmd_fullreport_offline_arg_passed_through():
     assert calls == [True]
 
 
-def test_sprint_asset_breakdown_buckets_by_coin_prefix():
-    """Frage 1 des Nutzers: Krypto vs. Aktien-Perps - was brachte mehr? Der
-    Bucket 'unbekannt' fängt Zyklen ohne coin-Feld ab (alte Einzel-Ritt-
-    Zyklen vor dem coin-Tracking-Fix) - die dürfen NIE still als Krypto
-    gezählt werden, das würde eine Genauigkeit vortäuschen, die fehlt."""
+def test_sprint_asset_breakdown_scoped_to_current_era():
+    """Krypto vs. Aktien NUR für die aktuelle Ära (letzte won+busted Zyklen).
+    Alte Mess-Woche-Zyklen davor werden ausgeschlossen - genau das 'Krypto/
+    Aktien muss reset werden' des Nutzers, ohne Journal zu löschen."""
     import tempfile
 
     from bot.journal import Journal
 
+    class FakeSprint:
+        won, busted = 2, 1          # aktuelle Ära = 3 Zyklen
+        strikes, banned, confidence = {}, set(), {}
+
     ap = _autopilot()
+    ap.sprint = FakeSprint()
     with tempfile.TemporaryDirectory() as tmp:
         j = Journal(path=Path(tmp) / "trades.jsonl")
-        j.record("sprint_tp", coin="BTC", pnl=100.0)
-        j.record("sprint_bust", coin="ETH", pnl=-50.0)
-        j.record("sprint_cycle_end", coin="xyz:INTC", pnl=30.0)
-        j.record("sprint_cycle_end", coin="xyz:AMD", pnl=-10.0)
-        j.record("sprint_cycle_end", pnl=5.0)             # kein coin-Feld
-        j.record("order", coin="BTC", pnl=999.0)           # falscher kind, ignorieren
+        # 2 alte Ära-Zyklen (müssen RAUS aus der Auswertung)
+        j.record("sprint_cycle_end", coin="BTC", pnl=-999.0, leader="0xold")
+        j.record("sprint_cycle_end", coin="BTC", pnl=-999.0, leader="0xold")
+        # aktuelle Ära: 3 Zyklen (Krypto x2, Aktie x1)
+        j.record("sprint_tp", coin="ETH", pnl=100.0, leader="0xa")
+        j.record("sprint_bust", coin="xyz:INTC", pnl=-50.0, leader="0xb")
+        j.record("sprint_cycle_end", coin="SOL", pnl=30.0, leader="0xa")
         ap.journal = j
         out = ap._sprint_asset_breakdown()
 
-    assert "Krypto: 2 Zyklen, PnL +50.00 $ (Trefferquote 50%)" in out
-    assert "Aktien: 2 Zyklen, PnL +20.00 $ (Trefferquote 50%)" in out
-    assert "unbekannt: 1 Zyklen, PnL +5.00 $ (Trefferquote 100%)" in out
-    assert "coin-Tracking-Fix" in out, "Hinweis auf die Unsicherheit muss stehen"
+    assert "aktuelle Ära, 3 Zyklen" in out
+    assert "Krypto: 2 Zyklen, PnL +130.00 $ (Trefferquote 100%)" in out
+    assert "Aktien: 1 Zyklen, PnL -50.00 $ (Trefferquote 0%)" in out
+    assert "-999" not in out, "alte Ära-Zyklen dürfen NICHT mehr auftauchen"
 
 
 def test_sprint_reset_zeroes_bilanz_keeps_strikes():
@@ -379,7 +384,12 @@ def test_sprint_asset_breakdown_empty_journal():
 
     from bot.journal import Journal
 
+    class FakeSprint:
+        won = busted = 0
+        strikes, banned, confidence = {}, set(), {}
+
     ap = _autopilot()
+    ap.sprint = FakeSprint()
     with tempfile.TemporaryDirectory() as tmp:
         ap.journal = Journal(path=Path(tmp) / "trades.jsonl")
         out = ap._sprint_asset_breakdown()

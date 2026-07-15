@@ -34,25 +34,8 @@ def _load_json(path: Path) -> dict:
         return {}
 
 
-def _asset_buckets(journal: list[dict]) -> dict:
-    """Abgeschlossene Quest-Zyklen nach Coin-Präfix bucketen ('xyz:...' = Aktie).
-    Fehlt das coin-Feld (alte Zyklen vor dem coin-Tracking-Fix), landet der
-    Eintrag EXPLIZIT in 'unbekannt' - nie still als Krypto gezählt."""
-    kinds = {"sprint_tp", "sprint_bust", "sprint_cycle_end"}
-    buckets = {k: {"n": 0, "pnl": 0.0, "won": 0}
-               for k in ("Krypto", "Aktien", "unbekannt")}
-    for e in journal:
-        if e.get("kind") not in kinds:
-            continue
-        coin = e.get("coin")
-        key = "unbekannt" if not coin else ("Aktien" if ":" in coin else "Krypto")
-        b = buckets[key]
-        b["n"] += 1
-        pnl = float(e.get("pnl", 0))
-        b["pnl"] += pnl
-        if pnl > 0:
-            b["won"] += 1
-    return buckets
+def _addr(a: str) -> str:
+    return f"{a[:10]}…" if len(a) > 11 else a
 
 
 def build_report(offline: bool = False, horizon: float = 24, fast_horizon: float = 1.0,
@@ -85,6 +68,10 @@ def build_report(offline: bool = False, horizon: float = 24, fast_horizon: float
     avg = (int(st.get("total_trades", 0)) + cur_trades) / max(1, total + 1)
     eq_real = float(bk.get("initial_equity", 1000)) + float(bk.get("realized_pnl", 0))
 
+    from bot.report import quest_scorecard
+
+    sc = quest_scorecard(journal, st)
+
     add("\n=== Quest-Bot Report ===\n")
     add(f"  Schatztruhe        {banked:+,.2f} $")
     wr = f", Trefferquote {won / total * 100:.0f}%" if total else ""
@@ -92,36 +79,44 @@ def build_report(offline: bool = False, horizon: float = 24, fast_horizon: float
     add(f"  Ø Trades/Zyklus    {avg:.1f}  (Churn-Frühwarnung: einstellig = gesund)")
     add(f"  Aktueller Zyklus   Equity {eq_real:,.2f} (realisiert, {cur_trades} Trades)")
 
-    buckets = _asset_buckets(journal)
-    if any(b["n"] for b in buckets.values()):
-        add("\n  Krypto vs. Aktien-Perps:")
+    # DER Kern: welche Wallet hat verdient, welche verkackt (gesamte Historie)?
+    leaders = sc["leaders"]
+    if leaders:
+        add("\n  Leader-Scorecard (gesamte Quest-Historie, Netto-PnL absteigend):")
+        add(f"    {'Wallet':13s} {'Ritte':>6} {'S-N':>7} {'PnL $':>10} {'Ø $':>8}  Status")
+        for l in leaders:
+            status = []
+            if l["star"]:
+                status.append("⭐STAR")
+            if l["banned"]:
+                status.append("🚫GESPERRT")
+            elif l["strikes"]:
+                status.append(f"{l['strikes']} Strike(s)")
+            if l["confidence"] and not l["star"]:
+                status.append(f"conf {l['confidence']}")
+            add(f"    {_addr(l['addr']):13s} {l['rides']:>6} "
+                f"{l['wins']}-{l['losses']:<5} {l['pnl']:>+10.2f} {l['avg']:>+8.2f}  "
+                f"{' '.join(status)}")
+        winners = [l for l in leaders if l["pnl"] > 0]
+        losers = [l for l in leaders if l["pnl"] < 0]
+        add(f"    → {len(winners)} Verdiener, {len(losers)} Verlierer. "
+            f"Größter Verlierer {_addr(leaders[-1]['addr'])} "
+            f"({leaders[-1]['pnl']:+.2f}$) ist ein Prune-Kandidat.")
+
+    assets = sc["assets"]
+    if any(b["n"] for b in assets.values()):
+        add(f"\n  Krypto vs. Aktien-Perps (aktuelle Ära, {sc['era_cycles']} Zyklen):")
         for name in ("Krypto", "Aktien", "unbekannt"):
-            b = buckets[name]
+            b = assets[name]
             if not b["n"]:
                 continue
             wr2 = b["won"] / b["n"] * 100
             add(f"    {name:10s} {b['n']:>3} Zyklen  PnL {b['pnl']:+,.2f} $  "
                 f"(Trefferquote {wr2:.0f}%)")
-        if buckets["unbekannt"]["n"]:
-            add("    ('unbekannt' = alte Zyklen vor dem coin-Tracking-Fix)")
 
-    strikes = st.get("strikes") or {}
-    banned = st.get("banned") or []
-    confidence = st.get("confidence") or {}
-    stars = [a for a, n in confidence.items() if n >= 100]
-    if strikes or banned or confidence:
-        add("\n  LARP-Filter:")
-        if stars:
-            add(f"    ⭐ Stars           {', '.join(a[:10] for a in stars)}")
-        if confidence:
-            top = sorted(confidence.items(), key=lambda t: -t[1])[:5]
-            add("    Confidence        " + ", ".join(f"{a[:10]}:{n}" for a, n in top))
-        if strikes:
-            add(f"    Strikes           {len(strikes)} Leader mit offenen Strikes")
-        if banned:
-            add(f"    Gesperrt          {len(banned)} Leader (enttarnte LARPs)")
-
-    add(f"\n  Pool               {pool_n} Leader scanbar")
+    banned_state = st.get("banned") or []
+    add(f"\n  Pool               {pool_n} Leader scanbar "
+        f"({len(banned_state)} insgesamt gesperrt)")
     add("\n  (Kopier-Buch stillgelegt, nur noch Feed - es gibt nur den Quest-Bot.)")
     add()
     return "\n".join(out)
