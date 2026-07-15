@@ -963,6 +963,132 @@ def test_star_priority_over_higher_score_on_simultaneous_signals():
         assert b.ride_leader == "0xsecond", "Star gewinnt trotz niedrigerem Score"
 
 
+# ---------- Star-Preemption (QOL-Runde) ----------
+
+def _riding_with_star(tmp, t):
+    """Helfer: 0xbest reitet BTC (direkt via _enter, ohne Bestätigungsfenster
+    für den Ritt-Aufbau selbst), 0xstar ist bereits ein Star. Gibt (b, two,
+    s_best, s_star) zurück - der Aufrufer triggert das frische ETH-Signal
+    per tick() selbst, um den genauen Preis/Zeitpunkt zu kontrollieren."""
+    b = _confirm_book(tmp, t)
+    two = leaders(("0xbest", 80), ("0xstar", 95))
+    b.confidence["0xstar"] = STAR_THRESHOLD
+    s_best = snap("0xbest", 50_000, BTC=500)
+    b._enter("BTC", s_best, P)
+    assert "BTC" in b.paper.sizes()
+    b._baselines["0xbest"] = b._book_of(s_best)
+    b._baselines["0xstar"] = {}
+    return b, two, s_best
+
+
+def test_star_preemption_full_flow_settles_old_ride_as_star_preempt():
+    """Kompletter Preemption-Fluss: profitabler BTC-Ritt läuft, ein Star
+    meldet ein frisches Signal, das Fenster wird abgewartet, dann wird der
+    alte Ritt mit reason='star_preempt' abgeschlossen (+5 Confidence für den
+    ALTEN Leader, nicht den Star) und der Star-Ritt eröffnet."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b, two, s_best = _riding_with_star(tmp, t)
+        s_star = snap("0xstar", 50_000, ETH=300)
+        hold = {"BTC": 100.5, "ETH": 100.0}   # BTC profitabel, aber unter TP
+
+        b.tick(two, [s_best, s_star], hold)
+        assert any(p["coin"] == "ETH" for p in b.stats(hold)["pending"])
+        assert "BTC" in b.paper.sizes(), "alter Ritt läuft während der Bestätigung weiter"
+
+        t["now"] += 11
+        b.tick(two, [s_best, s_star], hold)
+        assert "ETH" in b.paper.sizes() and "BTC" not in b.paper.sizes()
+        assert b.ride_leader == "0xstar"
+        assert b.won == 1, "der preemptete Ritt zählt als Bilanz-Gewinn"
+        assert b.confidence.get("0xbest", 0) == CONFIDENCE_PER_WIN, \
+            "star_preempt gibt dem ALTEN Leader +5 Confidence (BACKLOG-Versprechen)"
+        assert b.confidence.get("0xstar", 0) == STAR_THRESHOLD, \
+            "der Star selbst bekommt hier keine zusätzlichen Punkte"
+        assert b.stats(hold)["pending"] == []
+
+
+def test_star_preemption_rechecks_profitability_at_confirmation_time():
+    """Zweiter Fund des Gegenchecks: Profitabilität wird zum Bestätigungs-
+    zeitpunkt neu geprüft, nicht zur Entdeckungszeit - kippt der Ritt
+    zwischendurch ins Minus/Breakeven, bleibt die Preemption gegenstandslos
+    und der Kandidat wartet einfach weiter."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b, two, s_best = _riding_with_star(tmp, t)
+        s_star = snap("0xstar", 50_000, ETH=300)
+
+        b.tick(two, [s_best, s_star], {"BTC": 100.5, "ETH": 100.0})   # profitabel
+        assert any(p["coin"] == "ETH" for p in b.stats(P)["pending"])
+
+        t["now"] += 11
+        # Preis zurück auf Einstand (netto durch die Entry-Fee sogar leicht
+        # unter 1000 Basis) - zum Bestätigungszeitpunkt NICHT mehr profitabel
+        b.tick(two, [s_best, s_star], {"BTC": 100.0, "ETH": 100.0})
+        assert "ETH" not in b.paper.sizes(), "Preemption gegenstandslos ohne Profit JETZT"
+        assert "BTC" in b.paper.sizes(), "alter Ritt läuft unverändert weiter"
+        assert any(p["coin"] == "ETH" for p in b.stats(P)["pending"]), \
+            "Kandidat wird nicht verworfen, bleibt einfach stehen"
+
+
+def test_star_preemption_moot_when_ride_ends_naturally_during_wait():
+    """Endet der laufende Ritt während der Wartezeit von selbst (Leader steigt
+    aus), ist die Preemption gegenstandslos: der Ritt settled ganz normal
+    (reason='leader_exit', KEINE Confidence fürs BACKLOG-'nur tp'-Ergebnis),
+    der Star-Kandidat wird zum normalen Fresh-Entry, sobald wieder flach."""
+    recorded = []
+
+    class J:
+        def record(self, kind, **d):
+            recorded.append((kind, d))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b, two, s_best = _riding_with_star(tmp, t)
+        b.journal = J()
+        s_star = snap("0xstar", 50_000, ETH=300)
+        hold = {"BTC": 100.5, "ETH": 100.0}
+
+        b.tick(two, [s_best, s_star], hold)
+        assert any(p["coin"] == "ETH" for p in b.stats(hold)["pending"])
+
+        t["now"] += 3
+        s_best_flat = snap("0xbest", 50_000)   # Leader selbst schon wieder raus
+        b.tick(two, [s_best_flat, s_star], hold)
+        assert b.paper.sizes() == {}, "Ritt hat sich ganz normal beendet"
+        assert b.won == 1
+        cycle_end = next(d for k, d in recorded if k == "sprint_cycle_end")
+        assert cycle_end["reason"] == "leader_exit"
+        assert b.confidence.get("0xbest", 0) == 0, \
+            "leader_exit-Gewinn bleibt confidence-neutral, auch als Preemption-Auslöser"
+
+        t["now"] += 10   # insgesamt 13s seit Entdeckung des Star-Signals
+        b.tick(two, [s_best_flat, s_star], hold)
+        assert "ETH" in b.paper.sizes(), "Star-Kandidat promotet normal, sobald flach"
+        assert b.ride_leader == "0xstar"
+
+
+def test_non_star_candidate_does_not_preempt_while_riding():
+    """Nur Stars dürfen einen laufenden, profitablen Ritt preempten - ein
+    normaler (nicht-Star) Kandidat bleibt einfach liegen, bis wir wieder
+    flach sind (unabhängig vom Score)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book(tmp, t)
+        s_best = snap("0xbest", 50_000, BTC=500)
+        b._enter("BTC", s_best, P)
+        s2 = snap("0xsecond", 50_000, ETH=300)   # kein Star
+        b._register_pending("ETH", s2)
+
+        t["now"] += 11
+        two = leaders(("0xbest", 80), ("0xsecond", 90))
+        b.tick(two, [s_best, s2], {"BTC": 100.5, "ETH": 100.0})
+        assert "ETH" not in b.paper.sizes()
+        assert "BTC" in b.paper.sizes()
+        assert any(p["coin"] == "ETH" for p in b.stats(P)["pending"]), \
+            "bleibt liegen, bis wir wieder flach sind"
+
+
 # ---------- coin-Feld im Einzel-Ritt-Zyklusende (QOL-Runde) ----------
 
 def test_single_ride_settle_carries_coin_field():

@@ -178,7 +178,7 @@ class SprintBook:
             return
 
         if self.paper.sizes():
-            self._tick_riding(snapshots, prices)
+            self._tick_riding(leaders, snapshots, prices)
         else:
             self._tick_waiting(leaders, snapshots, prices)
         # Läuft IMMER (auch während eines Ritts, für die später kommende
@@ -307,6 +307,33 @@ class SprintBook:
         ready.sort(key=lambda item: (self.is_star(item[1]["leader"]),
                                      scores.get(item[1]["leader"].lower(), 0.0)),
                   reverse=True)
+
+        if self.paper.sizes():
+            # Läuft noch ein Ritt: NUR eine Star-Preemption kann hier greifen
+            # (die Exit-Folge in _tick_riding hätte sonst schon geschlossen).
+            # Ein reifer Kandidat, dessen Leader kein Star ist, bleibt einfach
+            # PENDING liegen - "wird zum normalen Fresh-Entry-Kandidaten", der
+            # seine Chance bekommt, sobald wir wieder flach sind (BACKLOG).
+            eligible = [r for r in ready if self.is_star(r[1]["leader"])]
+            if not eligible:
+                return
+            win_coin, win_info, win_snap = eligible[0]
+            # Profitabilität JETZT neu prüfen, nicht zum Entdeckungszeitpunkt -
+            # der Kurs kann in den Sekunden der Bestätigung gekippt sein.
+            if self.paper.equity(prices) - self.cfg.equity <= 0:
+                return  # Preemption gegenstandslos - alle Kandidaten warten weiter
+            for coin, info, _ in ready:
+                if coin != win_coin:
+                    self._pending.pop(coin, None)
+                    self._reject(coin, info["leader"], "andere_bestaetigt")
+            self._pending.pop(win_coin, None)
+            for coin in list(self.paper.sizes()):
+                self._close_coin(coin, prices, "star_preempt")
+            self._settle_ride(prices, "star_preempt")
+            self._enter(win_coin, win_snap, prices)
+            return
+
+        # FLACH: normaler Promotion-Pfad
         win_coin, win_info, win_snap = ready[0]
         for coin, info, _ in ready[1:]:
             self._pending.pop(coin, None)
@@ -460,7 +487,8 @@ class SprintBook:
 
     # ---------- IM RITT: halten, nur dem Ride-Leader folgen ----------
 
-    def _tick_riding(self, snapshots: list, prices: dict[str, float]) -> None:
+    def _tick_riding(self, leaders: list[dict], snapshots: list,
+                     prices: dict[str, float]) -> None:
         snap = next((s for s in snapshots
                      if s.address.lower() == self.ride_leader.lower()), None)
         if snap is None:
@@ -508,6 +536,45 @@ class SprintBook:
 
         if not self.paper.sizes():
             self._settle_ride(prices, last_reason or "leader_exit")
+            return
+        # Star-Preemption (BACKLOG): auch während eines laufenden Ritts weiter
+        # ALLE ANDEREN Leader auf frische Signale scannen - aber NUR Stars
+        # dürfen einen Kandidaten registrieren. Läuft NUR, wenn der Ritt noch
+        # steht (return oben deckt den "gerade beendet"-Fall ab).
+        self._scan_star_preemption(leaders, snapshots, prices)
+
+    def _scan_star_preemption(self, leaders: list[dict], snapshots: list,
+                              prices: dict[str, float]) -> None:
+        """Star-Preemption-Kandidaten registrieren (nicht selbst entscheiden -
+        das macht _process_pending, der zum Bestätigungszeitpunkt neu prüft,
+        ob der Ritt dann noch läuft UND noch profitabel ist)."""
+        by_addr = {s.address.lower(): s for s in snapshots}
+        for l in leaders:
+            addr = str(l.get("address", "")).lower()
+            if addr == self.ride_leader.lower() or not self.is_star(addr):
+                continue  # eigener Ride-Leader läuft über die Exit-Folge oben;
+                          # nur Stars dürfen preemten
+            snap = by_addr.get(addr)
+            if snap is None:
+                continue
+            prev = self._baselines.get(addr)
+            if prev is None:
+                continue
+            fresh = self._fresh_coins(self._book_of(snap), prev)
+            if not fresh:
+                continue
+            self._note_fresh(len(fresh))
+            candidates = [c for c in fresh if c not in self.paper.sizes()]
+            if not candidates:
+                continue
+            candidates.sort(key=lambda c: abs(snap.exposure(c)), reverse=True)
+            for coin in candidates:
+                ko = self._ineligible_reason(coin)
+                if ko:
+                    self._reject(coin, snap.address, ko)
+                    continue
+                self._register_pending(coin, snap)
+                break   # nur das stärkste Signal dieses Stars pro Tick
 
     def _refresh_baselines(self, leaders: list[dict], snapshots: list) -> None:
         keep = {str(l.get("address", "")).lower() for l in leaders}
