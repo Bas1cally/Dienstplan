@@ -931,6 +931,29 @@ class SprintBook:
             self.banned = {str(a).lower() for a in (raw.get("banned") or [])}
             self.confidence = {str(k): int(v) for k, v in
                                (raw.get("confidence") or {}).items()}
+            # Mess-Modus -> Einzel-Ritt (QOL-Runde, Nutzer-Entscheidung): die
+            # Bilanz (Zyklus-Zähler/Schatztruhe) der Mess-Woche wurde unter
+            # anderen Regeln erzielt (parallele Ritte, kein Bestätigungsfenster)
+            # und soll die künftige Einzel-Ritt-Messung nicht verfälschen - EIN
+            # frischer Start bei Zyklus 1/0$, sobald wir das erste Mal unter
+            # parallel_rides=false laden. Strikes/Bans/Confidence bleiben (echtes
+            # LARP-Wissen, keine Mess-Modus-spezifische Zahl). Alte v2/v3-State-
+            # Dateien ohne 'parallel_rides'-Feld (vor diesem Feature gespeichert)
+            # gelten als 'war Mess-Modus' (Default True) - das trifft exakt den
+            # Umstieg von der laufenden Mess-Woche. Echte v1-Altlasten (noch kein
+            # 'ride_leader'-Feld) sind ein ANDERER, älterer Migrationsfall mit
+            # eigenem "Bilanz bleibt"-Vertrag (siehe unten) - hier ausgenommen.
+            was_v1 = "ride_leader" not in raw
+            was_parallel = bool(raw.get("parallel_rides", True))
+            if not was_v1 and was_parallel and not self.cfg.parallel_rides:
+                log.warning("Sprint: Mess-Modus -> Einzel-Ritt - Bilanz "
+                            "(Zyklus/Schatztruhe) zurückgesetzt, Strikes/"
+                            "Bans/Confidence bleiben erhalten")
+                self.won = 0
+                self.busted = 0
+                self.banked = 0.0
+                self.total_trades = 0
+                self._save_state()
         # v1-Migration: altes Buch hat mit Dauer-Reconciliation gechurnt (139 Trades)
         # -> Buch einmalig sauber neu starten, Bilanz (banked/won/busted) behalten.
         v1_state = raw is not None and "ride_leader" not in raw
@@ -952,6 +975,7 @@ class SprintBook:
                 "ride_leaders": self.ride_leaders,
                 "strikes": self.strikes, "banned": sorted(self.banned),
                 "confidence": self.confidence,
+                "parallel_rides": self.cfg.parallel_rides,
             }))
         except OSError:
             log.exception("sprint_cycles.json nicht schreibbar")

@@ -1169,6 +1169,74 @@ def test_mode_switch_defers_coin_without_price_to_next_tick():
         assert b.paper.sizes() == {} and b.ride_leaders == {}
 
 
+# ---------- Bilanz-Reset beim ersten Laden nach Mess-Modus (QOL-Runde) ----------
+
+def test_bilanz_resets_when_loading_after_mess_modus_switch():
+    """Erster Load unter parallel_rides=false, nachdem der State zuletzt unter
+    parallel_rides=true gespeichert wurde: Zyklus-Zähler und Schatztruhe (Mess-
+    Woche-Bilanz, andere Regeln - parallele Ritte, kein Bestätigungsfenster)
+    starten frisch bei 0. Strikes/Bans/Confidence (echtes LARP-Wissen, keine
+    Mess-Modus-spezifische Zahl) bleiben unangetastet."""
+    with tempfile.TemporaryDirectory() as tmp:
+        old = book(tmp, parallel_rides=True)
+        old.won, old.busted, old.banked, old.total_trades = 5, 3, 842.17, 40
+        old.strikes["0xbad"] = 1
+        old.banned.add("0xzzz")
+        old.confidence["0xbest"] = 55
+        old._save_state()
+
+        fresh = book(tmp)   # Default parallel_rides=False
+        assert fresh.won == 0 and fresh.busted == 0
+        assert fresh.banked == 0.0 and fresh.total_trades == 0
+        assert fresh.strikes.get("0xbad") == 1, "Strikes bleiben"
+        assert "0xzzz" in fresh.banned, "Bans bleiben"
+        assert fresh.confidence.get("0xbest") == 55, "Confidence bleibt"
+
+
+def test_bilanz_reset_does_not_repeat_on_next_restart():
+    with tempfile.TemporaryDirectory() as tmp:
+        old = book(tmp, parallel_rides=True)
+        old.won, old.banked = 5, 500.0
+        old._save_state()
+
+        first = book(tmp)
+        assert first.won == 0 and first.banked == 0.0
+        first.won, first.banked = 2, 150.0   # neue Einzel-Ritt-Bilanz sammelt sich an
+        first._save_state()
+
+        second = book(tmp)
+        assert second.won == 2 and second.banked == 150.0, \
+            "kein wiederholter Reset - der Umstieg ist ein einmaliges Ereignis"
+
+
+def test_missing_parallel_rides_field_treated_as_was_parallel():
+    """Alte State-Dateien (vor diesem Feature gespeichert) haben kein
+    'parallel_rides'-Feld - genau der Fall auf dem echten Server gerade jetzt.
+    Muss wie 'war Mess-Modus' behandelt werden, sonst würde der Umstieg beim
+    allerersten Deploy dieses Features gar keinen Reset auslösen."""
+    with tempfile.TemporaryDirectory() as tmp:
+        rt = Path(tmp)
+        (rt / "sprint_cycles.json").write_text(json.dumps({
+            "banked": 1370.63, "won": 26, "busted": 23, "total_trades": 90,
+            "ride_leader": "", "strikes": {"0xbad": 1}, "banned": ["0xzzz"],
+        }))
+        fresh = SprintBook(SprintConfig(exclude_coins=[]), FEE, runtime_dir=rt)
+        assert fresh.won == 0 and fresh.busted == 0 and fresh.banked == 0.0
+        assert fresh.strikes.get("0xbad") == 1
+        assert "0xzzz" in fresh.banned
+
+
+def test_no_bilanz_reset_when_staying_in_parallel_mode():
+    with tempfile.TemporaryDirectory() as tmp:
+        old = book(tmp, parallel_rides=True)
+        old.won, old.banked = 5, 500.0
+        old._save_state()
+
+        still_parallel = book(tmp, parallel_rides=True)
+        assert still_parallel.won == 5 and still_parallel.banked == 500.0, \
+            "kein Reset, solange der Mess-Modus weiterläuft"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

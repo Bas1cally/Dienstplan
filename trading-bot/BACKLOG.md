@@ -29,6 +29,18 @@ ist da; Chat-Verlauf ist es nicht.
 > Krypto-vs-Aktien-Frage der Mess-Woche direkt per Telegram. Die Bank heißt in
 > der Anzeige jetzt „Schatztruhe" (intern weiter `banked` — reine Anzeigefrage).
 >
+> **UPDATE 15.07. — Bilanz-Reset beim Umstieg (Nutzer-Nachfrage):** Zyklus-
+> Zähler (`won`/`busted`) und Schatztruhe (`banked`, `total_trades`) setzen
+> sich beim ERSTEN Laden unter `parallel_rides: false` automatisch auf 0/1
+> zurück — die Mess-Woche-Bilanz (+1.370,63 $ über 50 Zyklen unter anderen
+> Regeln: parallele Ritte, kein Bestätigungsfenster) würde sonst die künftige
+> Einzel-Ritt-Messung verfälschen. „Die echte Bot-Messwoche" beginnt damit
+> sauber bei Zyklus 1. Strikes/Bans/Confidence bleiben unangetastet — das ist
+> erprobtes LARP-Wissen, keine Mess-Modus-spezifische Zahl. Läuft automatisch
+> beim Deploy, kein manueller Schritt nötig (`_migrate_v1_or_load` in
+> `bot/sprint.py`, erkennt den Umstieg am persistierten `parallel_rides`-Feld
+> des letzten Saves bzw. dessen Fehlen bei alten State-Dateien).
+>
 > **UPDATE 15.07. — Voller Effort auf Sprint, Beobachter abgeschaltet.**
 > 33-Tage-`/fullreport` zeigte: Haupt-Buch −4,94 % (Veto-Outcome nicht
 > signifikant), Anomalie-/Orderbuch-Scout nicht signifikant, Strategie-Labor
