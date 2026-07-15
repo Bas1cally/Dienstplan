@@ -736,7 +736,7 @@ class SprintBook:
                                 notional=round(abs(notional), 0),
                                 leader=snap.address, cycle=cycle)
         if self.notifier:
-            self.notifier.send(f"🟢 <b>Sprint-Einstieg</b>: {side} {coin} "
+            self.notifier.send(f"🟢 <b>Quest-Einstieg</b>: {side} {coin} "
                                f"${abs(notional):,.0f}\nLeader <code>{snap.address[:10]}…</code> "
                                f"| Zyklus {cycle}")
         self._save_state()
@@ -754,7 +754,7 @@ class SprintBook:
             self.journal.record("sprint_exit", coin=coin, reason=reason,
                                 cycle_pnl=round(run_pnl, 2))
         if self.notifier:
-            self.notifier.send(f"🔴 <b>Sprint-Exit</b> {coin}: {reason_txt}\n"
+            self.notifier.send(f"🔴 <b>Quest-Exit</b> {coin}: {reason_txt}\n"
                                f"Zyklus-PnL {run_pnl:+,.2f} $")
 
     # ---------- Zyklus-Ende (= Ritt-Ende, v3) ----------
@@ -829,7 +829,7 @@ class SprintBook:
                     if self.notifier:
                         self.notifier.send(
                             f"🚫 <b>Leader enttarnt</b> <code>{leader[:10]}…</code>\n"
-                            f"{n} Verlust-Ritte in Folge - fürs Sprint-Buch gesperrt.")
+                            f"{n} Verlust-Ritte in Folge - vom Quest-Bot gesperrt.")
                 elif self.notifier:
                     self.notifier.send(f"⚠️ Strike {n}/{self.cfg.strike_ban} für "
                                        f"<code>{leader[:10]}…</code> (Verlust-Ritt {pnl:+,.2f}$)")

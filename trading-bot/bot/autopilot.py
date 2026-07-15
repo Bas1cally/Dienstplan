@@ -231,7 +231,8 @@ class Autopilot:
             "/anomalies": self._cmd_anomalies,
             "/orderbook": self._cmd_orderbook,
             "/twap": self._cmd_twap,
-            "/sprint": self._cmd_sprint,
+            "/quest": self._cmd_sprint,
+            "/sprint": self._cmd_sprint,   # Alt-Alias (Muskelgedächtnis) - Quest-Bot ist der neue Name
             "/polymarket": self._cmd_polymarket,
             "/stop": self._cmd_stop,
             "/start": self._cmd_start,
@@ -248,30 +249,24 @@ class Autopilot:
     # ---------- Telegram-Befehle (Antworten als HTML-String) ----------
 
     def _cmd_help(self) -> str:
-        return ("<b>Befehle</b>\n/status – Zustand & Equity\n/report – Auswertung\n"
-                "/positions – offene Positionen + PnL\n/leaders – Leader + ROI\n/anomalies – HL-Scout-Funde\n"
-                "/orderbook – Mikrostruktur-Signale\n/twap – laufende Whale-TWAPs\n"
-                "/sprint – Sprint-Buch (1000$ x10, Ziel +100$)\n"
-                "/sprint pool – Sprint-Pool mit Richtungs-Scores\n"
-                "/sprint assets – Krypto vs. Aktien-Perps PnL-Vergleich\n"
-                "/sprint reset – Bilanz (Zyklus/Schatztruhe) auf 0, Strikes/Bans bleiben\n"
-                "/polymarket – Prediction-Market-Funde\n"
+        return ("<b>Befehle</b>\n/status – Zustand & Schatztruhe\n"
+                "/quest – Quest-Bot (1000$ x10, Ziel +100$/Zyklus)\n"
+                "/quest pool – Quest-Pool mit Richtungs-Scores\n"
+                "/quest assets – Krypto vs. Aktien-Perps PnL-Vergleich\n"
+                "/quest reset – Bilanz (Zyklus/Schatztruhe) auf 0, Strikes/Bans bleiben\n"
+                "/report – Quest-Auswertung\n/positions – offene Positionen + PnL\n"
+                "/leaders – Quest-Pool + ROI\n"
                 "/update – Update ziehen + neu starten\n"
                 "/probe – Multi-DEX-Scan-Probe (Extended/Lighter/…)\n"
                 "/lighter &lt;ref&gt; – Lighter-Konto prüfen (Verifikation)\n"
                 "/setcmm &lt;token&gt; – HyperTracker-API-Token setzen\n"
                 "/cmm – HyperTracker-Leaderboard live proben\n"
                 "/analyze – Leader-Analyse sofort anstoßen\n"
-                "/fullreport [offline] – KOMPLETTER Report zum Copy-Paste (mehrere "
-                "Nachrichten - fürs Weiterleiten, wenn SSH/Konsole klemmt)\n"
-                "/stop /start /resume – Autopilot/Halt steuern")
+                "/fullreport [offline] – kompletter Quest-Report zum Copy-Paste\n"
+                "/stop /start /resume – Autopilot/Halt steuern\n"
+                "<i>(/sprint funktioniert weiter als Alt-Name für /quest)</i>")
 
     def _cmd_status(self) -> str:
-        s = self.status()
-        eq = self.copier.last_equity if self.copier else None
-        day_t = int(time.time()) - 86_400
-        orders = sum(1 for e in self.journal.tail(2000)
-                     if e.get("kind") == "order" and e.get("t", 0) >= day_t)
         if self._analysis_running:
             mins = (time.time() - self._analysis_started) / 60
             analysis = (f"Analyse: ⏳ LÄUFT seit {mins:.0f} min (50 Wallets dauern "
@@ -285,14 +280,20 @@ class Autopilot:
                         if age_h is not None else "Analyse: noch keine gelaufen")
         if self._analysis_note and not self._analysis_running:
             analysis += f"\n{self._analysis_note}"
-        return (f"<b>Status</b>: {s.get('state', '?')}\n"
-                f"Equity: {f'{eq:,.2f}' if eq else 'n/a'}\n"
-                f"Orders (24h): {orders}\n"
-                f"Risiko: {self.guard.last_level.name if self.guard else 'NORMAL'}\n"
-                f"Kopier-Buch: {len(self.leaders)} | Sprint-Pool: {len(self.sprint_leaders)} | "
-                f"WS: {'an' if self.feed and self.feed.connected else 'aus'}\n"
+        # Quest-Bot ist das ganze System - /status dreht sich nur noch um ihn
+        # und die Schatztruhe, kein Kopier-Buch mehr (das läuft still als Feed).
+        risk = self.guard.last_level.name if self.guard else "NORMAL"
+        ws = "an" if self.feed and self.feed.connected else "aus"
+        if not self.sprint:
+            return (f"<b>Status</b>: Quest-Bot nicht aktiv (sprint.enabled/dry_run prüfen)\n"
+                    f"Risiko: {risk} | Pool: {len(self.sprint_leaders)} | WS: {ws}\n{analysis}")
+        q = self.sprint.stats(self.copier.last_prices if self.copier else {})
+        return (f"<b>Status Quest-Bot</b>: {q['state']}\n"
+                f"Schatztruhe: {q['banked']:+,.2f} $ | Zyklus {q['cycle']} "
+                f"({q['won']}✅ {q['busted']}💥)\n"
+                f"Risiko: {risk} | Pool: {len(self.sprint_leaders)} scanbar | WS: {ws}\n"
                 f"{analysis}\n"
-                f"<i>/analyze = Analyse sofort anstoßen</i>")
+                f"<i>/quest = Details | /analyze = Analyse sofort anstoßen</i>")
 
     def _cmd_report(self) -> str:
         from .report import summarize
@@ -378,42 +379,19 @@ class Autopilot:
                 f"Nachrichten zum Copy-Paste.\n<i>/fullreport offline = ohne Netz-Analyse, schneller</i>")
 
     def _cmd_positions(self) -> str:
-        """Was steckt der Bot gerade drin? Offene Positionen mit unrealisiertem PnL."""
+        """Was hält der Quest-Bot gerade? Offene Positionen mit unrealisiertem PnL.
+        Kopier-Buch/Labs sind stillgelegt - es gibt nur noch den Quest-Bot."""
         prices = self.copier.last_prices if self.copier else {}
         out: list[str] = []
-        rows = self.status().get("positions") or []
-        if rows:
-            out.append("<b>Copy-Buch</b>")
-            total = 0.0
-            for r in rows:
-                size = r.get("size", 0)
-                side = "LONG" if size > 0 else "SHORT"
-                entry = r.get("entry", 0)
-                px = prices.get(r["coin"], entry) or entry
-                pnl = r.get("unrealized_pnl", 0)
-                out.append(f"{side} {r['coin']}: {abs(size):.4f} @ {entry:.4f} "
-                           f"(${abs(size) * px:,.0f}, PnL {pnl:+,.2f})")
-                total += pnl
-            out.append(f"Σ unrealisiert: {total:+,.2f}")
-        # Eigene Strategien (Paper) - was sie aktuell halten
-        if self.labs:
-            for lab in self.labs.labs:
-                lrows = lab.paper.position_rows(prices)
-                if lrows:
-                    out.append(f"<b>{lab.name}</b>")
-                    for r in lrows:
-                        side = "LONG" if r["size"] > 0 else "SHORT"
-                        out.append(f"{side} {r['coin']}: {abs(r['size']):.4f} @ {r['entry']:.4f} "
-                                   f"(PnL {r['unrealized_pnl']:+,.2f})")
         if self.sprint:
             srows = self.sprint.paper.position_rows(prices)
             if srows:
-                out.append("<b>Sprint-Buch (x10)</b>")
+                out.append("<b>Quest-Bot (x10)</b>")
                 for r in srows:
                     side = "LONG" if r["size"] > 0 else "SHORT"
                     out.append(f"{side} {r['coin']}: {abs(r['size']):.4f} @ {r['entry']:.4f} "
                                f"(PnL {r['unrealized_pnl']:+,.2f})")
-        return "\n".join(out) if out else "Aktuell keine offenen Positionen."
+        return "\n".join(out) if out else "Quest-Bot hält aktuell nichts (wartet auf frisches Signal)."
 
     def _cmd_leaders(self) -> str:
         if not self.leaders:
@@ -447,13 +425,13 @@ class Autopilot:
 
     def _cmd_sprint(self, arg: str = "") -> str:
         if not self.sprint:
-            return "Sprint-Buch nicht aktiv (sprint.enabled / dry_run prüfen)."
+            return "Quest-Bot nicht aktiv (sprint.enabled / dry_run prüfen)."
         prices = self.copier.last_prices if self.copier else {}
         if arg.lower().strip() == "close":
             n = self.sprint.close(prices)
-            return (f"⏹ Sprint-Zyklus manuell beendet ({n} Position(en)) - sofort "
+            return (f"⏹ Quest-Zyklus manuell beendet ({n} Position(en)) - sofort "
                     "verbucht, kein Strike. Nächster Zyklus wartet auf frisches Signal."
-                    if n else "Sprint-Buch hält gerade nichts.")
+                    if n else "Quest-Bot hält gerade nichts.")
         if arg.lower().strip() == "reset":
             n = self.sprint.close(prices)   # offene Position(en) zuerst sauber raus, kein Strike
             self.sprint.reset_bilanz()
@@ -462,8 +440,8 @@ class Autopilot:
                     + ".\nStrikes/Bans/Confidence bleiben erhalten.")
         if arg.lower().strip() == "pool":
             if not self.sprint_leaders:
-                return "Sprint-Pool ist leer (nächste Analyse: /analyze)."
-            lines = ["<b>Sprint-Pool</b> (Richtungs-Score, bester zuerst)"]
+                return "Quest-Pool ist leer (nächste Analyse: /analyze)."
+            lines = ["<b>Quest-Pool</b> (Richtungs-Score, bester zuerst)"]
             banned = self.sprint.banned
             for l in self.sprint_leaders:
                 a = str(l.get("address", ""))
@@ -545,7 +523,7 @@ class Autopilot:
                 cov += f" ({tracker.last_stale} stale)"
             feed += cov
 
-        return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']}): {s['state']}\n"
+        return (f"<b>Quest-Bot</b> (Zyklus {s['cycle']}): {s['state']}\n"
                 f"{pos_block}\n"
                 f"{equity_line}"
                 f"{pending_block}\n"
@@ -561,8 +539,8 @@ class Autopilot:
                 f"Feed: Snapshots {feed}\n"
                 f"Baselines: {s.get('baseline_status', 'n/a')}\n"
                 f"\n"
-                f"<i>/sprint close = schließen | /sprint pool = Pool-Liste | "
-                f"/sprint assets = Krypto vs. Aktien | /sprint reset = Bilanz auf 0</i>")
+                f"<i>/quest close = schließen | /quest pool = Pool-Liste | "
+                f"/quest assets = Krypto vs. Aktien | /quest reset = Bilanz auf 0</i>")
 
     def _sprint_asset_breakdown(self) -> str:
         """Krypto vs. Aktien-Perps (Nutzer-Frage: was brachte in der Mess-Woche
@@ -590,8 +568,8 @@ class Autopilot:
                 b["won"] += 1
         total_n = sum(b["n"] for b in buckets.values())
         if not total_n:
-            return "Noch keine abgeschlossenen Sprint-Zyklen im Journal."
-        lines = ["<b>Sprint: Krypto vs. Aktien</b>"]
+            return "Noch keine abgeschlossenen Quest-Zyklen im Journal."
+        lines = ["<b>Quest: Krypto vs. Aktien</b>"]
         for name in ("Krypto", "Aktien", "unbekannt"):
             b = buckets[name]
             if b["n"] == 0:
@@ -834,12 +812,12 @@ class Autopilot:
             self.notifier.send("✅ Setup im neuen Anlauf geglückt - Autopilot fährt hoch.")
         self._set_status(state="running")
         self.notifier.send(
-            f"🚀 <b>Autopilot gestartet</b>\n"
+            f"🚀 <b>Quest-Bot gestartet</b>\n"
             f"Modus: {'DRY-RUN' if self.cfg.dry_run else 'LIVE'} auf "
             f"{'Testnet' if self.cfg.is_testnet else 'Mainnet'}\n"
-            + (f"Sprint: {len(self.sprint_leaders)} Leader im Pool\n"
-               if self.cfg.sprint.enabled else "")
-            + f"Kopier-Buch: {len(self.leaders)} Leader | max {self.cfg.risk.max_leverage}x"
+            + (f"Pool: {len(self.sprint_leaders)} Leader | 1000$ x{self.cfg.sprint.leverage:.0f}, "
+               f"Ziel +{self.cfg.sprint.target_profit:.0f}$/Zyklus"
+               if self.cfg.sprint.enabled else "Quest-Bot aus (sprint.enabled prüfen)")
         )
         while not self._stop.is_set():
             try:
@@ -1420,56 +1398,36 @@ class Autopilot:
     # ---------- Tages-Digest & Inaktivitäts-Watchdog ----------
 
     def _maybe_digest(self) -> None:
-        """Einmal täglich: kompakter Lagebericht - damit '+1$ nach 4 Wochen'
-        spätestens am Tag 2 auffällt, nicht am Tag 28."""
+        """Einmal täglich: kompakter Quest-Lagebericht - damit '+1$ nach 4
+        Wochen' spätestens am Tag 2 auffällt, nicht am Tag 28. Dreht sich nur
+        noch um den Quest-Bot und die Schatztruhe (kein Kopier-Buch mehr)."""
         if not self.cfg.autopilot.daily_digest:
             return
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        equity = self.copier.last_equity if self.copier else None
         if today == self._digest_date:
-            if self._digest_equity is None and equity:
-                self._digest_equity = equity
             return
         self._digest_date = today
-        day_t = int(time.time()) - 86_400
-        entries = [e for e in self.journal.tail(2000) if e.get("t", 0) >= day_t]
-        orders = sum(1 for e in entries if e["kind"] == "order")
-        vetoes = sum(1 for e in entries if e["kind"] == "veto")
-        scalp_pnl = sum(float(e.get("pnl", 0)) for e in entries if e["kind"] == "scalp_close")
-        delta = ""
-        bleed = ""
-        if equity and self._digest_equity:
-            pct = (equity / self._digest_equity - 1) * 100
-            delta = f"\nEquity: {equity:,.2f} ({pct:+.2f}% 24h)"
-        # Kern-Edge: realisierter PnL des Copy-Buchs (nicht der Buchgewinn).
-        if self.copier and self.copier.paper:
-            rp = self.copier.paper.realized_pnl
-            bleed = f"\nCopy realisiert: {rp:+,.2f}"
-            if rp < -0.02 * self.cfg.backtest.initial_equity:
-                bleed += " ⚠️ blutet"
-        # Edge-Status je Strategie-Spur (das eigentliche Ziel des Digests)
-        tracks = ""
-        if self.labs and self.copier and self.copier.last_prices:
-            for name, st in self.labs.stats(self.copier.last_prices).items():
-                tracks += f"\n  {name}: {st['realized_pnl']:+,.2f} ({st['trades']} Tr.)"
-        if self.sprint:
-            sp = self.sprint.stats(self.copier.last_prices if self.copier else {})
-            tracks += (f"\n  sprint: Zyklus {sp['cycle']} {sp['state']} "
-                       f"({sp['cycle_pnl']:+,.2f}$), Schatztruhe {sp['banked']:+,.2f}$ "
-                       f"[{sp['won']}✅/{sp['busted']}💥]")
-        if self.lighter and self.copier and self.copier.last_prices:
-            li = self.lighter.stats(self.copier.last_prices)
-            tracks += (f"\n  lighter-schatten: {li['realized_pnl']:+,.2f} "
-                       f"({li['trades']} Tr., {li['return_pct']:+.2f}%)")
-        msg = (f"📊 <b>Tagesbericht</b>{delta}{bleed}\n"
-               f"Orders: {orders} | Vetos: {vetoes}"
-               + (f" | Scalp-PnL: {scalp_pnl:+,.2f}" if scalp_pnl else "")
-               + (f"\n<b>Spuren:</b>{tracks}" if tracks else "")
-               + f"\nRisiko: {self.guard.last_level.name if self.guard else 'NORMAL'}"
-               + "\nAuswertung: python report.py")
-        log.info("Tagesbericht: %d Orders, %d Vetos", orders, vetoes)
+        risk = self.guard.last_level.name if self.guard else "NORMAL"
+        if not self.sprint:
+            self.notifier.send(f"📊 <b>Tagesbericht</b>\nQuest-Bot aus. Risiko: {risk}")
+            return
+        sp = self.sprint.stats(self.copier.last_prices if self.copier else {})
+        sc = sp.get("scan", {})
+        # Schatztruhe-Delta über 24h: macht '+1$ nach Wochen' früh sichtbar
+        day_line = ""
+        if self._digest_equity is not None:
+            day_line = f" ({sp['banked'] - self._digest_equity:+,.2f}$ / 24h)"
+        msg = (f"📊 <b>Quest-Tagesbericht</b>\n"
+               f"Schatztruhe: {sp['banked']:+,.2f} ${day_line}\n"
+               f"Zyklus {sp['cycle']} {sp['state']} ({sp['cycle_pnl']:+,.2f}$) "
+               f"[{sp['won']}✅/{sp['busted']}💥]\n"
+               f"Scan: {sc.get('fresh_seen', 0)} frische Signale seit Start | "
+               f"Pool {len(self.sprint_leaders)} | Risiko: {risk}\n"
+               f"Auswertung: /report")
+        log.info("Quest-Tagesbericht: Schatztruhe %+.2f, Zyklus %d",
+                 sp["banked"], sp["cycle"])
         self.notifier.send(msg)
-        self._digest_equity = equity
+        self._digest_equity = sp["banked"]
 
     def _maybe_warn_stale_feed(self) -> None:
         """Warnt, wenn Sprint auf eingefrorenen Snapshots scannt (Copier pausiert
@@ -1480,15 +1438,15 @@ class Autopilot:
         age = time.time() - self.copier.last_snapshots_t
         if age > 300 and not self._stale_feed_warned:
             self._stale_feed_warned = True
-            log.warning("Sprint-Feed eingefroren: Snapshots %.0f min alt", age / 60)
+            log.warning("Quest-Feed eingefroren: Snapshots %.0f min alt", age / 60)
             self.notifier.send(
-                f"⚠️ <b>Sprint-Feed eingefroren</b>: Leader-Snapshots sind "
+                f"⚠️ <b>Quest-Feed eingefroren</b>: Leader-Snapshots sind "
                 f"{age / 60:.0f} min alt - der Scan sieht keine neuen Signale.\n"
                 f"Mögliche Ursachen: Circuit-Breaker (/resume), API-Störung. /status prüfen."
             )
         elif age < 60 and self._stale_feed_warned:
             self._stale_feed_warned = False   # wieder frisch -> Warnung neu scharf
-            self.notifier.send("✅ Sprint-Feed wieder frisch (Snapshots aktuell).")
+            self.notifier.send("✅ Quest-Feed wieder frisch (Snapshots aktuell).")
 
     def _maybe_watchdog(self) -> None:
         """Meldet sich von selbst, wenn der Bot auffällig lange nichts handelt."""

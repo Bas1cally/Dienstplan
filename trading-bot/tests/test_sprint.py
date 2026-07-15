@@ -746,12 +746,12 @@ def test_notifier_journal_and_stats():
         b.tick(LED, [snap("0xbest", 50_000)], P)
         assert b.stats(P)["state"] == "wartet auf frisches Signal"
         b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
-        assert any("Sprint-Einstieg" in m for m in sent)
-        assert recorded and recorded[0][0] == "sprint_entry"
+        assert any("Quest-Einstieg" in m for m in sent)
+        assert recorded and recorded[0][0] == "sprint_entry"   # Journal-Kind bleibt intern
         st = b.stats(P)
         assert st["state"] == "hält" and st["held"] == ["BTC LONG"]
         b.tick(LED, [snap("0xbest", 50_000)], P)
-        assert any("Sprint-Exit" in m for m in sent)
+        assert any("Quest-Exit" in m for m in sent)
         assert any(k == "sprint_exit" for k, _ in recorded)
 
 

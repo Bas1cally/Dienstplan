@@ -523,26 +523,31 @@ def test_analyzer_retries_on_429():
         pass
 
 
-def test_cmd_positions():
+def test_cmd_positions_shows_quest_only():
+    """Quest-Bot-Umstellung: /positions zeigt NUR noch den Quest-Bot, kein
+    Kopier-Buch/Labs mehr (die sind stillgelegt)."""
     from bot.autopilot import Autopilot
     from bot.config import load_config
 
     ap = Autopilot(load_config())
-    assert "keine offenen" in ap._cmd_positions().lower(), "leer: keine Positionen"
+    ap.sprint = None
+    assert "nichts" in ap._cmd_positions().lower(), "leer: Quest-Bot hält nichts"
 
-    ap._status = {"positions": [
-        {"coin": "BTC", "size": 0.5, "entry": 60_000, "unrealized_pnl": 120.0},
-        {"coin": "ETH", "size": -2.0, "entry": 3_000, "unrealized_pnl": -15.0},
-    ]}
+    class FakePaper:
+        def position_rows(self, prices):
+            return [{"coin": "BTC", "size": 0.5, "entry": 100.0, "unrealized_pnl": 12.0}]
+
+    class FakeSprint:
+        paper = FakePaper()
 
     class C:
-        last_prices = {"BTC": 61_000, "ETH": 3_000}
+        last_prices = {"BTC": 101.0}
 
+    ap.sprint = FakeSprint()
     ap.copier = C()
-    ap.labs = None
     msg = ap._cmd_positions()
-    assert "LONG BTC" in msg and "SHORT ETH" in msg
-    assert "Σ unrealisiert" in msg and "+105" in msg.replace(",", "")  # 120 - 15
+    assert "Quest-Bot" in msg and "LONG BTC" in msg
+    assert "12" in msg
 
 
 def test_cmd_update_already_current():
