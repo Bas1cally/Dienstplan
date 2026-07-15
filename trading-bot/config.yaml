@@ -175,9 +175,13 @@ sprint:
                             # blind instant (Live-Befund: Leader schießt nach
                             # Einstieg sofort ins Minus und flippt Sekunden
                             # später zurück). 0 = aus (altes Sofort-Verhalten).
-  crypto_only: true         # Aktien-Perps (Builder-DEX, 'xyz:...') außerhalb
-                            # der Börsenzeiten sind reine Spekulation auf HL -
-                            # stören die Messlatte für stabile Trader.
+  crypto_only: false        # Aktien-Perps (Builder-DEX, 'xyz:...') bleiben
+                            # DAUERHAFT erlaubt (Nutzer-Entscheidung 15.07.,
+                            # nach der Mess-Woche bestätigt) - nicht mehr nur
+                            # für die Mess-Woche befristet. Die Mess-Woche
+                            # lieferte gemischte Krypto+Aktien-Ritte, per
+                            # /sprint assets auswertbar; kein Grund, Aktien-
+                            # Signale wieder pauschal auszuschließen.
   pool_size: 20             # Sprint scannt einen breiteren Leader-Pool als das
                             # Hauptbuch (max_leaders: 6). Sprint hält immer nur EINE
                             # Position -> mehr Quellen = weniger Leerlauf, ohne die

@@ -41,6 +41,15 @@ ist da; Chat-Verlauf ist es nicht.
 > `bot/sprint.py`, erkennt den Umstieg am persistierten `parallel_rides`-Feld
 > des letzten Saves bzw. dessen Fehlen bei alten State-Dateien).
 >
+> **UPDATE 15.07. — `crypto_only: false` dauerhaft, nicht mehr nur für die
+> Mess-Woche.** Ursprünglich war `crypto_only: false` (14.07., Commit
+> `dee239e`) ausdrücklich befristet: "NACH der Mess-Woche wieder true". Beim
+> Config-Flip auf Einzel-Ritt wurde entsprechend zurückgesetzt. Nutzer-
+> Nachfrage + explizite Entscheidung: Aktien-Perps (Builder-DEX, `xyz:...`)
+> bleiben DAUERHAFT erlaubt, kein Rückfall auf Krypto-only. `sprint.
+> crypto_only: false` in config.yaml wieder gesetzt (permanent, nicht mehr
+> Mess-Woche-befristet).
+>
 > **UPDATE 15.07. — Voller Effort auf Sprint, Beobachter abgeschaltet.**
 > 33-Tage-`/fullreport` zeigte: Haupt-Buch −4,94 % (Veto-Outcome nicht
 > signifikant), Anomalie-/Orderbuch-Scout nicht signifikant, Strategie-Labor

@@ -1320,7 +1320,7 @@ def test_no_bilanz_reset_when_staying_in_parallel_mode():
 def test_fresh_signal_reaches_entry_under_production_settings_full_pool():
     """Deckt genau die Sorge ab, die live nach dem Deploy aufkam: mit ALLEN
     QOL-Runde-Einstellungen gleichzeitig scharf (confirm_delay_s=10,
-    crypto_only=true, exclude_coins=[BTC], parallel_rides=false) und einem
+    crypto_only=false, exclude_coins=[BTC], parallel_rides=false) und einem
     vollen 21er-Pool (wie live gemeldet) muss ein frisches Signal eines
     NICHT-Top-Score-Leaders trotzdem zuverlässig durch die komplette Kette
     (Entdeckung -> Bestätigungsfenster -> Promotion) bis zum echten Einstieg
@@ -1330,7 +1330,7 @@ def test_fresh_signal_reaches_entry_under_production_settings_full_pool():
         cfg = SprintConfig(
             enabled=True, equity=1000.0, leverage=10.0, target_profit=100.0,
             max_positions=1, parallel_rides=False, max_rides=8,
-            max_rides_per_leader=1, crypto_only=True, bust_frac=0.05,
+            max_rides_per_leader=1, crypto_only=False, bust_frac=0.05,
             pool_size=20, pool_min_score=10.0, rebalance_threshold=0.02,
             min_notional=10.0, partial_exit_frac=0.75, add_signal_frac=0.5,
             confirm_delay_s=10.0, strike_ban=2, exclude_coins=["BTC"],
