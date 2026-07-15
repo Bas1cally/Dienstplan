@@ -281,6 +281,28 @@ def test_sprint_asset_breakdown_buckets_by_coin_prefix():
     assert "coin-Tracking-Fix" in out, "Hinweis auf die Unsicherheit muss stehen"
 
 
+def test_sprint_reset_zeroes_bilanz_keeps_strikes():
+    """/sprint reset - Nutzer-Wunsch nach einem manuellen 'clean sheet' (z.B.
+    wenn ein Forced-Close vor dem Reset-Zeitpunkt die frische Bilanz
+    verunreinigt hat): Zyklus/Schatztruhe auf 0, Strikes/Bans/Confidence
+    bleiben - das ist erprobtes LARP-Wissen, keine Bilanz-Zahl."""
+    import tempfile
+
+    from bot.sprint import SprintBook
+
+    ap = _autopilot()
+    with tempfile.TemporaryDirectory() as tmp:
+        ap.sprint = SprintBook(ap.cfg.sprint, ap.cfg.backtest.fee_rate, runtime_dir=Path(tmp))
+        ap.sprint.won, ap.sprint.busted, ap.sprint.banked = 1, 3, -200.57
+        ap.sprint.strikes["0xbad"] = 1
+        ap.sprint.banned.add("0xzzz")
+        out = ap._cmd_sprint("reset")
+    assert "zurückgesetzt" in out
+    assert ap.sprint.won == 0 and ap.sprint.busted == 0 and ap.sprint.banked == 0.0
+    assert ap.sprint.strikes.get("0xbad") == 1
+    assert "0xzzz" in ap.sprint.banned
+
+
 def test_sprint_asset_breakdown_empty_journal():
     import tempfile
 

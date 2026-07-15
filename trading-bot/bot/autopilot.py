@@ -254,6 +254,7 @@ class Autopilot:
                 "/sprint – Sprint-Buch (1000$ x10, Ziel +100$)\n"
                 "/sprint pool – Sprint-Pool mit Richtungs-Scores\n"
                 "/sprint assets – Krypto vs. Aktien-Perps PnL-Vergleich\n"
+                "/sprint reset – Bilanz (Zyklus/Schatztruhe) auf 0, Strikes/Bans bleiben\n"
                 "/polymarket – Prediction-Market-Funde\n"
                 "/update – Update ziehen + neu starten\n"
                 "/probe – Multi-DEX-Scan-Probe (Extended/Lighter/…)\n"
@@ -288,7 +289,7 @@ class Autopilot:
                 f"Equity: {f'{eq:,.2f}' if eq else 'n/a'}\n"
                 f"Orders (24h): {orders}\n"
                 f"Risiko: {self.guard.last_level.name if self.guard else 'NORMAL'}\n"
-                f"Leader: {len(self.leaders)} | Pool: {len(self.sprint_leaders)} | "
+                f"Kopier-Buch: {len(self.leaders)} | Sprint-Pool: {len(self.sprint_leaders)} | "
                 f"WS: {'an' if self.feed and self.feed.connected else 'aus'}\n"
                 f"{analysis}\n"
                 f"<i>/analyze = Analyse sofort anstoßen</i>")
@@ -453,6 +454,12 @@ class Autopilot:
             return (f"⏹ Sprint-Zyklus manuell beendet ({n} Position(en)) - sofort "
                     "verbucht, kein Strike. Nächster Zyklus wartet auf frisches Signal."
                     if n else "Sprint-Buch hält gerade nichts.")
+        if arg.lower().strip() == "reset":
+            n = self.sprint.close(prices)   # offene Position(en) zuerst sauber raus, kein Strike
+            self.sprint.reset_bilanz()
+            return ("🧹 <b>Bilanz zurückgesetzt</b>: Zyklus 1, Schatztruhe 0,00 $"
+                    + (f" ({n} offene Position(en) davor geschlossen)" if n else "")
+                    + ".\nStrikes/Bans/Confidence bleiben erhalten.")
         if arg.lower().strip() == "pool":
             if not self.sprint_leaders:
                 return "Sprint-Pool ist leer (nächste Analyse: /analyze)."
@@ -549,7 +556,7 @@ class Autopilot:
                 f"Feed: Snapshots {feed}\n"
                 f"\n"
                 f"<i>/sprint close = schließen | /sprint pool = Pool-Liste | "
-                f"/sprint assets = Krypto vs. Aktien</i>")
+                f"/sprint assets = Krypto vs. Aktien | /sprint reset = Bilanz auf 0</i>")
 
     def _sprint_asset_breakdown(self) -> str:
         """Krypto vs. Aktien-Perps (Nutzer-Frage: was brachte in der Mess-Woche
@@ -824,9 +831,9 @@ class Autopilot:
             f"🚀 <b>Autopilot gestartet</b>\n"
             f"Modus: {'DRY-RUN' if self.cfg.dry_run else 'LIVE'} auf "
             f"{'Testnet' if self.cfg.is_testnet else 'Mainnet'}\n"
-            f"Haupt-Buch: {len(self.leaders)} Leader | max {self.cfg.risk.max_leverage}x"
-            + (f"\nSprint-Pool: {len(self.sprint_leaders)} Leader"
+            + (f"Sprint: {len(self.sprint_leaders)} Leader im Pool\n"
                if self.cfg.sprint.enabled else "")
+            + f"Kopier-Buch: {len(self.leaders)} Leader | max {self.cfg.risk.max_leverage}x"
         )
         while not self._stop.is_set():
             try:

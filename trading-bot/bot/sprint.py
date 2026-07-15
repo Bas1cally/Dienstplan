@@ -88,6 +88,10 @@ class SprintBook:
         self.busted = 0
         self.total_trades = 0            # über alle abgeschlossenen Zyklen
         self.ride_leader = ""            # fixiert, solange Positionen offen sind
+        # Mode-Switch-Bilanz-Reset (QOL-Runde): gesetzt in _migrate_v1_or_load,
+        # wenn beim Laden noch offene Alt-Mess-Ritte drainiert werden müssen -
+        # der eigentliche Reset wartet dann in tick() bis der Drain fertig ist.
+        self._bilanz_reset_pending = False
         self.strikes: dict[str, int] = {}   # addr -> aktive Strikes (LARP-Enttarnung)
         self.banned: set[str] = set()       # fürs Sprint-Buch gesperrte Leader
         # addr -> Confidence-Punkte (verdiente Anerkennung, siehe
@@ -158,6 +162,14 @@ class SprintBook:
             # Bust-Rechnung, sonst würde der allererste Einzel-Ritt-Tick sofort
             # (fälschlich) auf Basis der Mess-Modus-Restsalden feuern.
             self.paper.reset()
+            # Nutzer-Befund (echter Bug): der Bilanz-Reset lief bisher schon
+            # beim LADEN, BEVOR dieser Drain überhaupt Chance hatte zu laufen -
+            # der Forced-Close des Alt-Ritts sickerte dadurch als allererster
+            # Eintrag in die frisch genullte Bilanz. Ist ein Reset noch
+            # ausstehend, greift er deshalb erst HIER, NACHDEM der Alt-Ritt
+            # bereits vollständig abgerechnet ist - wirklich blitzsauber.
+            if self._bilanz_reset_pending:
+                self.reset_bilanz()
         # 1. Ziel/Bust hat Vorrang - Zyklus=Ritt, also sofort abrechnen+resetten
         eq = self.paper.equity(prices)
         if eq >= self.cfg.equity + self.cfg.target_profit:
@@ -954,14 +966,15 @@ class SprintBook:
             was_v1 = "ride_leader" not in raw
             was_parallel = bool(raw.get("parallel_rides", True))
             if not was_v1 and was_parallel and not self.cfg.parallel_rides:
-                log.warning("Sprint: Mess-Modus -> Einzel-Ritt - Bilanz "
-                            "(Zyklus/Schatztruhe) zurückgesetzt, Strikes/"
-                            "Bans/Confidence bleiben erhalten")
-                self.won = 0
-                self.busted = 0
-                self.banked = 0.0
-                self.total_trades = 0
-                self._save_state()
+                if self.ride_leaders:
+                    # Noch offene Alt-Mess-Ritte: der Reset muss WARTEN, bis
+                    # tick() sie über die Mode-Switch-Sicherung sauber
+                    # abgerechnet hat - sonst zählt deren Forced-Close als
+                    # allererster Eintrag der eigentlich frischen Bilanz
+                    # (genau der Bug, den ein Nutzer live beobachtet hat).
+                    self._bilanz_reset_pending = True
+                else:
+                    self.reset_bilanz()
         # v1-Migration: altes Buch hat mit Dauer-Reconciliation gechurnt (139 Trades)
         # -> Buch einmalig sauber neu starten, Bilanz (banked/won/busted) behalten.
         v1_state = raw is not None and "ride_leader" not in raw
@@ -972,6 +985,17 @@ class SprintBook:
             self.paper.reset()
             self.ride_leader = ""
             self._save_state()
+
+    def reset_bilanz(self) -> None:
+        log.warning("Sprint: Mess-Modus -> Einzel-Ritt - Bilanz (Zyklus/"
+                    "Schatztruhe) zurückgesetzt, Strikes/Bans/Confidence "
+                    "bleiben erhalten")
+        self.won = 0
+        self.busted = 0
+        self.banked = 0.0
+        self.total_trades = 0
+        self._bilanz_reset_pending = False
+        self._save_state()
 
     def _save_state(self) -> None:
         try:

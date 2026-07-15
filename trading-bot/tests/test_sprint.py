@@ -1209,6 +1209,31 @@ def test_bilanz_resets_when_loading_after_mess_modus_switch():
         assert fresh.confidence.get("0xbest") == 55, "Confidence bleibt"
 
 
+def test_bilanz_reset_waits_for_leftover_ride_drain():
+    """Live-Bug (Nutzer-Befund): der Reset lief bisher schon beim Laden - vor
+    dem ersten Tick, der noch offene Alt-Mess-Ritte über die Mode-Switch-
+    Sicherung abrechnet. Der Forced-Close des Alt-Ritts sickerte dadurch als
+    allererster Eintrag in die eigentlich frische Bilanz. Reset muss WARTEN,
+    bis der Drain fertig ist."""
+    with tempfile.TemporaryDirectory() as tmp:
+        old = book(tmp, parallel_rides=True)
+        old.tick(LED, [snap("0xbest", 50_000)], P)
+        old.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # offener Mess-Ritt
+        assert "BTC" in old.paper.sizes() and "BTC" in old.ride_leaders
+        old.won, old.banked = 5, 842.17   # simuliert echte Mess-Woche-Historie
+        old._save_state()
+
+        fresh = book(tmp)   # parallel_rides=False (Default)
+        assert fresh.won == 5 and fresh.banked == 842.17, \
+            "Reset noch NICHT angewendet - wartet auf den Drain des Alt-Ritts"
+        assert "BTC" in fresh.ride_leaders
+
+        fresh.tick(LED, [snap("0xbest", 50_000)], P)   # erster Tick: drained + resettet
+        assert fresh.ride_leaders == {} and fresh.paper.sizes() == {}
+        assert fresh.won == 0 and fresh.busted == 0 and fresh.banked == 0.0, \
+            "jetzt wirklich sauber - der Forced-Close zählt nicht in die frische Bilanz"
+
+
 def test_bilanz_reset_does_not_repeat_on_next_restart():
     with tempfile.TemporaryDirectory() as tmp:
         old = book(tmp, parallel_rides=True)
