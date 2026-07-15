@@ -69,6 +69,10 @@ STAR_THRESHOLD = 100
 # Downtime wäre der Einstieg dagegen längst verpasst -> lieber re-baselinen.
 _BASELINE_MAX_AGE_S = 600.0
 
+# Idle-Rotation: _last_active-Einträge älter als das (7 Tage) werden gekappt,
+# damit der Dict nicht unbegrenzt über alle je gesehenen Wallets wächst.
+_ACTIVE_MAX_AGE_S = 7 * 86_400.0
+
 # Sicherheitsnetz gegen einen Live-Befund: fehlt für einen pending Coin
 # dauerhaft der Preis (z.B. Symbol nicht in all_mids(), Feed-Lücke für genau
 # diesen Coin), wartete der Kandidat bisher UNBEGRENZT - weder Promotion noch
@@ -122,6 +126,11 @@ class SprintBook:
         # Rotations-Leader mit (auch während eines Ritts), damit nach dem Ritt
         # keine längst laufenden Positionen fälschlich als "frisch" gelten.
         self._baselines: dict[str, dict[str, float]] = {}
+        # Idle-Rotation: addr -> Zeitpunkt des letzten FRISCHEN Signals dieses
+        # Leaders (geseedet beim Pool-Eintritt). Wer zu lange stumm ist, wird
+        # beim Pool-Rebuild nach hinten rotiert (idle_addrs). Persistiert neben
+        # den Baselines, damit ein Neustart die Idle-Uhr nicht zurücksetzt.
+        self._last_active: dict[str, float] = {}
         # Scan-Telemetrie (seit Prozess-Start): ohne sie sind "kein Signal kam"
         # und "Signale kamen, wurden aber still verworfen" von außen identisch -
         # genau das Beobachtbarkeits-Loch, das der Nutzer als 'irgendwas fehlt'
@@ -245,7 +254,7 @@ class SprintBook:
             fresh = self._fresh_coins(book, prev)
             if not fresh:
                 continue
-            self._note_fresh(len(fresh))
+            self._note_fresh(len(fresh), snap.address)
             if addr in self.banned:
                 # LARP-enttarnt: sein frisches Signal zählt nicht - aber SICHTBAR
                 # verwerfen statt still (Telemetrie fürs 'warum passiert nichts')
@@ -461,7 +470,7 @@ class SprintBook:
             fresh = self._fresh_coins(self._book_of(snap), prev)
             if not fresh:
                 continue
-            self._note_fresh(len(fresh))
+            self._note_fresh(len(fresh), snap.address)
             if addr in self.banned:
                 for coin in fresh:
                     self._reject(coin, snap.address, "leader_gesperrt")
@@ -559,7 +568,7 @@ class SprintBook:
                      if sz != 0 and prev.get(c, 0.0) == 0.0
                      and c not in self.paper.sizes()]
             if fresh:
-                self._note_fresh(len(fresh))
+                self._note_fresh(len(fresh), snap.address)
             for coin in fresh:
                 if len(self.paper.sizes()) >= self.cfg.max_positions:
                     # Ein Ritt = eine Position: keine Zusatz-Coins mitten im Ritt
@@ -596,7 +605,7 @@ class SprintBook:
             fresh = self._fresh_coins(self._book_of(snap), prev)
             if not fresh:
                 continue
-            self._note_fresh(len(fresh))
+            self._note_fresh(len(fresh), snap.address)
             candidates = [c for c in fresh if c not in self.paper.sizes()]
             if not candidates:
                 continue
@@ -612,6 +621,7 @@ class SprintBook:
     def _refresh_baselines(self, leaders: list[dict], snapshots: list) -> None:
         keep = {str(l.get("address", "")).lower() for l in leaders}
         keep.add(self.ride_leader.lower())
+        now = self.clock()
         changed = False
         for s in snapshots:
             key = s.address.lower()
@@ -620,11 +630,33 @@ class SprintBook:
                 if self._baselines.get(key) != book:
                     self._baselines[key] = book
                     changed = True
+                # Idle-Uhr beim POOL-EINTRITT starten (Karenz): ein neu
+                # aufgenommener Leader hat ab jetzt rotate_idle_hours Zeit, ein
+                # frisches Signal zu geben, bevor er als stumm gilt.
+                if key not in self._last_active:
+                    self._last_active[key] = now
         for addr in list(self._baselines):
             if addr not in keep:
                 self._baselines.pop(addr, None)
                 changed = True
+        # _last_active NICHT beim Pool-Austritt löschen - eine rotierte Stumme
+        # soll stumm bleiben (nicht bei jedem Rebuild frisch geseedet werden und
+        # vordrängeln). Nur uralte Einträge kappen, damit der Dict nicht wächst.
+        for addr in list(self._last_active):
+            if now - self._last_active[addr] > _ACTIVE_MAX_AGE_S:
+                self._last_active.pop(addr, None)
         self._persist_baselines(changed)
+
+    def idle_addrs(self, max_idle_s: float) -> set[str]:
+        """Pool-Leader, die seit max_idle_s KEIN frisches Signal gaben (Idle-
+        Rotation). Stars sind ausgenommen - ein bewiesener Verdiener wird nicht
+        wegen einer stillen Phase rausrotiert (das Confidence-System soll ihn
+        gerade halten)."""
+        if max_idle_s <= 0:
+            return set()
+        now = self.clock()
+        return {a for a, t in self._last_active.items()
+                if now - t > max_idle_s and not self.is_star(a)}
 
     def _persist_baselines(self, changed: bool) -> None:
         """Baselines auf Platte, damit ein Neustart kein Blindfenster reißt
@@ -637,7 +669,8 @@ class SprintBook:
         self._baselines_saved_t = now
         try:
             self.baselines_path.write_text(json.dumps(
-                {"t": now, "baselines": self._baselines}))
+                {"t": now, "baselines": self._baselines,
+                 "last_active": self._last_active}))
         except OSError:
             log.debug("sprint_baselines.json nicht schreibbar", exc_info=True)
 
@@ -658,12 +691,21 @@ class SprintBook:
             log.info("Sprint: %d Baselines übernommen (%.0fs alt) - kein "
                      "Blindfenster nach Neustart", len(self._baselines), age)
             self._baseline_status = f"warm übernommen ({age:.0f}s alt beim Start)"
+            # Idle-Uhren mitladen, damit ein Neustart die Rotation nicht
+            # zurücksetzt (sonst bekäme jede Stumme nach jedem Deploy wieder
+            # die volle Karenz und würde nie rausrotiert).
+            self._last_active = {str(a).lower(): float(t)
+                                 for a, t in (raw.get("last_active") or {}).items()}
         except (OSError, ValueError, TypeError, AttributeError):
             pass   # keine/kaputte Datei -> normales Re-Baseline beim ersten Tick (Default bleibt "kein Vorstand")
 
-    def _note_fresh(self, n: int) -> None:
+    def _note_fresh(self, n: int, addr: str | None = None) -> None:
         self._fresh_seen += n
         self._last_fresh_t = self.clock()
+        if addr:
+            # Dieser Leader hat gerade ein frisches Signal gegeben -> Idle-Uhr
+            # zurücksetzen (er ist aktiv, bleibt vorn im Pool).
+            self._last_active[addr.lower()] = self.clock()
 
     def _reject(self, coin: str, addr: str, reason: str) -> None:
         """Verworfenes frisches Signal SICHTBAR machen (Zähler + letzte Fälle) -

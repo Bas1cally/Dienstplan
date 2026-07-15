@@ -475,10 +475,21 @@ class Autopilot:
                 return "Quest-Pool ist leer (nächste Analyse: /analyze)."
             lines = ["<b>Quest-Pool</b> (Richtungs-Score, bester zuerst)"]
             banned = self.sprint.banned
+            idle = self.sprint.idle_addrs(self.cfg.sprint.rotate_idle_hours * 3600)
             for l in self.sprint_leaders:
                 a = str(l.get("address", ""))
-                mark = " 🚫" if a.lower() in banned else (" ⭐" if self.sprint.is_star(a) else "")
+                if a.lower() in banned:
+                    mark = " 🚫"
+                elif self.sprint.is_star(a):
+                    mark = " ⭐"
+                elif a.lower() in idle:
+                    mark = " 💤"   # stumm, rotiert beim nächsten Rebuild nach hinten
+                else:
+                    mark = ""
                 lines.append(f"<code>{a[:12]}…</code> Score {l.get('score', '?')}{mark}")
+            if idle:
+                lines.append(f"<i>💤 = seit >{self.cfg.sprint.rotate_idle_hours:.0f}h stumm, "
+                             f"rotiert beim nächsten Pool-Rebuild nach hinten</i>")
             return "\n".join(lines)
         if arg.lower().strip() == "assets":
             return self._sprint_asset_breakdown()
@@ -1081,11 +1092,22 @@ class Autopilot:
         (Nutzer): ein enttarnter LARP darf keinen Pool-Slot mehr blockieren,
         der nächstbeste frische Kandidat rückt nach. Ohne diesen Filter blieb
         ein gebannter Leader für immer im Pool sitzen (fraß Scan-/Snapshot-
-        Slot) und seine Signale wurden nur still verworfen, statt ersetzt."""
+        Slot) und seine Signale wurden nur still verworfen, statt ersetzt.
+
+        Idle-Rotation (Nutzer: 'scannen scannen Daten'): eine Wallet, die zu
+        lange KEIN Signal gab (idle_addrs), rutscht nach HINTEN - frische
+        Kandidaten kriegen Vorrang. Self-balancing: eine Stumme landet nur dann
+        doch im Top-N, wenn es nicht genug aktive/neue Kandidaten gibt."""
         banned = self._sprint_banned()
+        idle = self.sprint.idle_addrs(self.cfg.sprint.rotate_idle_hours * 3600) \
+            if self.sprint else set()
         n = max(self.cfg.sprint.pool_size, len(self.leaders))
+        # Sortierschlüssel: aktive/neue Wallets (nicht idle) zuerst, Stumme ans
+        # Ende; innerhalb jeder Gruppe nach Richtungs-Score. [:n] schneidet die
+        # Stummen ab, SOLANGE genug nicht-idle Kandidaten da sind.
         top = sorted((m for m in sprint_ok if m.address.lower() not in banned),
-                     key=lambda m: m.sprint_score, reverse=True)[:n]
+                     key=lambda m: (m.address.lower() not in idle, m.sprint_score),
+                     reverse=True)[:n]
         pool = [{"address": m.address, "score": round(m.sprint_score, 1)} for m in top]
         have = {p["address"] for p in pool}
         for l in self.leaders:

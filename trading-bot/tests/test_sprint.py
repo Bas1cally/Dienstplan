@@ -626,6 +626,70 @@ def test_baseline_status_no_file_at_all():
         assert b.stats(P)["baseline_status"] == "kalt neu gesetzt (kein Vorstand)"
 
 
+# ---------- Idle-Rotation: stumme Wallets nach hinten (Quest) ----------
+
+def _idle_book(tmp, t):
+    cfg = SprintConfig(exclude_coins=[], confirm_delay_s=0)
+    return SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+
+
+def test_idle_addr_after_silence_active_resets_clock():
+    """Eine Wallet, die seit Pool-Eintritt kein frisches Signal gab, gilt nach
+    max_idle_s als idle. Ein frisches Signal setzt die Uhr zurück."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _idle_book(tmp, t)
+        # Tick 1: Leader tritt in den Pool ein (Baseline), Idle-Uhr startet jetzt
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        assert b.idle_addrs(3600) == set(), "gerade erst aufgenommen -> Karenz"
+
+        t["now"] += 4000   # > 1h stumm
+        b.tick(LED, [snap("0xbest", 50_000)], P)   # immer noch keine neue Position
+        assert "0xbest" in b.idle_addrs(3600), "über die Schwelle stumm -> idle"
+
+        # frisches Signal (0 -> Position) setzt die Uhr zurück
+        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], P)
+        assert b.idle_addrs(3600) == set(), "aktiv -> nicht mehr idle"
+
+
+def test_idle_rotation_disabled_when_zero():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _idle_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        t["now"] += 100_000
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        assert b.idle_addrs(0) == set(), "max_idle_s<=0 = Rotation aus"
+
+
+def test_star_never_counts_as_idle():
+    """Ein Star (bewiesener Verdiener) wird NICHT wegen Stille rausrotiert -
+    das Confidence-System soll ihn gerade halten."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _idle_book(tmp, t)
+        b.confidence["0xbest"] = STAR_THRESHOLD
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        t["now"] += 100_000   # lange stumm
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        assert b.idle_addrs(3600) == set(), "Star ist idle-immun"
+
+
+def test_last_active_survives_restart():
+    """Die Idle-Uhr überlebt einen Neustart (persistiert neben den Baselines) -
+    sonst bekäme jede Stumme nach jedem Deploy die volle Karenz und würde nie
+    rausrotiert."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _idle_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)     # Idle-Uhr startet bei now
+        t["now"] += 4000
+        b.tick(LED, [snap("0xbest", 50_000)], P)     # persistiert (Zeitstempel-Refresh)
+        fresh = SprintBook(SprintConfig(exclude_coins=[]), FEE,
+                           runtime_dir=Path(tmp), clock=lambda: t["now"])
+        assert "0xbest" in fresh.idle_addrs(3600), "Idle-Stand überlebt Neustart"
+
+
 def test_restart_keeps_ride_and_rebaselines():
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)

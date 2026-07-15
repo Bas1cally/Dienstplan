@@ -130,6 +130,42 @@ def test_build_sprint_pool_evicts_banned_larp_next_candidate_rises():
         "nächstbester (0xd) rückt auf den frei gewordenen Slot statt leer zu bleiben"
 
 
+def test_build_sprint_pool_rotates_idle_wallets_to_the_back():
+    """Nutzer: 'scannen scannen Daten'. Eine Wallet, die über Stunden kein
+    Signal gab (idle), rutscht beim Rebuild nach hinten - frische Kandidaten
+    kriegen Vorrang, auch wenn die Stumme einen höheren Score hätte."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.sprint.pool_size = 2
+        ap.cfg.sprint.rotate_idle_hours = 6
+        ap.leaders = []
+        # 0xhigh hat den besten Score, ist aber seit Ewigkeiten stumm -> idle
+        ap.sprint._last_active = {"0xhigh": 0.0}   # uralt = idle
+        ranked = [metrics("0xhigh", 90), metrics("0xb", 50), metrics("0xc", 40)]
+        pool = ap._build_sprint_pool(ranked)
+    addrs = [p["address"] for p in pool]
+    assert addrs == ["0xb", "0xc"], \
+        "idle 0xhigh trotz Top-Score nach hinten, frische 0xb/0xc kriegen die Slots"
+
+
+def test_build_sprint_pool_keeps_idle_when_no_fresh_candidates():
+    """Self-balancing: gibt es nicht genug aktive/neue Kandidaten, rutscht die
+    Stumme doch wieder rein - der Pool verhungert nie."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.sprint.pool_size = 3
+        ap.cfg.sprint.rotate_idle_hours = 6
+        ap.leaders = []
+        ap.sprint._last_active = {"0xhigh": 0.0}
+        pool = ap._build_sprint_pool([metrics("0xhigh", 90), metrics("0xb", 50)])
+    assert "0xhigh" in [p["address"] for p in pool], \
+        "nur 2 Kandidaten für 3 Slots -> die idle Wallet bleibt drin"
+
+
 def test_build_sprint_pool_does_not_force_in_banned_main_leader():
     """Selbst ein Haupt-Leader wird NICHT in den Sprint-Pool gezwungen, wenn
     Sprint ihn gebannt hat - der Ban ist das speziellere, stärkere Urteil."""

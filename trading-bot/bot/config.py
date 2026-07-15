@@ -405,6 +405,16 @@ class SprintConfig:
     # LARP-Strikes: Verlust-Ritt -> Strike +1, Gewinn-Ritt -> Strike -1 (min 0).
     # Bei strike_ban Strikes wird der Leader fürs Sprint-Buch gesperrt.
     strike_ban: int = 2
+    # Idle-Rotation (Nutzer: "scannen scannen Daten"): eine Wallet, die seit dem
+    # Pool-Eintritt länger als rotate_idle_hours KEIN einziges frisches Signal
+    # gab, ist totes Gewicht - sie belegt einen Scan-Slot, ohne Daten zu liefern
+    # (schlimmer als ein Verlierer, der wenigstens gemessen wird). Beim nächsten
+    # Pool-Rebuild werden solche Stummen nach HINTEN sortiert, frische Kandidaten
+    # bekommen Vorrang. Self-balancing: eine Stumme rutscht nur dann doch wieder
+    # rein, wenn es nicht genug aktive/neue Kandidaten gibt (Pool verhungert nie).
+    # Stars (bewiesene Verdiener) sind ausgenommen. 0 = aus. Sinnvoll ~ reanalyze
+    # _hours (Rebuild-Kadenz) - kürzer bringt nichts, da erst beim Rebuild rotiert.
+    rotate_idle_hours: float = 6.0
     # BTC ist praktisch "der Markt" (Beta statt Leader-Alpha) und volatilitätsarm -
     # bis das feste +10%-Ziel (bei 10x ~1% Kursbewegung) erreicht ist, stoppt ein
     # scalpender Leader oft mehrfach aus - jeder Ritt kostet echte Ein-/Ausstiegs-

@@ -212,6 +212,11 @@ sprint:
                             # Signale bei 8/8 Feed-Abdeckung), ihr Überzeugungs-
                             # Moment ist das AUFSTOCKEN. 0 = aus (nur 0->Position).
   strike_ban: 2             # 2 Verlust-Ritte -> Leader fürs Sprint-Buch gesperrt
+  rotate_idle_hours: 6      # QUEST: eine Wallet, die seit Pool-Eintritt >6h KEIN
+                            # frisches Signal gab, wird beim nächsten Rebuild nach
+                            # hinten rotiert - frische Kandidaten bekommen Vorrang
+                            # (Nutzer: 'scannen scannen Daten'). Stars ausgenommen.
+                            # 0 = aus. Sinnvoll ~ autopilot.reanalyze_hours (6h).
   exclude_coins: [BTC]      # BTC = Beta statt Leader-Alpha; bei fixem +10%-Ziel
                             # (10x ~1% Move) stoppt ein BTC-Scalper oft mehrfach
                             # aus, bevor das Ziel steht - teure Ein-/Ausstiegs-Fees
