@@ -460,15 +460,17 @@ class Autopilot:
             banned = self.sprint.banned
             for l in self.sprint_leaders:
                 a = str(l.get("address", ""))
-                mark = " 🚫" if a.lower() in banned else ""
+                mark = " 🚫" if a.lower() in banned else (" ⭐" if self.sprint.is_star(a) else "")
                 lines.append(f"<code>{a[:12]}…</code> Score {l.get('score', '?')}{mark}")
             return "\n".join(lines)
         if arg.lower().strip() == "assets":
             return self._sprint_asset_breakdown()
         s = self.sprint.stats(prices)
-        lead = f"<code>{s['leader'][:10]}…</code>" if s.get("leader") else "n/a"
+        lead = (f"<code>{s['leader'][:10]}…</code>" + (" ⭐" if s.get("leader_is_star") else "")
+                if s.get("leader") else "n/a")
         strikes = ", ".join(f"{a}:{n}" for a, n in s.get("strikes", {}).items()) or "-"
         banned = ", ".join(s.get("banned", [])) or "-"
+        stars = ", ".join(s.get("stars", [])) or "-"
         # Einzelne Positionen mit Entry + eigenem unrealisiertem PnL (nicht nur
         # 'LONG HYPE' ohne Zahlen). Zyklus = Ritt (v3): keine separate Ritt-PnL
         # mehr nötig, cycle_pnl IST die PnL des laufenden Ritts.
@@ -509,7 +511,7 @@ class Autopilot:
                 f"{pos_block}\n"
                 f"{equity_line}\n"
                 f"Bilanz: {s['won']}✅ {s['busted']}💥 | Schatztruhe {s['banked']:+,.2f} $\n"
-                f"Strikes: {strikes} | 🚫 gesperrt: {banned}\n"
+                f"Strikes: {strikes} | 🚫 gesperrt: {banned} | ⭐ Stars: {stars}\n"
                 f"Leader: {lead} | Pool: {len(self.sprint_leaders)} scanbar | "
                 f"Trades: {s['trades']} (Ø {s['avg_trades_per_cycle']}/Zyklus)\n"
                 f"Scan seit Start: {seen} frische Signale (letztes: {last_fresh}) | "

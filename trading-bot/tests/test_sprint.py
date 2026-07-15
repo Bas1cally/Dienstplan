@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bot.config import SprintConfig
 from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
-from bot.sprint import SprintBook
+from bot.sprint import CONFIDENCE_PER_WIN, STAR_THRESHOLD, SprintBook
 
 FEE = 0.00045
 
@@ -721,6 +721,95 @@ def test_notifier_journal_and_stats():
         b.tick(LED, [snap("0xbest", 50_000)], P)
         assert any("Sprint-Exit" in m for m in sent)
         assert any(k == "sprint_exit" for k, _ in recorded)
+
+
+# ---------- Confidence-Points/Star-Kern (QOL-Runde) ----------
+
+def test_tp_earns_confidence_leader_exit_win_does_not():
+    """Nur das eigene, durchgehaltene +10%-Ziel (tp) verdient einen Confidence-
+    Punkt. Ein leader-getriebener Exit im Plus bleibt Bilanz-Gewinn UND heilt
+    weiter einen Strike - ist aber confidence-neutral (kein bewiesener
+    Richtungs-Skill, nur zufälliges Grün beim Leader-Exit)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)   # BTC-Long, Einstieg bei Preis 100
+        b.strikes["0xbest"] = 1   # simuliert einen vorherigen Verlust-Ritt
+        # Leader steigt aus, Preis ist gestiegen -> Gewinn-Ritt, aber leader_exit
+        b.tick(LED, [snap("0xbest", 50_000)], {"BTC": 101.0, "ETH": 100.0})
+        assert b.won == 1, "zählt als Gewinn-Zyklus"
+        assert b.strikes.get("0xbest", 0) == 0, "Strike heilt trotzdem"
+        assert b.confidence.get("0xbest", 0) == 0, "aber KEIN Confidence-Punkt"
+
+
+def test_tp_reason_grants_five_confidence():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)
+        # Preis weit genug rauf für +100$ TP bei 10x auf 1000$ Basis
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 101.5, "ETH": 100.0})
+        assert b.won == 1
+        assert b.confidence.get("0xbest", 0) == CONFIDENCE_PER_WIN
+
+
+def test_star_marked_at_threshold_and_stays_strike_prone():
+    """Star ab genau STAR_THRESHOLD Punkten (= 20 TP-Ritte). Ein Star ist
+    NICHT strike-immun - ein Verlust-Ritt striked ihn wie jeden anderen."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)
+        b.confidence["0xbest"] = STAR_THRESHOLD - CONFIDENCE_PER_WIN  # kurz davor
+        assert not b.is_star("0xbest")
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 101.5, "ETH": 100.0})
+        assert b.confidence["0xbest"] == STAR_THRESHOLD
+        assert b.is_star("0xbest")
+
+        # Star bleibt strike-anfällig: nächster Ritt verliert -> normaler Strike
+        b.tick(LED, [snap("0xbest", 50_000)], P)                    # Baseline
+        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], P)           # frischer Ritt
+        b.tick(LED, [snap("0xbest", 50_000)], P)                    # Leader raus, Fee-Verlust
+        assert b.strikes.get("0xbest") == 1, "Star ist NICHT strike-immun"
+        assert b.confidence["0xbest"] == STAR_THRESHOLD, "Verlust senkt Confidence nicht"
+        assert b.is_star("0xbest"), "bleibt Star trotz Strike"
+
+
+def test_star_push_fires_once_at_threshold_crossing():
+    sent, recorded = [], []
+
+    class N:
+        def send(self, m):
+            sent.append(m)
+
+    class J:
+        def record(self, kind, **d):
+            recorded.append((kind, d))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        b = SprintBook(SprintConfig(exclude_coins=[]), FEE, notifier=N(), journal=J(),
+                       runtime_dir=Path(tmp))
+        b.confidence["0xbest"] = STAR_THRESHOLD - CONFIDENCE_PER_WIN
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 101.5, "ETH": 100.0})
+    assert any("Star enttarnt" in m for m in sent)
+    assert any(k == "sprint_star" for k, _ in recorded)
+
+
+def test_confidence_survives_restart():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 101.5, "ETH": 100.0})
+        assert b.confidence.get("0xbest", 0) == CONFIDENCE_PER_WIN
+        fresh = book(tmp)
+        assert fresh.confidence.get("0xbest", 0) == CONFIDENCE_PER_WIN
+
+
+def test_star_priority_over_higher_score_on_simultaneous_signals():
+    """BACKLOG-Entscheidung: bei gleichzeitigen Signalen gewinnt der Star vor
+    dem reinen Score-Tie-Break."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.confidence["0xsecond"] = STAR_THRESHOLD   # 0xsecond ist Star, aber schwächerer Score
+        two = leaders(("0xbest", 90), ("0xsecond", 50))
+        b.tick(two, [snap("0xbest", 50_000, BTC=100), snap("0xsecond", 50_000, ETH=100)], P)
+        b.tick(two, [snap("0xbest", 50_000, BTC=200), snap("0xsecond", 50_000, ETH=200)], P)
+        assert b.ride_leader == "0xsecond", "Star gewinnt trotz niedrigerem Score"
 
 
 # ---------- coin-Feld im Einzel-Ritt-Zyklusende (QOL-Runde) ----------

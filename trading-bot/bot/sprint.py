@@ -51,6 +51,18 @@ _REASON_TXT = {
 }
 _STRIKE_EXEMPT = {"manual", "risk_off"}  # nicht die Entscheidung/Schuld des Leaders
 
+# Confidence-Points/Star (BACKLOG.md, Nutzer-Entscheidung 15.07.): NUR das
+# eigene, durchgehaltene +10%-Ziel (tp) und eine Star-Preemption (der Bot
+# beendet aktiv einen profitablen Ritt zugunsten eines bestätigten Star-
+# Signals - "star_preempt", NICHT "leader_exit") verdienen einen Punkt. Jeder
+# leader-getriebene Exit (leader_exit/-flip/-scaleout/-rotated) bleibt
+# Bilanz-Gewinn + Strike-Heilung, ist aber confidence-NEUTRAL - kurzes Grün
+# beim Leader-Exit beweist keine Willenskraft, nur das durchgehaltene eigene
+# Ziel tut das (konsistent mit dem Anti-Flip-Flopper-Bestätigungsfenster).
+_CONFIDENCE_EARNING = {"tp", "star_preempt"}
+CONFIDENCE_PER_WIN = 5
+STAR_THRESHOLD = 100
+
 # Baselines überleben Neustarts nur, wenn die Datei jünger ist: bei kurzen
 # Deploys (~1 min) wollen wir das Blindfenster schließen (ein während des
 # Neustarts eröffnetes Signal ist noch frisch genug zum Reiten). Nach langer
@@ -78,6 +90,13 @@ class SprintBook:
         self.ride_leader = ""            # fixiert, solange Positionen offen sind
         self.strikes: dict[str, int] = {}   # addr -> aktive Strikes (LARP-Enttarnung)
         self.banned: set[str] = set()       # fürs Sprint-Buch gesperrte Leader
+        # addr -> Confidence-Punkte (verdiente Anerkennung, siehe
+        # _CONFIDENCE_EARNING). Star-Status ist ABGELEITET (>= STAR_THRESHOLD),
+        # keine eigene Liste - vermeidet zwei Wahrheiten, die auseinanderlaufen
+        # können. Gebannte Leader werden vor _enter bereits abgewiesen, können
+        # also nie mehr Punkte verdienen - kein Sonderfall-Code fürs Einfrieren
+        # nötig, das ergibt sich von selbst aus dem bestehenden Bann-Check.
+        self.confidence: dict[str, int] = {}
         self._ride_start_equity: float | None = None  # Equity bei Ritt-Beginn (PnL-Attribution)
         self._ride_entry_sizes: dict[str, float] = {}  # coin -> |Leader-Größe| beim Einstieg
         # Baseline je Leader (addr -> coin -> signierte Größe): nur Übergänge
@@ -166,8 +185,12 @@ class SprintBook:
     def _tick_waiting(self, leaders: list[dict], snapshots: list,
                       prices: dict[str, float]) -> None:
         by_addr = {s.address.lower(): s for s in snapshots}
-        # Höchster Score zuerst: melden mehrere Leader gleichzeitig, gewinnt der Beste
-        for l in sorted(leaders, key=lambda l: float(l.get("score", 0)), reverse=True):
+        # Star zuerst, dann höchster Score: melden mehrere Leader gleichzeitig,
+        # gewinnt der bewiesene Star vor dem reinen Score-Tie-Break (BACKLOG-
+        # Entscheidung: "Star-Vorrang bei gleichzeitigen Signalen").
+        for l in sorted(leaders, key=lambda l: (
+                self.is_star(str(l.get("address", ""))), float(l.get("score", 0))),
+                reverse=True):
             addr = str(l.get("address", "")).lower()
             snap = by_addr.get(addr)
             if snap is None:
@@ -266,8 +289,11 @@ class SprintBook:
             elif abs(leader_sz) <= (1 - self.cfg.partial_exit_frac) * entry_sz:
                 self._settle_one(coin, prices, "leader_scaleout")
         # 4. Frische Signale ALLER Leader - jeder darf (s)einen Ritt eröffnen,
-        #    je Leader und Tick nur das stärkste Signal (Korb-Regel bleibt)
-        for l in sorted(leaders, key=lambda l: float(l.get("score", 0)), reverse=True):
+        #    je Leader und Tick nur das stärkste Signal (Korb-Regel bleibt).
+        #    Star zuerst, dann Score (wie im Einzel-Ritt-Scan) für Konsistenz.
+        for l in sorted(leaders, key=lambda l: (
+                self.is_star(str(l.get("address", ""))), float(l.get("score", 0))),
+                reverse=True):
             addr = str(l.get("address", "")).lower()
             snap = by_addr.get(addr)
             if snap is None:
@@ -600,6 +626,22 @@ class SprintBook:
             elif pnl > 0 and self.strikes.get(key):
                 self.strikes[key] = max(0, self.strikes[key] - 1)  # profitabel heilt
 
+        if leader and reason in _CONFIDENCE_EARNING and pnl > 0:
+            key = leader.lower()
+            was_star = self.confidence.get(key, 0) >= STAR_THRESHOLD
+            self.confidence[key] = self.confidence.get(key, 0) + CONFIDENCE_PER_WIN
+            if self.confidence[key] >= STAR_THRESHOLD and not was_star:
+                log.warning("Sprint: %s ist jetzt ein STAR (%d Confidence-Punkte)",
+                            leader[:10], self.confidence[key])
+                if self.journal:
+                    self.journal.record("sprint_star", leader=leader,
+                                        confidence=self.confidence[key])
+                if self.notifier:
+                    self.notifier.send(
+                        f"⭐ <b>Star enttarnt</b> <code>{leader[:10]}…</code>\n"
+                        f"{self.confidence[key]} Confidence-Punkte - wiederholt "
+                        f"bewiesener Erfolg, kein Zufall.")
+
         icon = "🏁" if reason == "tp" else "💥" if reason == "bust" else ("✅" if won else "🔻")
         reason_txt = _REASON_TXT.get(reason, reason)
         kind = {"tp": "sprint_tp", "bust": "sprint_bust"}.get(reason, "sprint_cycle_end")
@@ -666,8 +708,14 @@ class SprintBook:
             "avg_trades_per_cycle": round((self.total_trades + self.paper.trades)
                                           / max(1, cycles_done + 1), 1),
             "leader": self.ride_leader,
+            "leader_is_star": self.is_star(self.ride_leader) if self.ride_leader else False,
             "strikes": {a[:10]: n for a, n in self.strikes.items() if n > 0},
             "banned": [a[:10] for a in self.banned],
+            # Confidence nur für Leader mit Punkten (0 sind uninteressant);
+            # stars separat abgeleitet, damit die Anzeige nicht bei jedem
+            # Leader neu >= STAR_THRESHOLD rechnen muss.
+            "confidence": {a[:10]: n for a, n in self.confidence.items() if n > 0},
+            "stars": [a[:10] for a, n in self.confidence.items() if n >= STAR_THRESHOLD],
             # Scan-Telemetrie (seit Prozess-Start): macht 'kein Signal kam' von
             # 'Signal kam, wurde verworfen' unterscheidbar
             "scan": {
@@ -697,6 +745,8 @@ class SprintBook:
                                  (raw.get("ride_leaders") or {}).items()}
             self.strikes = {str(k): int(v) for k, v in (raw.get("strikes") or {}).items()}
             self.banned = {str(a).lower() for a in (raw.get("banned") or [])}
+            self.confidence = {str(k): int(v) for k, v in
+                               (raw.get("confidence") or {}).items()}
         # v1-Migration: altes Buch hat mit Dauer-Reconciliation gechurnt (139 Trades)
         # -> Buch einmalig sauber neu starten, Bilanz (banked/won/busted) behalten.
         v1_state = raw is not None and "ride_leader" not in raw
@@ -717,9 +767,13 @@ class SprintBook:
                 "total_trades": self.total_trades, "ride_leader": self.ride_leader,
                 "ride_leaders": self.ride_leaders,
                 "strikes": self.strikes, "banned": sorted(self.banned),
+                "confidence": self.confidence,
             }))
         except OSError:
             log.exception("sprint_cycles.json nicht schreibbar")
+
+    def is_star(self, addr: str) -> bool:
+        return self.confidence.get(addr.lower(), 0) >= STAR_THRESHOLD
 
     @staticmethod
     def _book_of(snap) -> dict[str, float]:
