@@ -254,6 +254,45 @@ def test_cmd_fullreport_offline_arg_passed_through():
     assert calls == [True]
 
 
+def test_sprint_asset_breakdown_buckets_by_coin_prefix():
+    """Frage 1 des Nutzers: Krypto vs. Aktien-Perps - was brachte mehr? Der
+    Bucket 'unbekannt' fängt Zyklen ohne coin-Feld ab (alte Einzel-Ritt-
+    Zyklen vor dem coin-Tracking-Fix) - die dürfen NIE still als Krypto
+    gezählt werden, das würde eine Genauigkeit vortäuschen, die fehlt."""
+    import tempfile
+
+    from bot.journal import Journal
+
+    ap = _autopilot()
+    with tempfile.TemporaryDirectory() as tmp:
+        j = Journal(path=Path(tmp) / "trades.jsonl")
+        j.record("sprint_tp", coin="BTC", pnl=100.0)
+        j.record("sprint_bust", coin="ETH", pnl=-50.0)
+        j.record("sprint_cycle_end", coin="xyz:INTC", pnl=30.0)
+        j.record("sprint_cycle_end", coin="xyz:AMD", pnl=-10.0)
+        j.record("sprint_cycle_end", pnl=5.0)             # kein coin-Feld
+        j.record("order", coin="BTC", pnl=999.0)           # falscher kind, ignorieren
+        ap.journal = j
+        out = ap._sprint_asset_breakdown()
+
+    assert "Krypto: 2 Zyklen, PnL +50.00 $ (Trefferquote 50%)" in out
+    assert "Aktien: 2 Zyklen, PnL +20.00 $ (Trefferquote 50%)" in out
+    assert "unbekannt: 1 Zyklen, PnL +5.00 $ (Trefferquote 100%)" in out
+    assert "coin-Tracking-Fix" in out, "Hinweis auf die Unsicherheit muss stehen"
+
+
+def test_sprint_asset_breakdown_empty_journal():
+    import tempfile
+
+    from bot.journal import Journal
+
+    ap = _autopilot()
+    with tempfile.TemporaryDirectory() as tmp:
+        ap.journal = Journal(path=Path(tmp) / "trades.jsonl")
+        out = ap._sprint_asset_breakdown()
+    assert "keine abgeschlossenen" in out
+
+
 def test_stale_feed_warns_once_and_recovers():
     """Audit-Befund: friert der Copier ein (halted/Störung), scannt Sprint
     Standbilder und 'wartet auf frisches Signal' sieht gesund aus. Jetzt: eine

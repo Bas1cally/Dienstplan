@@ -253,6 +253,7 @@ class Autopilot:
                 "/orderbook – Mikrostruktur-Signale\n/twap – laufende Whale-TWAPs\n"
                 "/sprint – Sprint-Buch (1000$ x10, Ziel +100$)\n"
                 "/sprint pool – Sprint-Pool mit Richtungs-Scores\n"
+                "/sprint assets – Krypto vs. Aktien-Perps PnL-Vergleich\n"
                 "/polymarket – Prediction-Market-Funde\n"
                 "/update – Update ziehen + neu starten\n"
                 "/probe – Multi-DEX-Scan-Probe (Extended/Lighter/…)\n"
@@ -462,6 +463,8 @@ class Autopilot:
                 mark = " 🚫" if a.lower() in banned else ""
                 lines.append(f"<code>{a[:12]}…</code> Score {l.get('score', '?')}{mark}")
             return "\n".join(lines)
+        if arg.lower().strip() == "assets":
+            return self._sprint_asset_breakdown()
         s = self.sprint.stats(prices)
         lead = f"<code>{s['leader'][:10]}…</code>" if s.get("leader") else "n/a"
         strikes = ", ".join(f"{a}:{n}" for a, n in s.get("strikes", {}).items()) or "-"
@@ -512,7 +515,47 @@ class Autopilot:
                 f"Scan seit Start: {seen} frische Signale (letztes: {last_fresh}) | "
                 f"verworfen: {rej}\n"
                 f"Feed: Snapshots {feed}\n"
-                f"<i>/sprint close = schließen | /sprint pool = Pool-Liste</i>")
+                f"<i>/sprint close = schließen | /sprint pool = Pool-Liste | "
+                f"/sprint assets = Krypto vs. Aktien</i>")
+
+    def _sprint_asset_breakdown(self) -> str:
+        """Krypto vs. Aktien-Perps (Nutzer-Frage: was brachte in der Mess-Woche
+        mehr?). Liest abgeschlossene Sprint-Zyklen aus dem Journal und bucketet
+        nach Coin-Präfix ('xyz:...' = Builder-DEX-Aktie). Fehlt das coin-Feld
+        (alte Einzel-Ritt-Zyklen vor dem coin-Fix), landet der Eintrag EXPLIZIT
+        in 'unbekannt' statt still als Krypto gezählt zu werden - sonst würde
+        die Zahl eine Genauigkeit vortäuschen, die die Daten nicht hergeben."""
+        kinds = {"sprint_tp", "sprint_bust", "sprint_cycle_end"}
+        buckets = {
+            "Krypto": {"n": 0, "pnl": 0.0, "won": 0},
+            "Aktien": {"n": 0, "pnl": 0.0, "won": 0},
+            "unbekannt": {"n": 0, "pnl": 0.0, "won": 0},
+        }
+        for e in self.journal.tail(5000):
+            if e.get("kind") not in kinds:
+                continue
+            coin = e.get("coin")
+            key = "unbekannt" if not coin else ("Aktien" if ":" in coin else "Krypto")
+            b = buckets[key]
+            b["n"] += 1
+            pnl = float(e.get("pnl", 0))
+            b["pnl"] += pnl
+            if pnl > 0:
+                b["won"] += 1
+        total_n = sum(b["n"] for b in buckets.values())
+        if not total_n:
+            return "Noch keine abgeschlossenen Sprint-Zyklen im Journal."
+        lines = ["<b>Sprint: Krypto vs. Aktien</b>"]
+        for name in ("Krypto", "Aktien", "unbekannt"):
+            b = buckets[name]
+            if b["n"] == 0:
+                continue
+            wr = b["won"] / b["n"] * 100
+            lines.append(f"{name}: {b['n']} Zyklen, PnL {b['pnl']:+,.2f} $ "
+                        f"(Trefferquote {wr:.0f}%)")
+        if buckets["unbekannt"]["n"]:
+            lines.append("<i>'unbekannt' = alte Zyklen vor dem coin-Tracking-Fix</i>")
+        return "\n".join(lines)
 
     def _cmd_twap(self) -> str:
         flagged = self.twap_scout.flagged[-6:] if self.twap_scout else []
