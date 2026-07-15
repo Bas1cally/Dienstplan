@@ -594,6 +594,7 @@ def test_baselines_survive_short_restart_no_blind_window():
         b.tick(LED, [snap("0xbest", 50_000)], P)     # Baseline flach, persistiert
         t["now"] += 60                                # ~1 min Deploy-Downtime
         b2 = SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+        assert "warm übernommen (60s alt beim Start)" == b2._baseline_status
         b2.tick(LED, [snap("0xbest", 50_000, ETH=200)], P)   # während Downtime eröffnet
         assert "ETH" in b2.paper.sizes(), \
             "kurz nach Neustart ist das Downtime-Signal noch frisch -> reiten"
@@ -609,10 +610,20 @@ def test_baselines_stale_file_discarded():
         b.tick(LED, [snap("0xbest", 50_000)], P)
         t["now"] += 3600                              # 1h down: viel zu alt
         b2 = SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+        assert "kalt neu gesetzt (Datei war 3600s alt)" == b2._baseline_status
         b2.tick(LED, [snap("0xbest", 50_000, ETH=200)], P)
         assert b2.paper.sizes() == {}, "alte Baselines verworfen -> ETH gilt als laufend"
         b2.tick(LED, [snap("0xbest", 50_000, ETH=200)], P)
         assert b2.paper.sizes() == {}, "ETH bleibt 'laufender Trade', kein Späteinstieg"
+
+
+def test_baseline_status_no_file_at_all():
+    """Allererster Start (noch keine sprint_baselines.json) - eigener Fall, kein
+    Lesefehler einer kaputten Datei, sondern schlicht 'noch nie gespeichert'."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = SprintBook(SprintConfig(exclude_coins=[]), FEE, runtime_dir=Path(tmp))
+        assert b._baseline_status == "kalt neu gesetzt (kein Vorstand)"
+        assert b.stats(P)["baseline_status"] == "kalt neu gesetzt (kein Vorstand)"
 
 
 def test_restart_keeps_ride_and_rebaselines():

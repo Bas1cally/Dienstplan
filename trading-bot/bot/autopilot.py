@@ -554,6 +554,7 @@ class Autopilot:
                 f"Scan seit Start: {seen} frische Signale (letztes: {last_fresh}) | "
                 f"verworfen: {rej}\n"
                 f"Feed: Snapshots {feed}\n"
+                f"Baselines: {s.get('baseline_status', 'n/a')}\n"
                 f"\n"
                 f"<i>/sprint close = schließen | /sprint pool = Pool-Liste | "
                 f"/sprint assets = Krypto vs. Aktien | /sprint reset = Bilanz auf 0</i>")

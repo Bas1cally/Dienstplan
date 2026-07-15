@@ -125,6 +125,11 @@ class SprintBook:
         self._last_entry_t: float | None = None
         self.baselines_path = runtime / "sprint_baselines.json"
         self._baselines_saved_t = 0.0
+        # Warm/kalt-Start dieses Prozess-Laufs (einmalig in _load_baselines
+        # gesetzt, ändert sich danach nicht mehr) - beantwortet "ist '0 frische
+        # Signale' echte Ruhe oder ein frischer Kaltstart ohne Vergleichsbasis"
+        # direkt in /sprint, ohne Server-Log-Zugriff (Nutzer-Nachfrage).
+        self._baseline_status = "kalt neu gesetzt (kein Vorstand)"
         self._migrate_v1_or_load()
         self._load_baselines()
 
@@ -628,6 +633,7 @@ class SprintBook:
                 log.info("Sprint: Baseline-Datei %.0fs alt (> %.0fs) - re-baseline "
                          "(zu lange down, verpasste Einstiege wären nicht mehr frisch)",
                          age, _BASELINE_MAX_AGE_S)
+                self._baseline_status = f"kalt neu gesetzt (Datei war {age:.0f}s alt)"
                 return
             self._baselines = {
                 str(a).lower(): {str(c): float(s) for c, s in (b or {}).items()}
@@ -635,8 +641,9 @@ class SprintBook:
             }
             log.info("Sprint: %d Baselines übernommen (%.0fs alt) - kein "
                      "Blindfenster nach Neustart", len(self._baselines), age)
+            self._baseline_status = f"warm übernommen ({age:.0f}s alt beim Start)"
         except (OSError, ValueError, TypeError, AttributeError):
-            pass   # keine/kaputte Datei -> normales Re-Baseline beim ersten Tick
+            pass   # keine/kaputte Datei -> normales Re-Baseline beim ersten Tick (Default bleibt "kein Vorstand")
 
     def _note_fresh(self, n: int) -> None:
         self._fresh_seen += n
@@ -920,6 +927,11 @@ class SprintBook:
             "pending": [{"coin": c, "leader": i["leader"][:10],
                         "wait_s": round(self.clock() - i["since"], 1)}
                        for c, i in self._pending.items()],
+            # Warm/kalt-Start (Nutzer-Nachfrage): unterscheidet 'echte Ruhe seit
+            # dem letzten Save' von 'frischer Kaltstart, noch keine
+            # Vergleichsbasis' - sonst sieht 'scan.fresh_seen == 0' in beiden
+            # Fällen identisch aus.
+            "baseline_status": self._baseline_status,
             # Scan-Telemetrie (seit Prozess-Start): macht 'kein Signal kam' von
             # 'Signal kam, wurde verworfen' unterscheidbar
             "scan": {
