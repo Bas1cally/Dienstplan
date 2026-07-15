@@ -97,6 +97,12 @@ class SprintBook:
         # also nie mehr Punkte verdienen - kein Sonderfall-Code fürs Einfrieren
         # nötig, das ergibt sich von selbst aus dem bestehenden Bann-Check.
         self.confidence: dict[str, int] = {}
+        # Bestätigungsfenster (Flip-Flopper-Schutz): coin -> {leader, since}.
+        # Bewusst NICHT persistiert - ein Kandidat bindet kein Kapital, ist nur
+        # Sekunden bis wenige Minuten unterwegs; geht er über einen Neustart
+        # verloren, entdeckt der nächste Scan ihn im Zweifel neu (oder eben
+        # nicht mehr, dann war er ohnehin kein anhaltendes Signal).
+        self._pending: dict[str, dict] = {}
         self._ride_start_equity: float | None = None  # Equity bei Ritt-Beginn (PnL-Attribution)
         self._ride_entry_sizes: dict[str, float] = {}  # coin -> |Leader-Größe| beim Einstieg
         # Baseline je Leader (addr -> coin -> signierte Größe): nur Übergänge
@@ -175,6 +181,10 @@ class SprintBook:
             self._tick_riding(snapshots, prices)
         else:
             self._tick_waiting(leaders, snapshots, prices)
+        # Läuft IMMER (auch während eines Ritts, für die später kommende
+        # Star-Preemption) - registriert selbst nichts, verarbeitet nur
+        # bereits pending Kandidaten (Bestätigungsfenster gegen Flip-Flopper).
+        self._process_pending(leaders, snapshots, prices)
         # Baselines ALLER Rotations-Leader aktuell halten (auch während eines
         # Ritts) und Ausgeschiedene vergessen - sonst gelten deren während des
         # Ritts eröffnete Positionen später fälschlich als "frisch".
@@ -187,7 +197,15 @@ class SprintBook:
         by_addr = {s.address.lower(): s for s in snapshots}
         # Star zuerst, dann höchster Score: melden mehrere Leader gleichzeitig,
         # gewinnt der bewiesene Star vor dem reinen Score-Tie-Break (BACKLOG-
-        # Entscheidung: "Star-Vorrang bei gleichzeitigen Signalen").
+        # Entscheidung: "Star-Vorrang bei gleichzeitigen Signalen"). Bei
+        # AKTIVEM Bestätigungsfenster kein frühzeitiges Return mehr nach dem
+        # ersten Treffer - ein frisches Signal wird nur als KANDIDAT
+        # registriert (bindet kein Kapital), mehrere Leader dürfen parallel
+        # pending sein, _process_pending löst das zur Bestätigungszeit auf.
+        # Ist das Fenster AUS (confirm_delay_s<=0), bleibt das alte Verhalten
+        # exakt erhalten: sobald real eingestiegen, sofort zurück - sonst
+        # könnte ein zweiter, niedriger priorisierter Leader im selben Tick
+        # ebenfalls einsteigen (max_positions wird sonst hier nicht geprüft).
         for l in sorted(leaders, key=lambda l: (
                 self.is_star(str(l.get("address", ""))), float(l.get("score", 0))),
                 reverse=True):
@@ -210,18 +228,97 @@ class SprintBook:
                     self._reject(coin, snap.address, "leader_gesperrt")
                 continue
             # EIN Ritt = EINE Position: bei Korb-Eröffnungen (Leader macht z.B.
-            # 7 Aktien-Shorts auf einmal auf) reiten wir nur das STÄRKSTE Signal
-            # (größte relative Überzeugung), statt die 10x-Kapazität auf den
-            # ganzen Korb zu verschmieren. Abgelehnte Coins füllen den Slot
-            # nicht (z.B. BTC-Ausschluss) - der nächststärkste rückt nach.
+            # 7 Aktien-Shorts auf einmal auf) wird nur das STÄRKSTE Signal
+            # Kandidat (größte relative Überzeugung), statt die 10x-Kapazität
+            # auf den ganzen Korb zu verschmieren. Ausgeschlossene Coins (z.B.
+            # BTC) füllen den Slot NICHT - der nächststärkste rückt nach, wie
+            # zuvor bei sofortigem _enter().
             fresh.sort(key=lambda c: abs(snap.exposure(c)), reverse=True)
+            registered = False
             for coin in fresh:
-                if len(self.paper.sizes()) >= self.cfg.max_positions:
+                if registered:
                     self._reject(coin, snap.address, "korb_begrenzt")
                     continue
-                self._enter(coin, snap, prices)
-            if self.paper.sizes():
-                return  # eingestiegen: dieser Leader ist der Ritt
+                ko = self._ineligible_reason(coin)
+                if ko:
+                    self._reject(coin, snap.address, ko)
+                    continue
+                if self.cfg.confirm_delay_s <= 0:
+                    # Feature AUS: exakt das alte Sofort-Verhalten, kein
+                    # Pending-Umweg (der würde sonst auch bei delay=0 noch
+                    # die "Leader nicht im Minus"-Prüfung anwenden - das wäre
+                    # kein "aus" mehr, sondern eine andere neue Regel).
+                    if len(self.paper.sizes()) >= self.cfg.max_positions:
+                        self._reject(coin, snap.address, "korb_begrenzt")
+                        continue
+                    self._enter(coin, snap, prices)
+                    registered = coin in self.paper.sizes()
+                else:
+                    self._register_pending(coin, snap)
+                    registered = coin in self._pending
+            if self.cfg.confirm_delay_s <= 0 and self.paper.sizes():
+                return  # altes Verhalten: real eingestiegen -> keine weiteren Leader
+
+    def _register_pending(self, coin: str, snap) -> None:
+        """Bestätigungs-Kandidat statt sofortigem Einstieg (Flip-Flopper-
+        Schutz): der Coin-Slot gehört dem ERSTEN Kandidaten, egal welcher
+        Leader - eine Kollision (auch desselben Leaders erneut, während er
+        schon pending ist) wird schlicht ignoriert, kein Timer-Reset, kein
+        Ersatz-Kandidat."""
+        if coin in self._pending:
+            return
+        self._pending[coin] = {"leader": snap.address, "since": self.clock()}
+
+    def _process_pending(self, leaders: list[dict], snapshots: list,
+                         prices: dict[str, float]) -> None:
+        """Jeden Tick: prüft alle Bestätigungs-Kandidaten. Negativ oder Leader
+        selbst schon wieder raus -> SOFORT verwerfen (nicht bis zum
+        Fensterende warten - genau der Flip-Flop-Fall, den wir verhindern
+        wollen). Durchgehend nicht im Minus UND Fenster um -> promoten, zum
+        AKTUELLEN Preis (nicht dem Preis beim ursprünglichen Signal)."""
+        if not self._pending:
+            return
+        by_addr = {s.address.lower(): s for s in snapshots}
+        scores = {str(l.get("address", "")).lower(): float(l.get("score", 0))
+                 for l in leaders}
+        ready = []
+        for coin, info in list(self._pending.items()):
+            leader = info["leader"]
+            snap = by_addr.get(leader.lower())
+            pos = snap.positions.get(coin) if snap else None
+            if pos is None or float(pos.size) == 0:
+                self._pending.pop(coin, None)
+                self._reject(coin, leader, "unbestaetigt_leader_weg")
+                continue
+            price = prices.get(coin)
+            if not price:
+                continue  # kein Preis diesen Tick - weder disqualifizieren noch promoten
+            if not pos.not_losing(price):
+                self._pending.pop(coin, None)
+                self._reject(coin, leader, "unbestaetigt_negativ")
+                continue
+            if self.clock() - info["since"] < self.cfg.confirm_delay_s:
+                continue  # noch nicht lange genug bestätigt
+            ready.append((coin, info, snap))
+        if not ready:
+            return
+        # Mehrere gleichzeitig reif: Star zuerst, dann Score (wie beim
+        # Discovery-Scan) - max_positions lässt ohnehin nur einen zu.
+        ready.sort(key=lambda item: (self.is_star(item[1]["leader"]),
+                                     scores.get(item[1]["leader"].lower(), 0.0)),
+                  reverse=True)
+        win_coin, win_info, win_snap = ready[0]
+        for coin, info, _ in ready[1:]:
+            self._pending.pop(coin, None)
+            self._reject(coin, info["leader"], "andere_bestaetigt")
+        # max_positions gilt erst HIER (Promotion kostet Kapital) - nicht
+        # schon bei der Registrierung (die kostet nichts).
+        if len(self.paper.sizes()) >= self.cfg.max_positions:
+            self._pending.pop(win_coin, None)
+            self._reject(win_coin, win_info["leader"], "max_ritte")
+            return
+        self._pending.pop(win_coin, None)
+        self._enter(win_coin, win_snap, prices)
 
     def _fresh_coins(self, book: dict[str, float], prev: dict[str, float]) -> list[str]:
         """Frische Richtungs-Signale eines Leaders (nur im FLACH-Scan genutzt):
@@ -478,15 +575,26 @@ class SprintBook:
 
     # ---------- Ein-/Ausstieg ----------
 
-    def _enter(self, coin: str, snap, prices: dict[str, float],
-               parallel: bool = False) -> None:
+    def _ineligible_reason(self, coin: str) -> str | None:
+        """Statische Zulässigkeit (unabhängig von Preis/Timing) - None = ok.
+        Genutzt von _enter() UND von der Korb-Registrierung im FLACH-Scan:
+        die Registrierung muss VOR der Bestätigung wissen, ob ein Kandidat
+        überhaupt je eintreten könnte, sonst würde der stärkste (aber
+        ausgeschlossene) Coin den Slot blockieren, statt dem nächststärksten
+        Platz zu machen."""
         if coin in self.cfg.exclude_coins:
-            self._reject(coin, snap.address, "coin_ausgeschlossen")
-            return  # Beta statt Leader-Alpha (z.B. BTC) - kein Signal
+            return "coin_ausgeschlossen"  # Beta statt Leader-Alpha (z.B. BTC)
         if self.cfg.crypto_only and ":" in coin:
             # Builder-DEX-Asset (Aktien/Gold, z.B. 'xyz:INTC'): außerhalb der
             # Börsenzeiten reine Spekulation - stört die Messlatte (Nutzer)
-            self._reject(coin, snap.address, "kein_krypto")
+            return "kein_krypto"
+        return None
+
+    def _enter(self, coin: str, snap, prices: dict[str, float],
+               parallel: bool = False) -> None:
+        ko = self._ineligible_reason(coin)
+        if ko:
+            self._reject(coin, snap.address, ko)
             return
         price = prices.get(coin)
         if not price or price <= 0:
@@ -698,7 +806,10 @@ class SprintBook:
             "progress_pct": round((eq - self.cfg.equity) / self.cfg.target_profit * 100, 1),
             "state": (f"{len(positions)} Mess-Ritte laufen"
                       if positions and self.cfg.parallel_rides
-                      else "hält" if positions else "wartet auf frisches Signal"),
+                      else "hält" if positions
+                      else f"{len(self._pending)} Signal(e) werden bestätigt"
+                      if self._pending
+                      else "wartet auf frisches Signal"),
             "held": held,
             "parallel": self.cfg.parallel_rides,
             "banked": round(self.banked, 2),
@@ -716,6 +827,12 @@ class SprintBook:
             # Leader neu >= STAR_THRESHOLD rechnen muss.
             "confidence": {a[:10]: n for a, n in self.confidence.items() if n > 0},
             "stars": [a[:10] for a, n in self.confidence.items() if n >= STAR_THRESHOLD],
+            # Bestätigungs-Kandidaten (Flip-Flopper-Schutz): laufen gerade,
+            # noch nicht promoted/verworfen - sonst wäre "wartet auf frisches
+            # Signal" von "Signal wartet auf Bestätigung" ununterscheidbar.
+            "pending": [{"coin": c, "leader": i["leader"][:10],
+                        "wait_s": round(self.clock() - i["since"], 1)}
+                       for c, i in self._pending.items()],
             # Scan-Telemetrie (seit Prozess-Start): macht 'kein Signal kam' von
             # 'Signal kam, wurde verworfen' unterscheidbar
             "scan": {

@@ -32,6 +32,11 @@ def book(tmp, **overrides):
     # ein eigenes Feature, unten separat getestet) - sonst bräche hier fast jeder
     # bestehende Test, weil er BTC als Test-Coin nutzt.
     overrides.setdefault("exclude_coins", [])
+    # Bestätigungsfenster standardmäßig AUS (altes Sofort-Verhalten) - sonst
+    # bräche praktisch jeder bestehende Mechanik-Test, der einen Einstieg
+    # innerhalb EINES tick()-Aufrufs erwartet. Eigene Tests unten überschreiben
+    # confirm_delay_s explizit, um genau dieses Feature zu prüfen.
+    overrides.setdefault("confirm_delay_s", 0)
     cfg = SprintConfig(**overrides)
     return SprintBook(cfg, FEE, runtime_dir=Path(tmp))
 
@@ -721,6 +726,152 @@ def test_notifier_journal_and_stats():
         b.tick(LED, [snap("0xbest", 50_000)], P)
         assert any("Sprint-Exit" in m for m in sent)
         assert any(k == "sprint_exit" for k, _ in recorded)
+
+
+# ---------- Bestätigungsfenster gegen Flip-Flopper (QOL-Runde) ----------
+
+def _confirm_book(tmp, t, delay=10.0):
+    cfg = SprintConfig(exclude_coins=[], confirm_delay_s=delay)
+    return SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+
+
+def test_pending_candidate_promoted_after_delay_if_never_negative():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)                 # Baseline
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)        # frisches Signal
+        assert b.paper.sizes() == {}, "kein Sofort-Einstieg mehr"
+        assert any(p["coin"] == "BTC" for p in b.stats(P)["pending"])
+
+        t["now"] += 5   # noch nicht lange genug
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert b.paper.sizes() == {}, "Fenster noch nicht um"
+
+        t["now"] += 6   # jetzt > 10s seit Entdeckung
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert "BTC" in b.paper.sizes(), "bestätigt -> jetzt eingestiegen"
+        assert b.stats(P)["pending"] == []
+
+
+def test_pending_candidate_rejected_immediately_on_negative_tick():
+    """'Hält sich mindestens 10s positiv' heißt DURCHGEHEND - ein Ausreißer
+    nach unten disqualifiziert sofort, nicht erst am Fensterende (genau der
+    Flip-Flop-Fall: Leader schießt ins Minus, wir sollen NICHT einsteigen)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)        # Entry-Preis 100
+        assert b.stats(P)["pending"]
+
+        t["now"] += 3
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.0, "ETH": 100.0})
+        assert b.stats(P)["pending"] == [], "sofort verworfen, nicht bis Fensterende gewartet"
+        assert b.stats(P)["scan"]["rejected"].get("unbestaetigt_negativ") == 1
+
+        t["now"] += 20   # selbst weit über dem Fenster: kein nachträglicher Einstieg
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 105.0, "ETH": 100.0})
+        assert b.paper.sizes() == {}, "verworfener Kandidat lebt nicht wieder auf"
+
+
+def test_pending_candidate_rejected_when_leader_exits_during_wait():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert b.stats(P)["pending"]
+
+        t["now"] += 3
+        b.tick(LED, [snap("0xbest", 50_000)], P)   # Leader selbst schon wieder raus
+        assert b.stats(P)["pending"] == []
+        assert b.stats(P)["scan"]["rejected"].get("unbestaetigt_leader_weg") == 1
+
+        t["now"] += 20
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        assert b.paper.sizes() == {}
+
+
+def test_pending_promotion_uses_current_price_not_signal_price():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 100.0, "ETH": 100.0})
+        t["now"] += 11
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 103.0, "ETH": 100.0})
+        rows = {r["coin"]: r for r in b.paper.position_rows({"BTC": 103.0})}
+        assert abs(rows["BTC"]["entry"] - 103.0) < 1e-9, \
+            "Einstieg zum AKTUELLEN Preis bei Bestätigung, nicht dem Signal-Preis"
+
+
+def test_no_price_neither_promotes_nor_rejects_pending():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        t["now"] += 20
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"ETH": 100.0})  # kein BTC-Preis
+        assert b.paper.sizes() == {} and b.stats(P)["pending"], \
+            "weder promoted noch verworfen - bleibt stehen"
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 100.0, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), "sobald der Preis wieder da ist, geht's normal weiter"
+
+
+def test_two_candidates_confirm_same_tick_highest_score_wins():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book(tmp, t)
+        two = leaders(("0xbest", 90), ("0xsecond", 50))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000, BTC=500),
+                     snap("0xsecond", 50_000, ETH=300)], P)
+        assert len(b.stats(P)["pending"]) == 2
+
+        t["now"] += 11
+        b.tick(two, [snap("0xbest", 50_000, BTC=500),
+                     snap("0xsecond", 50_000, ETH=300)], P)
+        assert list(b.paper.sizes()) == ["BTC"], "höherer Score (0xbest) gewinnt"
+        assert b.stats(P)["scan"]["rejected"].get("andere_bestaetigt") == 1
+
+
+def test_second_registration_same_coin_while_pending_ignored():
+    """Egal ob derselbe oder ein anderer Leader: der Coin-Slot gehört dem
+    ERSTEN Kandidaten, bis er aufgelöst ist - kein Timer-Reset, kein Ersatz."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book(tmp, t)
+        s1 = snap("0xbest", 50_000, BTC=500)
+        s2 = snap("0xsecond", 50_000, BTC=300)
+        b._register_pending("BTC", s1)
+        first_since = b._pending["BTC"]["since"]
+        t["now"] += 5
+        b._register_pending("BTC", s2)   # Kollision - muss ignoriert werden
+        assert b._pending["BTC"]["leader"] == "0xbest"
+        assert b._pending["BTC"]["since"] == first_since, "kein Timer-Reset"
+
+
+def test_flip_reentry_stays_instant_even_with_confirm_delay():
+    """Kritischer Fund des Architektur-Gegenchecks: eine flip-getriebene Re-
+    Entry MUSS sofort bleiben, sonst bricht die 'Flip = derselbe Zyklus läuft
+    weiter'-Semantik (sizes() wäre zwischen Close und Re-Entry leer ->
+    _settle_ride würde jedes Mal zwischenfeuern)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book(tmp, t, delay=10.0)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # Long: erst pending
+        t["now"] += 11   # Bestätigungsfenster abwarten -> jetzt eingestiegen
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert "BTC" in b.paper.sizes()
+        t["now"] += 1   # WEIT unter dem Bestätigungsfenster
+        b.tick(LED, [snap("0xbest", 50_000, BTC=-500)], P)  # Leader flippt auf Short
+        assert b.paper.sizes().get("BTC", 0) < 0, \
+            "Flip-Re-Entry bleibt sofort, auch mit confirm_delay_s=10"
+        assert b.won == 0 and b.busted == 0, \
+            "derselbe Zyklus läuft weiter (kein Zwischen-Settle beim Flip)"
 
 
 # ---------- Confidence-Points/Star-Kern (QOL-Runde) ----------

@@ -19,6 +19,15 @@ class LeaderPosition:
     position_value: float  # |Notional| in USD
     leverage: float
 
+    def not_losing(self, price: float) -> bool:
+        """Für Sprints Bestätigungsfenster (Flip-Flopper-Schutz): ist die
+        Position des LEADERS zum aktuellen Preis nicht im Minus? Bewusst
+        >= statt > 0 - im Moment der Signal-Entdeckung ist price meist noch
+        exakt gleich entry (PnL==0, weder Gewinn noch Verlust). Ein
+        genau-0-PnL ist kein Warnsignal, nur eine ECHTE Bewegung ins Minus
+        disqualifiziert den Kandidaten."""
+        return (price - self.entry) * (1.0 if self.size > 0 else -1.0) >= 0
+
 
 @dataclass
 class LeaderSnapshot:

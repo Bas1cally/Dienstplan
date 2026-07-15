@@ -384,6 +384,19 @@ class SprintConfig:
     # frisches Richtungs-Signal; ebenso ein Richtungs-FLIP (Long->Short) im
     # Bestand. 0 = aus (dann zählt nur der klassische 0->Position-Übergang).
     add_signal_frac: float = 0.5
+    # Bestätigungsfenster gegen Flip-Flopper (Nutzer-Beobachtung: Leader
+    # eröffnet, schießt sofort ins Minus, steigt Sekunden später wieder aus
+    # und öffnet denselben Trade erneut - wir waren jedes Mal blind instant
+    # im Minus dabei). Statt bei einem frischen Signal sofort einzusteigen,
+    # wird ein Kandidat registriert; erst wenn die Position des LEADERS (!)
+    # mindestens confirm_delay_s durchgehend nicht im Minus war, steigen wir
+    # zum DANN aktuellen Preis ein. 0 = aus (altes Sofort-Verhalten). Gilt
+    # NUR für frische Signale aus flachem Zustand + Star-Preemption - eine
+    # Flip-getriebene Re-Entry innerhalb eines laufenden Ritts bleibt sofort
+    # (sonst bricht das die "Flip = derselbe Zyklus läuft weiter"-Semantik).
+    # Sicherer Default 0 (aus) wie bei parallel_rides - config.yaml schaltet
+    # den Produktivwert (10s) explizit scharf.
+    confirm_delay_s: float = 0.0
     # LARP-Strikes: Verlust-Ritt -> Strike +1, Gewinn-Ritt -> Strike -1 (min 0).
     # Bei strike_ban Strikes wird der Leader fürs Sprint-Buch gesperrt.
     strike_ban: int = 2
