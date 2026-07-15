@@ -1,11 +1,13 @@
 """Unit-Tests: Report-Engine, Empfehlungs-Regeln, Watchdog-Diagnose."""
 
+import json
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from bot.autopilot import diagnose_inactivity
+from bot.autopilot import chunk_for_telegram, diagnose_inactivity
 from bot.report import recommendations, summarize, veto_outcomes
 
 
@@ -229,6 +231,121 @@ def test_healthy_run_no_noise():
     s = summarize(journal, history(7, 10_000, 10_600), {"fees_paid": 20.0, "realized_pnl": 600.0})
     recs = recommendations(s)
     assert recs == ["Keine Auffälligkeiten - weiterlaufen lassen und Stichprobe wachsen lassen."]
+
+
+# ---------- build_report (voller Report, /fullreport per Telegram) ----------
+
+def test_build_report_no_data():
+    import report as report_mod
+
+    with tempfile.TemporaryDirectory() as tmp:
+        text = report_mod.build_report(offline=True, runtime_dir=Path(tmp))
+    assert "Noch keine Daten" in text
+
+
+def test_build_report_offline_includes_all_active_tracks():
+    """Volle Fixture (Haupt-Buch + Sprint + Vetos) -> alle Abschnitte im
+    Text vorhanden, identisch zur bisherigen CLI-Ausgabe (Zeilen/Labels)."""
+    import report as report_mod
+
+    with tempfile.TemporaryDirectory() as tmp:
+        rt = Path(tmp)
+        trades = [order(i * 3600) for i in range(5)]
+        trades.append(veto(999, coin="ETH"))
+        (rt / "trades.jsonl").write_text("\n".join(json.dumps(t) for t in trades))
+        (rt / "history.jsonl").write_text(
+            "\n".join(json.dumps(h) for h in history(2, 10_000, 10_235)))
+        (rt / "paper_state.json").write_text(json.dumps(
+            {"trades": 5, "realized_pnl": 120.5, "fees_paid": 3.2, "initial_equity": 10_000}))
+        (rt / "sprint_cycles.json").write_text(json.dumps(
+            {"won": 3, "busted": 2, "banked": 252.89,
+             "strikes": {"0xfd688aed": 2}, "banned": ["0xfd688aed"]}))
+        (rt / "sprint_book.json").write_text(json.dumps(
+            {"initial_equity": 1000, "realized_pnl": 0, "trades": 0}))
+        text = report_mod.build_report(offline=True, runtime_dir=rt)
+
+    assert "=== Paper-Lauf-Report ===" in text
+    assert "Realisierter PnL" in text and "+120.50" in text
+    assert "Sprint-Buch" in text and "banked +252.89" in text
+    assert "Strikes {'0xfd688aed': 2}" in text and "gesperrt ['0xfd688aed']" in text
+    assert "=== Empfehlungen ===" in text
+    assert "Bewerte geblockte Trades" not in text, "offline darf keine Netz-Analyse anstoßen"
+
+
+def test_build_report_offline_skips_network_veto_analysis():
+    """offline=True darf NIE versuchen, HyperliquidClient/Preise zu holen -
+    sonst würde /fullreport offline auf dem Server unnötig Netz-Last erzeugen."""
+    import report as report_mod
+
+    with tempfile.TemporaryDirectory() as tmp:
+        rt = Path(tmp)
+        trades = [order(1)] + [veto(i + 10) for i in range(5)]
+        (rt / "trades.jsonl").write_text("\n".join(json.dumps(t) for t in trades))
+        (rt / "history.jsonl").write_text(
+            "\n".join(json.dumps(h) for h in history(3, 10_000, 10_100)))
+        # Kein Netz-Client importierbar/aufrufbar in diesem Testlauf - würde
+        # build_report ihn dennoch bauen, flöge hier eine Exception
+        text = report_mod.build_report(offline=True, runtime_dir=rt)
+    assert "=== Empfehlungen ===" in text  # kein Crash, kein Netz-Versuch
+
+
+def test_build_report_cli_main_prints_same_content():
+    """main() (python report.py) muss weiterhin exakt das drucken, was
+    build_report() zurückgibt - reiner Verhaltens-Erhalt nach dem Refactor."""
+    import contextlib
+    import io
+    import sys as _sys
+
+    import report as report_mod
+
+    with tempfile.TemporaryDirectory() as tmp:
+        rt = Path(tmp)
+        orig_argv, orig_runtime = _sys.argv, report_mod.RUNTIME
+        _sys.argv = ["report.py", "--offline"]
+        report_mod.RUNTIME = rt
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                report_mod.main()
+        finally:
+            _sys.argv, report_mod.RUNTIME = orig_argv, orig_runtime
+    assert "Noch keine Daten in runtime/" in buf.getvalue()
+
+
+# ---------- chunk_for_telegram (Telegram-4096-Zeichen-Limit) ----------
+
+def test_chunk_short_text_stays_one_piece():
+    assert chunk_for_telegram("hallo\nwelt") == ["hallo\nwelt"]
+
+
+def test_chunk_respects_limit_and_is_lossless():
+    text = "\n".join(f"Zeile {i}: " + "x" * 100 for i in range(200))
+    chunks = chunk_for_telegram(text, limit=500)
+    assert all(len(c) <= 500 for c in chunks)
+    assert len(chunks) > 1
+    assert "\n".join(chunks) == text, "Zeilengrenzen-Split darf nichts verlieren"
+
+
+def test_chunk_breaks_only_on_line_boundaries():
+    text = "\n".join(["kurz"] * 3 + ["y" * 90] + ["kurz"] * 3)
+    chunks = chunk_for_telegram(text, limit=100)
+    for c in chunks:
+        for line in c.split("\n"):
+            assert line in text.split("\n"), "keine mitten im Wort abgeschnittene Zeile"
+
+
+def test_chunk_hard_splits_single_oversized_line():
+    """Eine Einzelzeile länger als das Limit (sollte im Report nicht vorkommen,
+    aber die Funktion darf nicht endlos/leer zurückgeben)."""
+    text = "x" * 9000
+    chunks = chunk_for_telegram(text, limit=4000)
+    assert len(chunks) == 3
+    assert "".join(chunks) == text
+    assert all(len(c) <= 4000 for c in chunks)
+
+
+def test_chunk_empty_text():
+    assert chunk_for_telegram("") == [""]
 
 
 # ---------- Watchdog-Diagnose ----------

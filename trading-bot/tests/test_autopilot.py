@@ -187,6 +187,59 @@ def test_cmd_analyze_sets_flag_only_when_running():
     assert "läuft bereits" in out and ap._force_analysis is False
 
 
+def test_cmd_fullreport_without_notifier_shows_hint():
+    ap = _autopilot()
+    ap.notifier.token = ap.notifier.chat_id = ""   # enabled ist eine reine Property
+    assert "Telegram-Push" in ap._cmd_fullreport()
+
+
+def test_cmd_fullreport_chunks_and_pushes_with_headers():
+    """Voller Report läuft im Hintergrund, wird gechunkt und OHNE HTML-Parsing
+    gepusht (html=False) - Freitext mit '<'/'>' darf nie wieder Funkstille
+    erzeugen. Jeder Chunk trägt einen 'Report i/N'-Header."""
+    import report as report_mod
+
+    ap = _autopilot()
+    ap.notifier.token, ap.notifier.chat_id = "t", "42"   # enabled ist eine reine Property
+    sent = []
+    ap.notifier.send = lambda text, html=True: sent.append((text, html))
+
+    long_text = "\n".join(f"Zeile {i}: " + "x" * 100 for i in range(120))
+    orig_build = report_mod.build_report
+    calls = []
+    report_mod.build_report = lambda offline=False: (calls.append(offline), long_text)[1]
+    try:
+        out = ap._cmd_fullreport()
+        assert "wird gebaut" in out
+        ap._fullreport_thread.join(timeout=10)
+    finally:
+        report_mod.build_report = orig_build
+
+    assert calls == [False], "ohne Arg -> online (nicht offline)"
+    assert len(sent) > 1, "langer Text muss in mehreren Nachrichten ankommen"
+    assert all(html is False for _, html in sent), "Report-Text ohne HTML-Parsing gesendet"
+    assert sent[0][0].startswith("📊 Report 1/")
+    assert sent[-1][0].startswith(f"📊 Report {len(sent)}/{len(sent)}")
+
+
+def test_cmd_fullreport_offline_arg_passed_through():
+    import report as report_mod
+
+    ap = _autopilot()
+    ap.notifier.token, ap.notifier.chat_id = "t", "42"   # enabled ist eine reine Property
+    ap.notifier.send = lambda text, html=True: None
+    calls = []
+    orig_build = report_mod.build_report
+    report_mod.build_report = lambda offline=False: (calls.append(offline), "kurzer Text")[1]
+    try:
+        out = ap._cmd_fullreport("offline")
+        assert "offline" in out
+        ap._fullreport_thread.join(timeout=10)
+    finally:
+        report_mod.build_report = orig_build
+    assert calls == [True]
+
+
 def test_stale_feed_warns_once_and_recovers():
     """Audit-Befund: friert der Copier ein (halted/Störung), scannt Sprint
     Standbilder und 'wartet auf frisches Signal' sieht gesund aus. Jetzt: eine

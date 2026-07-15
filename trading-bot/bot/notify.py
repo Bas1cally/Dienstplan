@@ -27,19 +27,24 @@ class Notifier:
     def enabled(self) -> bool:
         return bool(self.token and self.chat_id)
 
-    def send(self, text: str) -> None:
+    def send(self, text: str, html: bool = True) -> None:
         """Sendet eine Nachricht; Fehler werden geloggt, nie geworfen.
         Lehnt Telegram das HTML-Parsing ab (400, z.B. rohes '<' in dynamischem
-        Inhalt), wird als Klartext nachgesendet - Push darf nie stumm sterben."""
+        Inhalt), wird als Klartext nachgesendet - Push darf nie stumm sterben.
+        `html=False`: von vornherein OHNE parse_mode senden - für Freitext mit
+        ungeprüftem Inhalt (z.B. der volle Report), der öfter mal ein '<'/'>'
+        enthält und sonst bei jeder Nachricht den 400-Retry-Umweg bräuchte."""
         if not self.enabled:
             return
         try:
+            payload = {"chat_id": self.chat_id, "text": text}
+            if html:
+                payload["parse_mode"] = "HTML"
             r = requests.post(
                 f"https://api.telegram.org/bot{self.token}/sendMessage",
-                json={"chat_id": self.chat_id, "text": text, "parse_mode": "HTML"},
-                timeout=10,
+                json=payload, timeout=10,
             )
-            if r.status_code == 400:
+            if html and r.status_code == 400:
                 log.warning("Telegram lehnt HTML ab (400) - sende als Klartext")
                 r = requests.post(
                     f"https://api.telegram.org/bot{self.token}/sendMessage",

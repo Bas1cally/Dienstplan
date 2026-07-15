@@ -111,6 +111,30 @@ def test_notifier_falls_back_to_plaintext_on_html_400():
     assert len(calls) == 2 and "parse_mode" not in calls[1]
 
 
+def test_notifier_html_false_sends_plain_immediately():
+    """/fullreport nutzt html=False: kein parse_mode im Payload, kein 400-Retry
+    nötig, selbst wenn der Text rohe '<'/'>' enthält (ungeprüfter Freitext)."""
+    import bot.notify as nf
+
+    calls = []
+
+    def fake_post(url, json=None, timeout=None):
+        calls.append(dict(json))
+        return _Resp(200)
+
+    n = nf.Notifier()
+    n.token, n.chat_id = "t", "42"
+    orig = nf.requests.post
+    nf.requests.post = fake_post
+    try:
+        n.send("Report mit <html> und > Zeichen", html=False)
+    finally:
+        nf.requests.post = orig
+    assert len(calls) == 1, "kein Retry nötig - direkt ohne parse_mode gesendet"
+    assert "parse_mode" not in calls[0]
+    assert calls[0]["text"] == "Report mit <html> und > Zeichen"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

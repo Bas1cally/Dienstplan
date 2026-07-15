@@ -59,6 +59,31 @@ def set_env_var(key: str, value: str, env_path: Path = ENV_FILE) -> None:
         pass
 
 
+def chunk_for_telegram(text: str, limit: int = 3800) -> list[str]:
+    """Teilt Text in Telegram-taugliche Häppchen (Hard-Limit der API: 4096
+    Zeichen/Nachricht, `limit` lässt Puffer für den '📊 Report i/N'-Header).
+    Bricht NUR an Zeilengrenzen (nie mitten im Wort/einer Zahl) - eine
+    Ausnahme-lange Einzelzeile wird als letzter Ausweg hart geschnitten."""
+    if not text:
+        return [""]
+    chunks: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    for line in text.split("\n"):
+        if cur and cur_len + len(line) + 1 > limit:
+            chunks.append("\n".join(cur))
+            cur, cur_len = [], 0
+        if len(line) > limit:
+            for i in range(0, len(line), limit):
+                chunks.append(line[i:i + limit])
+            continue
+        cur.append(line)
+        cur_len += len(line) + 1
+    if cur:
+        chunks.append("\n".join(cur))
+    return chunks or [""]
+
+
 def diagnose_inactivity(entries: list[dict], since_t: float, copier=None) -> str:
     """Erklärt, WARUM keine Orders kommen - die Watchdog-Diagnose."""
     recent = [e for e in entries if e.get("t", 0) >= since_t]
@@ -146,6 +171,7 @@ class Autopilot:
         self._analysis_running = False # Analyse läuft im Hintergrund-Thread -
         self._analysis_started = 0.0   # /status zeigt "läuft seit X min"
         self._analysis_thread: threading.Thread | None = None
+        self._fullreport_thread: threading.Thread | None = None
         self._stale_feed_warned = False  # Sprint scannt Standbilder -> einmal warnen
         self.leaders: list[dict] = []
         # Eigener, breiterer Leader-Pool nur fürs Sprint-Buch (siehe sprint.pool_size).
@@ -186,6 +212,7 @@ class Autopilot:
         return TelegramCommander({
             "/status": self._cmd_status,
             "/report": self._cmd_report,
+            "/fullreport": self._cmd_fullreport,
             "/leaders": self._cmd_leaders,
             "/positions": self._cmd_positions,
             "/anomalies": self._cmd_anomalies,
@@ -220,6 +247,8 @@ class Autopilot:
                 "/setcmm &lt;token&gt; – HyperTracker-API-Token setzen\n"
                 "/cmm – HyperTracker-Leaderboard live proben\n"
                 "/analyze – Leader-Analyse sofort anstoßen\n"
+                "/fullreport [offline] – KOMPLETTER Report zum Copy-Paste (mehrere "
+                "Nachrichten - fürs Weiterleiten, wenn SSH/Konsole klemmt)\n"
                 "/stop /start /resume – Autopilot/Halt steuern")
 
     def _cmd_status(self) -> str:
@@ -284,6 +313,43 @@ class Autopilot:
             for name, st in self.labs.stats(self.copier.last_prices).items():
                 lines.append(f"  {name}: {st['realized_pnl']:+,.2f} ({st['trades']} Tr.)")
         return "\n".join(lines)
+
+    def _cmd_fullreport(self, arg: str = "") -> str:
+        """Kompletter Report (Inhalt von `python report.py`: Vetos mit Signifikanz,
+        alle Scouts, Strategie-Labor, Sprint-Buch, Lighter-Schatten, Shadow-
+        Varianten, Empfehlungen) per Telegram zum Copy-Paste - für den Fall, dass
+        SSH/Konsole gerade nicht erreichbar sind, der Bot aber antwortet. Läuft im
+        Hintergrund (Netz-Preis-Lookups für die Signifikanz-Analyse können dauern),
+        kommt in mehreren Nachrichten (Telegrams 4096-Zeichen-Limit je Nachricht).
+        Arg 'offline' = schnell, ohne die netzbasierte Signifikanz-Analyse."""
+        if not (self.notifier and self.notifier.enabled):
+            return "Voller Report braucht Telegram-Push (Ergebnis wird gesendet)."
+        offline = arg.strip().lower() == "offline"
+
+        def run():
+            try:
+                import report as report_mod
+
+                text = report_mod.build_report(offline=offline)
+            except Exception as e:
+                text = f"⚠️ Voller Report fehlgeschlagen: {str(e)[:300]}"
+            chunks = chunk_for_telegram(text)
+            for i, chunk in enumerate(chunks, 1):
+                header = f"📊 Report {i}/{len(chunks)}\n\n" if len(chunks) > 1 else "📊 Report\n\n"
+                # html=False: der Report-Text ist ungeprüfter Freitext (Adressen,
+                # Prozentzeichen, Klammern) - ohne parse_mode gibt's kein 400-Risiko
+                self.notifier.send(header + chunk, html=False)
+                if i < len(chunks):
+                    time.sleep(0.4)   # Telegram-Rate-Limit-Hygiene zwischen Nachrichten
+
+        # Referenz auf self (statt nur lokal) - Tests können sauber .join(),
+        # ohne den Thread per threading.enumerate() suchen zu müssen (race-anfällig
+        # bei schnell durchlaufenden Mock-Funktionen).
+        self._fullreport_thread = threading.Thread(target=run, daemon=True, name="fullreport")
+        self._fullreport_thread.start()
+        mode = "offline, schnell" if offline else "online mit Signifikanz-Analyse, kann 1-2 Min dauern"
+        return (f"📊 Voller Report wird gebaut ({mode}) … kommt gleich in mehreren "
+                f"Nachrichten zum Copy-Paste.\n<i>/fullreport offline = ohne Netz-Analyse, schneller</i>")
 
     def _cmd_positions(self) -> str:
         """Was steckt der Bot gerade drin? Offene Positionen mit unrealisiertem PnL."""
