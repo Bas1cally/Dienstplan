@@ -46,6 +46,8 @@ _REASON_TXT = {
     "leader_exit": "Leader raus", "leader_flip": "Leader gedreht",
     "leader_scaleout": "Leader hat abgebaut", "leader_rotated": "Leader rotiert",
     "manual": "manuell geschlossen", "risk_off": "RISK_OFF",
+    "mode_switch": "Moduswechsel (Mess-Modus beendet)",
+    "star_preempt": "Star-Signal hat übernommen",
 }
 _STRIKE_EXEMPT = {"manual", "risk_off"}  # nicht die Entscheidung/Schuld des Leaders
 
@@ -110,6 +112,27 @@ class SprintBook:
             if leaders and snapshots:
                 self._refresh_baselines(leaders, snapshots)
             return
+        # Sicherung gegen einen Moduswechsel bei noch offenen Mess-Ritten: ohne
+        # das würde die Einzel-Ritt-Logik unten mehrere gleichzeitige Coins als
+        # "Leader aus der Rotation gefallen" (ride_leader=="") fehldeuten -
+        # ALLE Coins auf einmal zu EINEM falschen Zyklus verbuchen, ohne
+        # Strike/Heilung (leader="" ist falsy), ride_leaders nie geleert
+        # (State-Leak). Jeden Alt-Ritt einzeln über die bestehende Mess-Modus-
+        # Logik sauber abschließen (eigene 1000$-Basis, echte Strikes/Heilung -
+        # der Marktausgang war real, auch wenn WIR den Modus gewechselt haben),
+        # BEVOR die Einzel-Ritt-Logik unten überhaupt greift.
+        if self.ride_leaders:
+            for coin in list(self.ride_leaders):
+                if prices.get(coin):
+                    self._settle_one(coin, prices, "mode_switch")
+            if self.ride_leaders:
+                return  # Rest ohne Preis diesen Tick - nächster Tick erneut
+            # _settle_one resettet das Paper-Buch NIE (im Mess-Modus können
+            # mehrere Ritte gleichzeitig offen sein) - die Einzel-Ritt-Logik
+            # unten braucht aber ein sauberes 1000$-Buch für ihre eigene TP/
+            # Bust-Rechnung, sonst würde der allererste Einzel-Ritt-Tick sofort
+            # (fälschlich) auf Basis der Mess-Modus-Restsalden feuern.
+            self.paper.reset()
         # 1. Ziel/Bust hat Vorrang - Zyklus=Ritt, also sofort abrechnen+resetten
         eq = self.paper.equity(prices)
         if eq >= self.cfg.equity + self.cfg.target_profit:
@@ -528,7 +551,13 @@ class SprintBook:
         leader = self.ride_leader
         pnl = self.paper.equity(prices) - self.cfg.equity
         self.total_trades += self.paper.trades
-        self._book_cycle(leader, pnl, reason)
+        # Coin VOR dem .clear() ziehen - unter Einzel-Ritt hält ein Ritt nie
+        # mehr als einen Coin gleichzeitig (Flip dreht nur die Richtung, nicht
+        # den Coin), also ist das eindeutig "der" Ritt-Coin fürs Journal
+        # (fehlte bisher hier, anders als bei _settle_one im Mess-Modus - ohne
+        # das kann kein Auswertungs-Tool nach Coin/Asset-Klasse aufschlüsseln).
+        coin = next(iter(self._ride_entry_sizes), None)
+        self._book_cycle(leader, pnl, reason, coin=coin)
         self.paper.reset()
         self.ride_leader = ""
         self._ride_start_equity = None
@@ -584,7 +613,7 @@ class SprintBook:
         if self.notifier:
             self.notifier.send(
                 f"{icon} <b>{what} beendet</b> ({reason_txt}): {pnl:+,.2f} $\n"
-                f"Bilanz: {self.won}✅ {self.busted}💥 | banked {self.banked:+,.2f} $"
+                f"Bilanz: {self.won}✅ {self.busted}💥 | Schatztruhe {self.banked:+,.2f} $"
             )
         self._save_state()
 

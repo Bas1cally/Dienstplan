@@ -723,6 +723,86 @@ def test_notifier_journal_and_stats():
         assert any(k == "sprint_exit" for k, _ in recorded)
 
 
+# ---------- coin-Feld im Einzel-Ritt-Zyklusende (QOL-Runde) ----------
+
+def test_single_ride_settle_carries_coin_field():
+    """_settle_ride() ließ das coin-Feld bisher aus (anders als _settle_one im
+    Mess-Modus) - ein Auswertungs-Tool konnte Einzel-Ritt-Zyklen nicht nach
+    Coin/Asset-Klasse aufschlüsseln. Jetzt trägt jedes Journal-Kind (auch
+    sprint_tp/sprint_bust/sprint_cycle_end) den Coin des Ritts."""
+    recorded = []
+
+    class J:
+        def record(self, kind, **d):
+            recorded.append((kind, d))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        b = SprintBook(SprintConfig(exclude_coins=[]), FEE, journal=J(), runtime_dir=Path(tmp))
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # Einstieg BTC
+        b.tick(LED, [snap("0xbest", 50_000)], P)             # Leader raus -> Zyklusende
+    kinds = {k: d for k, d in recorded}
+    assert kinds["sprint_cycle_end"]["coin"] == "BTC", \
+        f"coin fehlt im Einzel-Ritt-Zyklusende: {kinds['sprint_cycle_end']}"
+
+
+# ---------- Mode-Switch-Sicherung: Mess-Modus -> Einzel-Ritt (QOL-Runde) ----------
+
+def test_mode_switch_settles_leftover_parallel_rides_individually():
+    """Schaltet man mitten im Mess-Modus (mehrere offene Ritte) auf Einzel-Ritt
+    um, würde die alte Einzel-Ritt-Logik das als 'Leader aus der Rotation
+    gefallen' fehldeuten und ALLE Coins auf einmal zu einem falschen Zyklus
+    verbuchen, ohne Strike/Heilung. Die Sicherung muss jeden Alt-Ritt EINZELN
+    über die Mess-Modus-Logik sauber abschließen, bevor irgendetwas anderes
+    passiert - korrekte eigene 1000$-Basis, korrekte Strikes, ride_leaders
+    geleert."""
+    with tempfile.TemporaryDirectory() as tmp:
+        # Zwei parallele Ritte simulieren: Mess-Modus an, zwei Leader eröffnen
+        b = SprintBook(SprintConfig(exclude_coins=[], parallel_rides=True), FEE,
+                       runtime_dir=Path(tmp))
+        two = leaders(("0xbest", 90), ("0xsecond", 70))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000, BTC=500),
+                     snap("0xsecond", 50_000, ETH=300)], P)
+        assert set(b.paper.sizes()) == {"BTC", "ETH"}
+        assert b.ride_leaders == {"BTC": "0xbest", "ETH": "0xsecond"}
+
+        # Jetzt der Moduswechsel: parallel_rides aus, nächster Tick im
+        # Einzel-Ritt-Modus muss die zwei Alt-Ritte sauber abwickeln
+        b.cfg.parallel_rides = False
+        b.tick(LED, [snap("0xbest", 50_000)], P)   # beliebiger Einzel-Ritt-Tick
+
+        assert b.paper.sizes() == {}, "beide Alt-Ritte wurden geschlossen"
+        assert b.ride_leaders == {}, "kein State-Leak"
+        assert b.won + b.busted == 2, "JEDER Alt-Ritt als eigener Zyklus verbucht"
+        # Preis unverändert -> beide Ritte enden im (Fee-)Minus -> je 1 Strike
+        assert b.strikes.get("0xbest") == 1
+        assert b.strikes.get("0xsecond") == 1
+        assert abs(b.paper.equity(P) - 1000.0) < 1e-6, \
+            "Konto danach sauber auf 1000 (kein falsch verbuchter Kombi-Zyklus)"
+
+
+def test_mode_switch_defers_coin_without_price_to_next_tick():
+    """Fehlt beim Drain der Preis für einen Alt-Ritt-Coin, wird er NICHT mit
+    einem falschen Preis zwangsverbucht, sondern bleibt bis zum nächsten Tick
+    stehen (kein Datenverlust durch eine kurze Preis-Lücke direkt nach einem
+    Neustart)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = SprintBook(SprintConfig(exclude_coins=[], parallel_rides=True), FEE,
+                       runtime_dir=Path(tmp))
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert "BTC" in b.paper.sizes()
+
+        b.cfg.parallel_rides = False
+        b.tick(LED, [snap("0xbest", 50_000)], {"ETH": 100.0})  # kein BTC-Preis!
+        assert "BTC" in b.paper.sizes(), "ohne Preis nicht zwangsverbucht"
+        assert b.ride_leaders == {"BTC": "0xbest"}, "Alt-Ritt bleibt bis zum nächsten Tick"
+
+        b.tick(LED, [snap("0xbest", 50_000)], P)   # jetzt mit BTC-Preis
+        assert b.paper.sizes() == {} and b.ride_leaders == {}
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

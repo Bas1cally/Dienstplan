@@ -505,7 +505,7 @@ class Autopilot:
         return (f"<b>Sprint-Buch</b> (Zyklus {s['cycle']}): {s['state']}\n"
                 f"{pos_block}\n"
                 f"{equity_line}\n"
-                f"Bilanz: {s['won']}✅ {s['busted']}💥 | banked {s['banked']:+,.2f} $\n"
+                f"Bilanz: {s['won']}✅ {s['busted']}💥 | Schatztruhe {s['banked']:+,.2f} $\n"
                 f"Strikes: {strikes} | 🚫 gesperrt: {banned}\n"
                 f"Leader: {lead} | Pool: {len(self.sprint_leaders)} scanbar | "
                 f"Trades: {s['trades']} (Ø {s['avg_trades_per_cycle']}/Zyklus)\n"
@@ -1325,7 +1325,7 @@ class Autopilot:
         if self.sprint:
             sp = self.sprint.stats(self.copier.last_prices if self.copier else {})
             tracks += (f"\n  sprint: Zyklus {sp['cycle']} {sp['state']} "
-                       f"({sp['cycle_pnl']:+,.2f}$), banked {sp['banked']:+,.2f}$ "
+                       f"({sp['cycle_pnl']:+,.2f}$), Schatztruhe {sp['banked']:+,.2f}$ "
                        f"[{sp['won']}✅/{sp['busted']}💥]")
         if self.lighter and self.copier and self.copier.last_prices:
             li = self.lighter.stats(self.copier.last_prices)
