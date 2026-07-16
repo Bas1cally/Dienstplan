@@ -840,6 +840,61 @@ def test_time_cut_clock_survives_restart():
         assert fresh.paper.sizes() == {}, "Cut greift auch nach Neustart (Startzeit geladen)"
 
 
+def test_ride_entry_sizes_survive_restart_scaleout_still_works():
+    """Deep-Dive-Fund: ohne Persistenz von _ride_entry_sizes ist der Scale-out-
+    Exit nach einem Neustart tot (entry_sz fällt jeden Tick auf die aktuelle
+    Leader-Größe -> Bedingung nie erfüllt). Der Leader kann fast ganz abbauen,
+    ohne dass wir mitgehen."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)   # BTC-Ritt, Leader-Größe 500 -> entry_sz 500
+        assert b._ride_entry_sizes.get("BTC") == 500
+        fresh = book(tmp)   # Neustart
+        assert fresh._ride_entry_sizes.get("BTC") == 500, "Einstiegsgröße überlebt Neustart"
+        # Leader baut >75% ab (500 -> 100): Scale-out muss auch nach Neustart greifen
+        fresh.tick(LED, [snap("0xbest", 50_000, BTC=100)], P)
+        assert fresh.paper.sizes() == {}, "Scale-out-Exit greift auch nach Neustart"
+
+
+def test_bilanz_reset_survives_restart_mid_drain():
+    """Deep-Dive-Fund (HIGH): faellt ein Neustart mitten in den Mode-Switch-Drain
+    (ein Alt-Ritt-Coin bepreist -> gesettlet und parallel_rides=false auf Platte,
+    ein anderer ohne Preis -> Drain in der Karenz), ging der ausstehende Bilanz-
+    Reset verloren: das Gate 'was_parallel and not cfg.parallel_rides' triggert
+    nach dem Neustart nicht mehr (Platte sagt schon false). Alt-Ritt-PnL
+    verseuchte die frische Schatztruhe dauerhaft. Fix: Flag persistieren."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        two = leaders(("0xbest", 80), ("0xsecond", 70))   # 1 Ritt pro Leader
+        px = {"ETH": 100.0, "xyz:TSLA": 100.0}
+        bp = SprintBook(SprintConfig(exclude_coins=[], parallel_rides=True,
+                                     crypto_only=False, confirm_delay_s=0),
+                        FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+        bp.tick(two, [snap("0xbest", 50_000), snap("0xsecond", 50_000)], px)
+        bp.tick(two, [snap("0xbest", 50_000, ETH=300),
+                      snap("0xsecond", 50_000, **{"xyz:TSLA": 300})], px)
+        bp.won, bp.banked = 5, 500.0   # Mess-Woche-Bilanz, darf nicht ueberleben
+        bp._save_state()
+        assert set(bp.ride_leaders) == {"ETH", "xyz:TSLA"}
+
+        cfg_single = dict(exclude_coins=[], parallel_rides=False, confirm_delay_s=0)
+        flat = [snap("0xbest", 50_000), snap("0xsecond", 50_000)]
+        b1 = SprintBook(SprintConfig(**cfg_single), FEE,
+                        runtime_dir=Path(tmp), clock=lambda: t["now"])
+        assert b1._bilanz_reset_pending is True
+        # ETH bepreist (gesettlet, schreibt parallel_rides=false), TSLA ohne Preis
+        b1.tick(two, flat, {"ETH": 100.0})
+        assert "xyz:TSLA" in b1.ride_leaders and b1._bilanz_reset_pending is True
+
+        # Neustart MITTEN im Drain
+        b2 = SprintBook(SprintConfig(**cfg_single), FEE,
+                        runtime_dir=Path(tmp), clock=lambda: t["now"])
+        assert b2._bilanz_reset_pending is True, "Flag hat den Neustart ueberlebt (der Fix)"
+        b2.tick(two, flat, {"ETH": 100.0, "xyz:TSLA": 100.0})   # TSLA bepreist -> Drain fertig
+        assert b2.ride_leaders == {}
+        assert b2.won == 0 and b2.banked == 0.0, \
+            "Bilanz-Reset angewendet - keine Alt-Ritt-PnL-Verseuchung"
+
+
 def test_restart_keeps_ride_and_rebaselines():
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)

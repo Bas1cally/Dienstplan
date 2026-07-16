@@ -1127,6 +1127,20 @@ class SprintBook:
             # Zeit+negativ-Uhr zurücksetzen und ein Dauer-Bluter nie gecuttet.
             rst = raw.get("ride_start_t")
             self._ride_start_t = float(rst) if rst is not None else None
+            # Ritt-Einstiegsgrößen über Neustarts halten (Deep-Dive-Fund): ohne
+            # das ist _ride_entry_sizes nach einem Deploy leer, und der Scale-out-
+            # Exit (Leader baut >=partial_exit_frac ab) wird für den geerbten Ritt
+            # deaktiviert (entry_sz fällt jeden Tick auf die AKTUELLE Leader-Größe
+            # zurück -> Bedingung nie erfüllt), der Ritt blutet ggf. weiter.
+            self._ride_entry_sizes = {str(c): float(s) for c, s in
+                                      (raw.get("ride_entry_sizes") or {}).items()}
+            # Ausstehender Bilanz-Reset über Neustarts halten (Deep-Dive-Fund):
+            # ohne das geht der Reset verloren, wenn ein Neustart mitten in den
+            # Mode-Switch-Drain fällt (der Drain hat parallel_rides=false schon
+            # auf Platte geschrieben, aber das Flag lag nur im RAM -> das Gate
+            # unten triggert nach dem Neustart nicht mehr, die Alt-Ritt-PnL
+            # verseucht die frische Schatztruhe dauerhaft).
+            self._bilanz_reset_pending = bool(raw.get("bilanz_reset_pending", False))
             self.strikes = {str(k): int(v) for k, v in (raw.get("strikes") or {}).items()}
             self.banned = {str(a).lower() for a in (raw.get("banned") or [])}
             self.confidence = {str(k): int(v) for k, v in
@@ -1146,15 +1160,14 @@ class SprintBook:
             was_v1 = "ride_leader" not in raw
             was_parallel = bool(raw.get("parallel_rides", True))
             if not was_v1 and was_parallel and not self.cfg.parallel_rides:
-                if self.ride_leaders:
-                    # Noch offene Alt-Mess-Ritte: der Reset muss WARTEN, bis
-                    # tick() sie über die Mode-Switch-Sicherung sauber
-                    # abgerechnet hat - sonst zählt deren Forced-Close als
-                    # allererster Eintrag der eigentlich frischen Bilanz
-                    # (genau der Bug, den ein Nutzer live beobachtet hat).
-                    self._bilanz_reset_pending = True
-                else:
-                    self.reset_bilanz()
+                # Erstmaliger Umstieg (State-Datei noch mit parallel_rides=True).
+                self._bilanz_reset_pending = True
+            # Ausstehender Reset (frisch erkannt ODER aus dem State geladen): ist
+            # nichts (mehr) zu drainen, JETZT anwenden; sonst wartet tick() bis
+            # der Drain durch ist. Deckt auch den Neustart-mitten-im-Drain-Fall ab
+            # (parallel_rides schon false auf Platte, aber Flag persistiert True).
+            if self._bilanz_reset_pending and not self.ride_leaders:
+                self.reset_bilanz()
         # v1-Migration: altes Buch hat mit Dauer-Reconciliation gechurnt (139 Trades)
         # -> Buch einmalig sauber neu starten, Bilanz (banked/won/busted) behalten.
         v1_state = raw is not None and "ride_leader" not in raw
@@ -1185,6 +1198,8 @@ class SprintBook:
                 "won": self.won, "busted": self.busted,
                 "total_trades": self.total_trades, "ride_leader": self.ride_leader,
                 "ride_leaders": self.ride_leaders, "ride_start_t": self._ride_start_t,
+                "ride_entry_sizes": self._ride_entry_sizes,
+                "bilanz_reset_pending": self._bilanz_reset_pending,
                 "strikes": self.strikes, "banned": sorted(self.banned),
                 "confidence": self.confidence,
                 "parallel_rides": self.cfg.parallel_rides,
