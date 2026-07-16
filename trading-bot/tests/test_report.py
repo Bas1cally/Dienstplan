@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from bot.autopilot import chunk_for_telegram, diagnose_inactivity
+from bot.autopilot import chunk_for_telegram
 from bot.report import recommendations, summarize, veto_outcomes
 
 
@@ -360,34 +360,36 @@ def test_chunk_never_emits_a_spurious_empty_chunk():
     assert chunks == ["x" * 3800]
 
 
-# ---------- Watchdog-Diagnose ----------
+# ---------- Quest-Watchdog-Diagnose ----------
 
-class FakeCopier:
-    def __init__(self, positions=0, halted=False):
-        self.halted = halted
-        snap = type("S", (), {"positions": dict.fromkeys(range(positions))})()
-        self.last_snapshots = [snap] if positions else []
+def test_quest_idle_diagnosis_dead_pool():
+    """Quest-Ära: der Watchdog warnt bei ausbleibenden Quest-Einstiegen und
+    diagnostiziert den häufigsten Grund - einen toten/schlafenden Pool (keine
+    Wallet hält gerade eine Position)."""
+    import time as _t
 
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+    from bot.sprint import SprintBook
 
-def test_diagnose_vetoes_dominant():
-    entries = [veto(100, reasons=["VETO: RSI 85 überkauft"]), veto(200, reasons=["VETO: RSI 80 überkauft"])]
-    text = diagnose_inactivity(entries, since_t=0, copier=FakeCopier(positions=3))
-    assert "2 Vetos" in text and "RSI" in text
+    ap = Autopilot(load_config())
+    with tempfile.TemporaryDirectory() as tmp:
+        ap.sprint = SprintBook(ap.cfg.sprint, ap.cfg.backtest.fee_rate, runtime_dir=Path(tmp))
 
+        class Snap:
+            def __init__(self, addr, pos):
+                self.address = addr
+                self.positions = pos
 
-def test_diagnose_flat_leaders():
-    text = diagnose_inactivity([], since_t=0, copier=FakeCopier(positions=0))
-    assert "keine Positionen" in text
-
-
-def test_diagnose_book_on_target():
-    text = diagnose_inactivity([], since_t=0, copier=FakeCopier(positions=4))
-    assert "kein Fehler" in text
-
-
-def test_diagnose_halted_flagged():
-    text = diagnose_inactivity([], since_t=0, copier=FakeCopier(positions=0, halted=True))
-    assert "HALTED" in text
+        class C:
+            last_prices = {}
+            last_snapshots = [Snap("0xa", {}), Snap("0xb", {})]   # beide flach
+            last_snapshots_t = _t.time()
+        ap.copier = C()
+        ap.sprint_leaders = [{"address": "0xa"}, {"address": "0xb"}]
+        text = ap._diagnose_quest_idle()
+    assert "KEINE" in text and "Pool-Wallets" in text
+    assert "Order" not in text and "Veto" not in text, "kein Kopier-Buch-Relikt mehr"
 
 
 if __name__ == "__main__":

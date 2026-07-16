@@ -96,34 +96,6 @@ def chunk_for_telegram(text: str, limit: int = 3800) -> list[str]:
     return chunks or [""]
 
 
-def diagnose_inactivity(entries: list[dict], since_t: float, copier=None) -> str:
-    """Erklärt, WARUM keine Orders kommen - die Watchdog-Diagnose."""
-    recent = [e for e in entries if e.get("t", 0) >= since_t]
-    vetoes = [e for e in recent if e.get("kind") == "veto"]
-    parts = []
-    if vetoes:
-        from collections import Counter
-
-        reasons = Counter()
-        for v in vetoes:
-            joined = " ".join(v.get("reasons", []))
-            key = "RSI" if "RSI" in joined else "Trend" if "Trend" in joined else \
-                "Claude" if "Claude" in joined else "Daten" if "wenig" in joined or "verfügbar" in joined else "sonstige"
-            reasons[key] += 1
-        parts.append(f"{len(vetoes)} Vetos ({', '.join(f'{k}: {n}' for k, n in reasons.most_common(3))}) "
-                     "-> Validator blockt; report.py zeigt, ob zu Recht")
-    leader_positions = 0
-    if copier and copier.last_snapshots:
-        leader_positions = sum(len(s.positions) for s in copier.last_snapshots)
-    if not vetoes and leader_positions == 0:
-        parts.append("Leader halten keine Positionen -> es gibt nichts zu kopieren; "
-                     "Rotation abwarten oder analysis.top_percent erhöhen")
-    elif not vetoes and leader_positions > 0:
-        parts.append(f"Leader halten {leader_positions} Positionen, aber Buch ist im Ziel "
-                     "(keine Abweichung über rebalance_threshold) - kein Fehler")
-    if copier and copier.halted:
-        parts.append("ACHTUNG: Bot ist HALTED (Circuit Breaker/Max-DD) - Neustart nötig")
-    return " | ".join(parts) if parts else "keine eindeutige Ursache - Logs prüfen"
 
 
 def rotate_leaders(
@@ -1512,22 +1484,59 @@ class Autopilot:
             self.notifier.send("✅ Quest-Feed wieder frisch (Snapshots aktuell).")
 
     def _maybe_watchdog(self) -> None:
-        """Meldet sich von selbst, wenn der Bot auffällig lange nichts handelt."""
+        """Meldet sich, wenn der QUEST-Bot auffällig lange keinen Ritt eröffnet
+        hat. Quest-Ära: das Kopier-Buch tradet feed-only nicht mehr, 'keine
+        Order' wäre immer wahr - der ehrliche Inaktivitäts-Alarm ist jetzt
+        'kein Quest-Einstieg', und der deutet meist auf einen toten/schlafenden
+        Pool (genau der Fall, den es zu fangen gilt)."""
         hours = self.cfg.autopilot.watchdog_hours
-        if hours <= 0:
+        if hours <= 0 or not self.sprint:
             return
         entries = self.journal.tail(500)
-        last_order = next((e["t"] for e in entries if e["kind"] in ("order", "scalp_open")), None)
-        ref = last_order or self._start_time
-        if last_order and self._watchdog_warned:
-            if time.time() - last_order < hours * 3600:
+        last_entry = next((e["t"] for e in entries if e.get("kind") == "sprint_entry"), None)
+        ref = last_entry or self._start_time
+        if last_entry and self._watchdog_warned:
+            if time.time() - last_entry < hours * 3600:
                 self._watchdog_warned = False  # wieder aktiv -> Alarm scharf stellen
         if time.time() - ref < hours * 3600 or self._watchdog_warned:
             return
         self._watchdog_warned = True
-        diagnosis = diagnose_inactivity(entries, since_t=ref, copier=self.copier)
-        log.warning("Watchdog: keine Order seit %.0fh - %s", hours, diagnosis)
-        self.notifier.send(f"⏰ <b>Watchdog</b>: keine Order seit {hours:.0f}h.\n{diagnosis}")
+        diagnosis = self._diagnose_quest_idle()
+        log.warning("Watchdog: kein Quest-Einstieg seit %.0fh - %s", hours, diagnosis)
+        self.notifier.send(f"⏰ <b>Watchdog</b>: kein Quest-Einstieg seit {hours:.0f}h.\n{diagnosis}")
+
+    def _diagnose_quest_idle(self) -> str:
+        """Warum eröffnet der Quest-Bot nichts? Toter/schlafender Pool, Signale
+        die verworfen werden, gesperrte Leader oder eingefrorener Feed."""
+        parts: list[str] = []
+        snaps = getattr(self.copier, "last_snapshots", []) if self.copier else []
+        holds = {s.address.lower(): bool(s.positions) for s in snaps}
+        n = len(self.sprint_leaders)
+        n_hold = sum(1 for l in self.sprint_leaders
+                     if holds.get(str(l.get("address", "")).lower()))
+        if n and n_hold == 0:
+            parts.append(f"KEINE der {n} Pool-Wallets hält gerade eine Position - "
+                         "toter/schlafender Pool, /analyze holt frische Kandidaten")
+        elif n:
+            parts.append(f"{n_hold}/{n} Pool-Wallets halten Positionen")
+        st = self.sprint.stats(self.copier.last_prices if self.copier else {})
+        sc = st.get("scan", {})
+        seen = sc.get("fresh_seen", 0)
+        rej = sc.get("rejected", {})
+        if seen == 0:
+            parts.append("0 frische Signale seit Start - der Pool eröffnet nichts "
+                         "(/quest pool zeigt, wer flach ist)")
+        elif rej:
+            top = ", ".join(f"{k} ×{v}" for k, v in
+                            sorted(rej.items(), key=lambda t: -t[1])[:2])
+            parts.append(f"{seen} Signale gesehen, aber verworfen: {top}")
+        if st.get("banned"):
+            parts.append(f"{len(st['banned'])} Leader gesperrt")
+        if self.copier and self.copier.last_snapshots_t:
+            age = time.time() - self.copier.last_snapshots_t
+            if age > 300:
+                parts.append(f"⚠️ Feed {age / 60:.0f} min alt - Snapshots eingefroren (/resume?)")
+        return " | ".join(parts) if parts else "keine eindeutige Ursache - /quest prüfen"
 
     # ---------- Equity-Historie & Leader-Performance ----------
 
