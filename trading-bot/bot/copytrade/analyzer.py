@@ -43,6 +43,13 @@ class TraderMetrics:
     # Aktivität
     coins: list[str] = field(default_factory=list)
     trades_per_day: float = 0.0
+    # Aktualität: Zeitpunkt des JÜNGSTEN Fills (ms) und daraus abgeleitet, wie
+    # viele Tage die Wallet schon NICHT mehr getradet hat. Gegen "historisch
+    # gut, jetzt Schläfer": ein Trader, der in Woche 1 des Fensters aktiv war
+    # und seither still, besteht sonst das Gate über Alt-Aktivität und blockiert
+    # als toter Slot den Pool (Nutzer-Befund: 20 flache Schläfer-Wallets).
+    last_fill_ms: int = 0
+    days_since_last_trade: float = 999.0
     # LARP-relevante Tiefenmetriken (aus rekonstruierten Round-Trips)
     round_trips: int = 0
     median_holding_minutes: float = 0.0
@@ -159,6 +166,7 @@ def analyze_fills(address: str, fills: list[dict], account_value: float, days: i
     m.net_pnl = m.realized_pnl - m.fees
     m.roi = m.net_pnl / account_value
     m.coins = sorted(coins)
+    m.last_fill_ms = int(fills[-1]["time"])   # fills sind zeitlich sortiert
     m.active_days = len(daily_pnl)
     m.trades_per_day = len(fills) / max(days, 1)
     if m.closed_trades:
@@ -317,6 +325,11 @@ class TraderAnalyzer:
         m.open_positions = n_open
         m.open_unrealized = unrealized
         m.open_green_share = green_val / total_val if total_val > 0 else 0.0
+        # Aktualität relativ zu JETZT: Tage seit dem jüngsten Fill (für den
+        # Schläfer-Filter im Pool-Aufbau). Kein Fill im Fenster -> bleibt beim
+        # Default 999 (= uralt), wird also als Schläfer behandelt.
+        if m.last_fill_ms:
+            m.days_since_last_trade = (end - m.last_fill_ms) / 86_400_000
         m.sprint_score = _sprint_score(m)   # mit Positions-Pfad neu bewerten
         return m
 

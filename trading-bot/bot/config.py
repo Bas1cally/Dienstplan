@@ -413,6 +413,15 @@ class SprintConfig:
     # solange der Ritt im Plus ist (dann läuft er weiter Richtung Ziel). Sicherer
     # Default 0 (aus) - config.yaml schaltet den Produktivwert scharf.
     max_ride_hours: float = 0.0
+    # Schläfer-Filter beim POOL-AUFBAU (Nutzer-Befund: 20 flache Schläfer-Wallets,
+    # kein Signal - "das ist doch sus"): eine Wallet kommt nur in den Pool, wenn
+    # sie in den letzten max_idle_days getradet hat ODER gerade eine Position
+    # hält. "Historisch gut, jetzt seit Wochen still" (das Gate zählt sonst
+    # Alt-Aktivität über das ganze 21-Tage-Fenster) fliegt raus, bevor sie einen
+    # Slot als toter Scan-Punkt belegt. Ergänzt die Laufzeit-Idle-Rotation
+    # (rotate_idle_hours), die WÄHREND der Pool-Zugehörigkeit stumm gewordene
+    # rausrotiert - dieser Filter verhindert das Reinkommen von Anfang an. 0 = aus.
+    max_idle_days: float = 3.0
     # Idle-Rotation (Nutzer: "scannen scannen Daten"): eine Wallet, die seit dem
     # Pool-Eintritt länger als rotate_idle_hours KEIN einziges frisches Signal
     # gab, ist totes Gewicht - sie belegt einen Scan-Slot, ohne Daten zu liefern

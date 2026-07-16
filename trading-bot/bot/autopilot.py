@@ -473,9 +473,17 @@ class Autopilot:
         if arg.lower().strip() == "pool":
             if not self.sprint_leaders:
                 return "Quest-Pool ist leer (nächste Analyse: /analyze)."
-            lines = ["<b>Quest-Pool</b> (Richtungs-Score, bester zuerst)"]
             banned = self.sprint.banned
             idle = self.sprint.idle_addrs(self.cfg.sprint.rotate_idle_hours * 3600)
+            # Halten die Pool-Wallets gerade überhaupt Positionen? (aus den
+            # Live-Snapshots) - macht den Schläfer-Verdacht direkt sichtbar:
+            # 2/20 mit Position = fast alles Schläfer.
+            snaps = getattr(self.copier, "last_snapshots", []) if self.copier else []
+            holds = {s.address.lower(): bool(s.positions) for s in snaps}
+            n_hold = sum(1 for l in self.sprint_leaders
+                         if holds.get(str(l.get("address", "")).lower()))
+            lines = [f"<b>Quest-Pool</b> ({n_hold}/{len(self.sprint_leaders)} halten "
+                     f"gerade Positionen)"]
             for l in self.sprint_leaders:
                 a = str(l.get("address", ""))
                 if a.lower() in banned:
@@ -486,10 +494,10 @@ class Autopilot:
                     mark = " 💤"   # stumm, rotiert beim nächsten Rebuild nach hinten
                 else:
                     mark = ""
-                lines.append(f"<code>{a[:12]}…</code> Score {l.get('score', '?')}{mark}")
-            if idle:
-                lines.append(f"<i>💤 = seit >{self.cfg.sprint.rotate_idle_hours:.0f}h stumm, "
-                             f"rotiert beim nächsten Pool-Rebuild nach hinten</i>")
+                pos = "📈" if holds.get(a.lower()) else "· "   # hält gerade / flach
+                lines.append(f"{pos}<code>{a[:12]}…</code> Score {l.get('score', '?')}{mark}")
+            lines.append("<i>📈 = hält gerade eine Position | · = flach</i>"
+                         + (f" | 💤 = >{self.cfg.sprint.rotate_idle_hours:.0f}h stumm" if idle else ""))
             return "\n".join(lines)
         if arg.lower().strip() == "assets":
             return self._sprint_asset_breakdown()
@@ -1083,6 +1091,14 @@ class Autopilot:
         Sprint aus ist oder das Buch noch nicht existiert."""
         return self.sprint.banned if self.sprint else set()
 
+    def _is_sleeper(self, m) -> bool:
+        """Schläfer-Wallet fürs Quest-Gate: hält KEINE offene Position UND hat
+        seit >max_idle_days nicht getradet. Historisch-gut-aber-jetzt-still -
+        ein toter Scan-Slot, der keine Signale liefert (Nutzer-Befund)."""
+        max_idle = self.cfg.sprint.max_idle_days
+        return (max_idle > 0 and getattr(m, "open_positions", 0) == 0
+                and getattr(m, "days_since_last_trade", 999.0) > max_idle)
+
     def _build_sprint_pool(self, sprint_ok) -> list[dict]:
         """Top-pool_size nach RICHTUNGS-Score (sprint_score) aus den Sprint-
         tauglichen Wallets; Haupt-Leader immer enthalten (sie sind bewiesen gut
@@ -1278,14 +1294,21 @@ class Autopilot:
         # Wallets (auch Haupt-LARP-K.O.s wie Swing-Trader oder Lucky-Puncher) -
         # Sprint zählt Richtungs-Treffer, nicht Profit-Größe (Nutzer-Vorgabe).
         sprint_ok = []
-        sprint_gate_ko = sprint_score_ko = 0
+        sprint_gate_ko = sprint_score_ko = sprint_idle_ko = 0
         if self.cfg.sprint.enabled:
             from .copytrade.larp import check_sprint
 
             larp_cfg = LarpConfig(**(an.larp or {}))
             pool_min = self.cfg.sprint.pool_min_score
             for m in report.get("metrics", []):
-                if not check_sprint(m, larp_cfg).passed:
+                # Schläfer-Filter zuerst (Nutzer: 'die keine positions sleeper
+                # sind und kein Signal ist doch sus'): wer weder eine offene
+                # Position hält NOCH in den letzten max_idle_days getradet hat,
+                # ist ein toter Slot - egal wie gut die Alt-Historie. Raus, bevor
+                # er den Pool blockiert.
+                if self._is_sleeper(m):
+                    sprint_idle_ko += 1
+                elif not check_sprint(m, larp_cfg).passed:
                     sprint_gate_ko += 1
                 elif m.sprint_score < pool_min:
                     sprint_score_ko += 1
@@ -1302,7 +1325,8 @@ class Autopilot:
             f"{len(addresses)} Kandidaten ({src_note}) → {len(main_ranked)} Haupt"
             f"(≥{an.min_score:g}) / {len(sprint_ok)} Sprint-tauglich "
             f"(Gate-K.O. {sprint_gate_ko}, Richtung unter "
-            f"{self.cfg.sprint.pool_min_score:g}: {sprint_score_ko})\n"
+            f"{self.cfg.sprint.pool_min_score:g}: {sprint_score_ko}, "
+            f"Schläfer: {sprint_idle_ko})\n"
             f"Aussortiert: {report.get('truncated', 0)} zu aktiv, "
             f"{report.get('larp_ko', 0)} LARP ({larp_top}), "
             f"{report.get('errors', 0)} Fehler | Top-Scores: {top_scores}")

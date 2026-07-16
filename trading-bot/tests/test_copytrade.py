@@ -44,6 +44,8 @@ def test_analyzer_basic_metrics():
     assert abs(m.profit_factor - 3.0) < 1e-9
     assert m.profitable_day_share == 1.0       # jeder Tag netto positiv
     assert m.score > 50, f"Konsistenter Trader muss hoch scoren, war {m.score}"
+    # Aktualität: jüngster Fill = letzter Tag + 1000ms (Schläfer-Filter-Basis)
+    assert m.last_fill_ms == 9 * DAY + 1000
 
 
 def test_analyzer_lucky_punch_scores_low():

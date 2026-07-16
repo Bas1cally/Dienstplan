@@ -67,6 +67,27 @@ def _autopilot():
     return Autopilot(load_config())
 
 
+def test_is_sleeper_flat_and_stale_is_excluded():
+    """Nutzer-Kernbefund: 20 flache Schläfer-Wallets, kein Signal = sus. Eine
+    Wallet ohne offene Position UND seit >max_idle_days ohne Trade ist ein
+    toter Slot und wird vor dem Pool aussortiert - egal wie gut die Alt-
+    Historie."""
+    ap = _autopilot()
+    ap.cfg.sprint.max_idle_days = 3
+
+    def m(open_pos, idle_days):
+        x = TraderMetrics(address="0xa", account_value=50_000, days=21)
+        x.open_positions = open_pos
+        x.days_since_last_trade = idle_days
+        return x
+
+    assert ap._is_sleeper(m(0, 10)) is True, "flach + 10 Tage still = Schläfer"
+    assert ap._is_sleeper(m(0, 1)) is False, "flach aber gestern getradet = wach"
+    assert ap._is_sleeper(m(2, 30)) is False, "hält Positionen = wach (auch bei alten Fills)"
+    ap.cfg.sprint.max_idle_days = 0
+    assert ap._is_sleeper(m(0, 999)) is False, "Filter aus -> nie Schläfer"
+
+
 def test_sprint_pool_wider_than_main_and_sorted_by_direction_score():
     """Sprint bekommt einen breiteren Pool (pool_size) als das Hauptbuch,
     sortiert nach RICHTUNGS-Score (sprint_score, nicht Haupt-Score) - das
