@@ -405,6 +405,14 @@ class SprintConfig:
     # LARP-Strikes: Verlust-Ritt -> Strike +1, Gewinn-Ritt -> Strike -1 (min 0).
     # Bei strike_ban Strikes wird der Leader fürs Sprint-Buch gesperrt.
     strike_ban: int = 2
+    # Zeit+negativ-Cut (Nutzer-Beobachtung: eine Position hing 4h im Minus und
+    # blockierte den einzigen Ritt-Slot, bis der Leader rotierte - -230$). Ist
+    # ein Ritt länger als max_ride_hours offen UND aktuell im Minus, wird er
+    # gecuttet (Slot frei, Verlust begrenzt, Leader kriegt seinen Strike). Cuttet
+    # NICHT bei schnellem Rauschen (nur der langsame Dauer-Bluter), und NICHT
+    # solange der Ritt im Plus ist (dann läuft er weiter Richtung Ziel). Sicherer
+    # Default 0 (aus) - config.yaml schaltet den Produktivwert scharf.
+    max_ride_hours: float = 0.0
     # Idle-Rotation (Nutzer: "scannen scannen Daten"): eine Wallet, die seit dem
     # Pool-Eintritt länger als rotate_idle_hours KEIN einziges frisches Signal
     # gab, ist totes Gewicht - sie belegt einen Scan-Slot, ohne Daten zu liefern

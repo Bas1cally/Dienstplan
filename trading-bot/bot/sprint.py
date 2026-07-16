@@ -48,6 +48,7 @@ _REASON_TXT = {
     "manual": "manuell geschlossen", "risk_off": "RISK_OFF",
     "mode_switch": "Moduswechsel (Mess-Modus beendet)",
     "star_preempt": "Star-Signal hat übernommen",
+    "zeit_negativ": "zu lange im Minus (Zeit-Cut)",
 }
 _STRIKE_EXEMPT = {"manual", "risk_off"}  # nicht die Entscheidung/Schuld des Leaders
 
@@ -120,6 +121,7 @@ class SprintBook:
         # nicht mehr, dann war er ohnehin kein anhaltendes Signal).
         self._pending: dict[str, dict] = {}
         self._ride_start_equity: float | None = None  # Equity bei Ritt-Beginn (PnL-Attribution)
+        self._ride_start_t: float | None = None        # Ritt-Beginn (für Zeit+negativ-Cut)
         self._ride_entry_sizes: dict[str, float] = {}  # coin -> |Leader-Größe| beim Einstieg
         # Baseline je Leader (addr -> coin -> signierte Größe): nur Übergänge
         # 0 -> Position NACH der Baseline sind frische Signale. Läuft für ALLE
@@ -199,6 +201,21 @@ class SprintBook:
             return
         if eq <= self.cfg.equity * self.cfg.bust_frac:
             self._settle_ride(prices, "bust")
+            return
+        # 1b. Zeit+negativ-Cut (Nutzer): ein Ritt, der länger als max_ride_hours
+        # offen UND aktuell im Minus ist, blockiert nur den einzigen Slot und
+        # blutet (Live: 4h im Minus, dann -230$ beim Leader-Exit). Freigeben -
+        # Verlust begrenzt, Leader kriegt seinen Strike (kein Exempt). Im Plus
+        # NICHT cutten (dann läuft der Ritt weiter Richtung Ziel).
+        if (self.cfg.max_ride_hours > 0 and self.paper.sizes()
+                and self._ride_start_t is not None
+                and eq < self.cfg.equity
+                and self.clock() - self._ride_start_t > self.cfg.max_ride_hours * 3600):
+            log.warning("Sprint: Ritt >%.1fh im Minus (Equity %.2f) - Zeit-Cut, Slot frei",
+                        self.cfg.max_ride_hours, eq)
+            for coin in list(self.paper.sizes()):
+                self._close_coin(coin, prices, "zeit_negativ")
+            self._settle_ride(prices, "zeit_negativ")
             return
         # 2. Markt-Schutz: glattstellen, Ritt (=Zyklus) endet sofort, nicht weiter warten
         if risk_off:
@@ -649,14 +666,16 @@ class SprintBook:
 
     def idle_addrs(self, max_idle_s: float) -> set[str]:
         """Pool-Leader, die seit max_idle_s KEIN frisches Signal gaben (Idle-
-        Rotation). Stars sind ausgenommen - ein bewiesener Verdiener wird nicht
-        wegen einer stillen Phase rausrotiert (das Confidence-System soll ihn
-        gerade halten)."""
+        Rotation). Ausgenommen: Stars (bewiesene Verdiener - das Confidence-
+        System soll sie halten) UND der aktuelle Ride-Leader (den wir GERADE
+        reiten - er hält eine Position, gibt aber definitionsgemäß kein frisches
+        Signal; ihn rauszurotieren würde den laufenden Ritt blind schließen)."""
         if max_idle_s <= 0:
             return set()
         now = self.clock()
+        riding = self.ride_leader.lower()
         return {a for a, t in self._last_active.items()
-                if now - t > max_idle_s and not self.is_star(a)}
+                if now - t > max_idle_s and a != riding and not self.is_star(a)}
 
     def _persist_baselines(self, changed: bool) -> None:
         """Baselines auf Platte, damit ein Neustart kein Blindfenster reißt
@@ -763,6 +782,7 @@ class SprintBook:
         self._last_entry_t = self.clock()
         if not parallel and self._ride_start_equity is None:
             self._ride_start_equity = self.paper.equity(prices)  # PnL-Basis des Ritts
+            self._ride_start_t = self.clock()  # Ritt-Beginn (für den Zeit+negativ-Cut)
         self.paper.execute(coin, notional / price, price)
         if parallel:
             self.ride_leaders[coin] = snap.address
@@ -839,6 +859,7 @@ class SprintBook:
         self.paper.reset()
         self.ride_leader = ""
         self._ride_start_equity = None
+        self._ride_start_t = None
         self._ride_entry_sizes.clear()
         self._save_state()
 
@@ -1022,6 +1043,10 @@ class SprintBook:
             self.ride_leader = str(raw.get("ride_leader", ""))
             self.ride_leaders = {str(c): str(a) for c, a in
                                  (raw.get("ride_leaders") or {}).items()}
+            # Ritt-Startzeit über Neustarts halten, sonst würde ein Deploy die
+            # Zeit+negativ-Uhr zurücksetzen und ein Dauer-Bluter nie gecuttet.
+            rst = raw.get("ride_start_t")
+            self._ride_start_t = float(rst) if rst is not None else None
             self.strikes = {str(k): int(v) for k, v in (raw.get("strikes") or {}).items()}
             self.banned = {str(a).lower() for a in (raw.get("banned") or [])}
             self.confidence = {str(k): int(v) for k, v in
@@ -1079,7 +1104,7 @@ class SprintBook:
                 "updated": int(self.clock()), "banked": round(self.banked, 2),
                 "won": self.won, "busted": self.busted,
                 "total_trades": self.total_trades, "ride_leader": self.ride_leader,
-                "ride_leaders": self.ride_leaders,
+                "ride_leaders": self.ride_leaders, "ride_start_t": self._ride_start_t,
                 "strikes": self.strikes, "banned": sorted(self.banned),
                 "confidence": self.confidence,
                 "parallel_rides": self.cfg.parallel_rides,

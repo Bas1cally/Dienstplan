@@ -212,6 +212,10 @@ sprint:
                             # Signale bei 8/8 Feed-Abdeckung), ihr Überzeugungs-
                             # Moment ist das AUFSTOCKEN. 0 = aus (nur 0->Position).
   strike_ban: 2             # 2 Verlust-Ritte -> Leader fürs Sprint-Buch gesperrt
+  max_ride_hours: 2         # QUEST (Nutzer): ein Ritt, der >2h offen UND im Minus
+                            # ist, wird gecuttet - er blockiert nur den einzigen
+                            # Slot und blutet (Live: 4h im Minus, dann -230$ beim
+                            # Leader-Exit). Im Plus wird NICHT gecuttet. 0 = aus.
   rotate_idle_hours: 6      # QUEST: eine Wallet, die seit Pool-Eintritt >6h KEIN
                             # frisches Signal gab, wird beim nächsten Rebuild nach
                             # hinten rotiert - frische Kandidaten bekommen Vorrang

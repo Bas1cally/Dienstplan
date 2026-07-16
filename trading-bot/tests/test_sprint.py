@@ -690,6 +690,93 @@ def test_last_active_survives_restart():
         assert "0xbest" in fresh.idle_addrs(3600), "Idle-Stand überlebt Neustart"
 
 
+def test_ride_leader_never_idle_rotated():
+    """Latenter Bug-Schutz: der Leader, den wir GERADE reiten, hält eine
+    Position, gibt aber definitionsgemäß kein frisches Signal - er darf NICHT
+    als idle rausrotiert werden (sonst blinder Close des laufenden Ritts)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _idle_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # jetzt reiten wir 0xbest
+        assert b.ride_leader == "0xbest"
+        t["now"] += 100_000   # lange kein NEUES Signal (er hält ja)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert "0xbest" not in b.idle_addrs(3600), "Ride-Leader ist idle-immun"
+
+
+# ---------- Zeit+negativ-Cut: blutenden Ritt früh schließen (Quest) ----------
+
+def _timecut_book(tmp, t, hours=2.0):
+    cfg = SprintConfig(exclude_coins=[], confirm_delay_s=0, max_ride_hours=hours)
+    return SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+
+
+def _enter_timecut(tmp, t, hours=2.0):
+    b = _timecut_book(tmp, t, hours)
+    b.tick(LED, [snap("0xbest", 50_000)], P)
+    b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # BTC long @100
+    assert "BTC" in b.paper.sizes()
+    return b
+
+
+def test_time_cut_closes_long_running_negative_ride():
+    """Nutzer: 4h im Minus, dann -230$ beim Leader-Exit. Ein Ritt, der >2h
+    offen UND im Minus ist, wird jetzt gecuttet - Slot frei, Leader kriegt
+    seinen Strike."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _enter_timecut(tmp, t, hours=2.0)
+        t["now"] += 2 * 3600 + 1   # >2h später
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.0, "ETH": 100.0})  # im Minus
+        assert b.paper.sizes() == {}, "Zeit-Cut hat den blutenden Ritt geschlossen"
+        assert b.busted == 1 and b.won == 0
+        assert b.strikes.get("0xbest") == 1, "Verlust-Cut -> Strike für den Leader"
+
+
+def test_time_cut_does_not_fire_while_positive():
+    """Im Plus wird NICHT gecuttet - der Ritt läuft weiter Richtung Ziel,
+    auch wenn er schon lange offen ist."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _enter_timecut(tmp, t, hours=2.0)
+        t["now"] += 5 * 3600   # 5h offen, aber ...
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 100.5, "ETH": 100.0})  # ... im Plus
+        assert "BTC" in b.paper.sizes(), "positiver Ritt läuft trotz langer Dauer weiter"
+
+
+def test_time_cut_waits_until_threshold():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _enter_timecut(tmp, t, hours=2.0)
+        t["now"] += 3600   # erst 1h - noch nicht über der Schwelle
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.0, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), "unter der Schwelle: Geduld, kein Cut"
+
+
+def test_time_cut_disabled_when_zero():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _enter_timecut(tmp, t, hours=0.0)   # aus
+        t["now"] += 10 * 3600
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.0, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), "max_ride_hours=0 -> nie zeit-cutten"
+
+
+def test_time_cut_clock_survives_restart():
+    """Die Ritt-Startzeit überlebt einen Neustart - sonst würde ein Deploy die
+    Cut-Uhr zurücksetzen und ein Dauer-Bluter nie geschlossen."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _enter_timecut(tmp, t, hours=2.0)
+        t["now"] += 2 * 3600 + 1
+        # Neustart: neues Buch lädt offene Position + ride_leader + ride_start_t
+        fresh = _timecut_book(tmp, t, hours=2.0)
+        assert "BTC" in fresh.paper.sizes() and fresh.ride_leader == "0xbest"
+        fresh.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.0, "ETH": 100.0})
+        assert fresh.paper.sizes() == {}, "Cut greift auch nach Neustart (Startzeit geladen)"
+
+
 def test_restart_keeps_ride_and_rebaselines():
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)
