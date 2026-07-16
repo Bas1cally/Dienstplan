@@ -1051,9 +1051,31 @@ def test_second_registration_same_coin_while_pending_ignored():
         b._register_pending("BTC", s1)
         first_since = b._pending["BTC"]["since"]
         t["now"] += 5
-        b._register_pending("BTC", s2)   # Kollision - muss ignoriert werden
+        assert b._register_pending("BTC", s2) is False, "Kollision -> False"
         assert b._pending["BTC"]["leader"] == "0xbest"
         assert b._pending["BTC"]["since"] == first_since, "kein Timer-Reset"
+
+
+def test_coin_collision_lets_second_leader_take_next_coin():
+    """Audit-Fund (lautloser Signal-Verlust): meldet Leader B einen Korb, dessen
+    stärkster Coin schon von Leader A pending ist, darf B NICHT leer ausgehen
+    und den Rest fälschlich als korb_begrenzt verlieren - B rückt auf seinen
+    NÄCHSTEN Coin nach. Genau das '5 frisch / 4 korb_begrenzt / 0 Trades'."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book(tmp, t)
+        two = leaders(("0xA", 90), ("0xB", 50))
+        prices = {"ETH": 100.0, "SOL": 100.0, "ADA": 100.0}
+        b.tick(two, [snap("0xA", 50_000), snap("0xB", 50_000)], prices)
+        # A eröffnet ETH; B eröffnet ETH+SOL+ADA (Kollision auf ETH)
+        b.tick(two, [snap("0xA", 50_000, ETH=300),
+                     snap("0xB", 50_000, ETH=300, SOL=300, ADA=300)], prices)
+        pend = {(p["coin"], p["leader"]) for p in b.stats(prices)["pending"]}
+        assert ("ETH", "0xA") in pend, "A hält den ETH-Slot"
+        assert any(c in ("SOL", "ADA") and ldr == "0xB" for c, ldr in pend), \
+            "B rückt auf SOL/ADA nach, geht NICHT leer aus"
+        # nur EIN korb_begrenzt (B's dritter Coin), nicht zwei
+        assert b.stats(prices)["scan"]["rejected"].get("korb_begrenzt") == 1
 
 
 def test_flip_reentry_stays_instant_even_with_confirm_delay():
@@ -1370,6 +1392,35 @@ def test_mode_switch_defers_coin_without_price_to_next_tick():
 
         b.tick(LED, [snap("0xbest", 50_000)], P)   # jetzt mit BTC-Preis
         assert b.paper.sizes() == {} and b.ride_leaders == {}
+
+
+def test_mode_switch_never_freezes_forever_on_unpriceable_coin():
+    """Audit-Fund (Freeze-Fallstrick): bleibt ein Alt-Ritt-Coin DAUERHAFT ohne
+    Preis (Aktien-Perp am Wochenende, fehlt in all_mids()), würde die Sicherung
+    sonst jeden Tick für immer zurückkehren -> der Bot handelt nie wieder. Nach
+    _DRAIN_MAX_AGE_S wird zum Einstand zwangsabgerechnet, damit die Pipeline
+    weiterläuft."""
+    from bot.sprint import _DRAIN_MAX_AGE_S
+
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        bp = SprintBook(SprintConfig(exclude_coins=[], parallel_rides=True,
+                                     crypto_only=False, confirm_delay_s=0),
+                        FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+        bp.tick(LED, [snap("0xbest", 50_000)], {"xyz:TSLA": 100.0})
+        bp.tick(LED, [snap("0xbest", 50_000, **{"xyz:TSLA": 300})], {"xyz:TSLA": 100.0})
+        assert bp.ride_leaders == {"xyz:TSLA": "0xbest"}
+
+        # Neustart im Einzel-Modus, xyz:TSLA hat KEINEN Preis mehr (Wochenende)
+        b = SprintBook(SprintConfig(exclude_coins=[], parallel_rides=False, confirm_delay_s=0),
+                       FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+        assert b.ride_leaders == {"xyz:TSLA": "0xbest"}
+        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], {"ETH": 100.0})   # kein TSLA-Preis
+        assert b.ride_leaders, "in der Karenz: noch nicht zwangsabgerechnet"
+
+        t["now"] += _DRAIN_MAX_AGE_S + 1
+        b.tick(LED, [snap("0xbest", 50_000, ETH=300)], {"ETH": 100.0})
+        assert b.ride_leaders == {}, "nach der Karenz zwangsabgerechnet - kein ewiger Freeze"
 
 
 # ---------- Bilanz-Reset beim ersten Laden nach Mess-Modus (QOL-Runde) ----------

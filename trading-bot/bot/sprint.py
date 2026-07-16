@@ -74,6 +74,11 @@ _BASELINE_MAX_AGE_S = 600.0
 # damit der Dict nicht unbegrenzt über alle je gesehenen Wallets wächst.
 _ACTIVE_MAX_AGE_S = 7 * 86_400.0
 
+# Mode-Switch-Drain-Sicherung: kann ein Alt-Ritt-Coin so lange nicht bepreist
+# werden, wird er zwangsabgerechnet, damit der Bot nicht ewig blockiert
+# (Audit-Fund: ein Aktien-Perp am Wochenende fehlt dauerhaft in all_mids()).
+_DRAIN_MAX_AGE_S = 120.0
+
 # Sicherheitsnetz gegen einen Live-Befund: fehlt für einen pending Coin
 # dauerhaft der Preis (z.B. Symbol nicht in all_mids(), Feed-Lücke für genau
 # diesen Coin), wartete der Kandidat bisher UNBEGRENZT - weder Promotion noch
@@ -105,6 +110,9 @@ class SprintBook:
         # wenn beim Laden noch offene Alt-Mess-Ritte drainiert werden müssen -
         # der eigentliche Reset wartet dann in tick() bis der Drain fertig ist.
         self._bilanz_reset_pending = False
+        # Wann der Mode-Switch-Drain zum ersten Mal an unpreisbaren Alt-Ritt-
+        # Coins hängenblieb (Freeze-Sicherung, siehe _DRAIN_MAX_AGE_S).
+        self._drain_since: float | None = None
         self.strikes: dict[str, int] = {}   # addr -> aktive Strikes (LARP-Enttarnung)
         self.banned: set[str] = set()       # fürs Sprint-Buch gesperrte Leader
         # addr -> Confidence-Punkte (verdiente Anerkennung, siehe
@@ -179,7 +187,29 @@ class SprintBook:
                 if prices.get(coin):
                     self._settle_one(coin, prices, "mode_switch")
             if self.ride_leaders:
-                return  # Rest ohne Preis diesen Tick - nächster Tick erneut
+                # Rest ohne Preis diesen Tick - normalerweise nächster Tick
+                # erneut. ABER nicht unbegrenzt: hat ein Alt-Ritt-Coin über
+                # _DRAIN_MAX_AGE_S hinweg NIE einen Preis bekommen (Audit-Fund:
+                # ein Aktien-Perp 'xyz:...' am Wochenende fehlt dauerhaft in
+                # all_mids() -> die Sicherung würde SONST jeden Tick für immer
+                # zurückkehren und der ganze Bot handelte nie wieder), wird er
+                # zum Einstandspreis (Breakeven, _settle_one fällt auf entry
+                # zurück) zwangsabgerechnet, damit die Pipeline weiterläuft.
+                if self._drain_since is None:
+                    self._drain_since = self.clock()
+                elif self.clock() - self._drain_since > _DRAIN_MAX_AGE_S:
+                    log.warning("Sprint: Alt-Ritt-Coins seit %.0fs ohne Preis - "
+                                "zwangsabrechnen zum Einstand, damit der Bot nicht "
+                                "ewig blockiert: %s", _DRAIN_MAX_AGE_S,
+                                list(self.ride_leaders))
+                    for coin in list(self.ride_leaders):
+                        self._settle_one(coin, prices, "mode_switch")
+                    self._drain_since = None
+                else:
+                    return  # noch in der Karenz - nächster Tick erneut versuchen
+                if self.ride_leaders:
+                    return  # (Sollte nach dem Zwangs-Settle leer sein; Sicherheit)
+            self._drain_since = None
             # _settle_one resettet das Paper-Buch NIE (im Mess-Modus können
             # mehrere Ritte gleichzeitig offen sein) - die Einzel-Ritt-Logik
             # unten braucht aber ein sauberes 1000$-Buch für ihre eigene TP/
@@ -305,20 +335,36 @@ class SprintBook:
                     self._enter(coin, snap, prices)
                     registered = coin in self.paper.sizes()
                 else:
-                    self._register_pending(coin, snap)
-                    registered = coin in self._pending
+                    # registered NUR True, wenn DIESER Aufruf den Kandidaten
+                    # platziert hat. Bei einer Kollision (Coin schon von einem
+                    # ANDEREN Leader oder aus einem früheren Tick pending) gibt
+                    # _register_pending False zurück -> dieser Leader probiert
+                    # seinen NÄCHSTEN Coin, statt sich fälschlich als 'registriert'
+                    # zu markieren und den Rest seines Korbs als korb_begrenzt zu
+                    # verwerfen (Bug: der Coin verschwand dann lautlos, und der
+                    # Rest wurde gegen einen fremden Slot begrenzt). Der kollidierte
+                    # Coin wird NICHT verworfen - er ist ja bereits pending, wird
+                    # also anderswo bearbeitet.
+                    registered = self._register_pending(coin, snap)
             if self.cfg.confirm_delay_s <= 0 and self.paper.sizes():
                 return  # altes Verhalten: real eingestiegen -> keine weiteren Leader
 
-    def _register_pending(self, coin: str, snap) -> None:
+    def _register_pending(self, coin: str, snap) -> bool:
         """Bestätigungs-Kandidat statt sofortigem Einstieg (Flip-Flopper-
         Schutz): der Coin-Slot gehört dem ERSTEN Kandidaten, egal welcher
         Leader - eine Kollision (auch desselben Leaders erneut, während er
         schon pending ist) wird schlicht ignoriert, kein Timer-Reset, kein
-        Ersatz-Kandidat."""
+        Ersatz-Kandidat.
+
+        Rückgabe: True, wenn DIESER Aufruf den Kandidaten platziert hat; False
+        bei Kollision (Coin-Slot schon vergeben). Der Aufrufer nutzt das, um
+        den Korb dieses Leaders korrekt zu begrenzen - nur NACHDEM er wirklich
+        seinen einen Kandidaten platziert hat, nicht schon bei einem fremden
+        Slot (das war der lautlose Signal-Verlust-Bug)."""
         if coin in self._pending:
-            return
+            return False
         self._pending[coin] = {"leader": snap.address, "since": self.clock()}
+        return True
 
     def _process_pending(self, leaders: list[dict], snapshots: list,
                          prices: dict[str, float]) -> None:
