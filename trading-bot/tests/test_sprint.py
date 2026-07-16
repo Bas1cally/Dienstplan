@@ -705,6 +705,46 @@ def test_ride_leader_never_idle_rotated():
         assert "0xbest" not in b.idle_addrs(3600), "Ride-Leader ist idle-immun"
 
 
+# ---------- Börsen-Schluss: profitable Aktien sichern (Worldclock) ----------
+
+def _stock_entered(tmp, coin="xyz:TSLA", price=100.0):
+    """Buch mit frisch eingestiegener Aktien-Long-Position (crypto_only aus)."""
+    cfg = SprintConfig(exclude_coins=[], confirm_delay_s=0, crypto_only=False)
+    b = SprintBook(cfg, FEE, runtime_dir=Path(tmp))
+    px = {coin: price}
+    b.tick(LED, [snap("0xbest", 50_000)], px)
+    b.tick(LED, [snap("0xbest", 50_000, **{coin: 300})], px)
+    assert coin in b.paper.sizes()
+    return b
+
+
+def test_close_stock_winners_locks_profitable_position():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _stock_entered(tmp)
+        n = b.close_stock_winners({"xyz:TSLA": 101.0})   # +PnL (long 100 -> 101)
+        assert n == 1 and b.paper.sizes() == {}, "profitable Aktie am Gong gesichert"
+        assert b.won == 1, "zählt als Gewinn-Zyklus"
+        assert b.strikes.get("0xbest", 0) == 0, "markt_zu ist strike-exempt"
+
+
+def test_close_stock_winners_leaves_losing_position_for_2h_rule():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _stock_entered(tmp)
+        n = b.close_stock_winners({"xyz:TSLA": 99.0})    # -PnL
+        assert n == 0 and "xyz:TSLA" in b.paper.sizes(), \
+            "Verlust-Aktie bleibt offen, die 2h-Regel fängt sie"
+
+
+def test_close_stock_winners_leaves_crypto_untouched():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)   # crypto_only default egal, BTC ist Krypto
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert "BTC" in b.paper.sizes()
+        n = b.close_stock_winners({"BTC": 101.0})        # Krypto, +PnL - trotzdem NICHT
+        assert n == 0 and "BTC" in b.paper.sizes(), "Krypto (24/7) bleibt am Aktien-Gong unberührt"
+
+
 # ---------- Zeit+negativ-Cut: blutenden Ritt früh schließen (Quest) ----------
 
 def _timecut_book(tmp, t, hours=2.0):

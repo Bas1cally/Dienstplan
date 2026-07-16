@@ -49,8 +49,11 @@ _REASON_TXT = {
     "mode_switch": "Moduswechsel (Mess-Modus beendet)",
     "star_preempt": "Star-Signal hat übernommen",
     "zeit_negativ": "zu lange im Minus (Zeit-Cut)",
+    "markt_zu": "Börsen-Schluss (Gewinn gesichert)",
 }
-_STRIKE_EXEMPT = {"manual", "risk_off"}  # nicht die Entscheidung/Schuld des Leaders
+# Kein Strike: nicht die Entscheidung/Schuld des Leaders. 'markt_zu' = unsere
+# Börsen-Öffnungszeiten-Regel (Gewinn sichern), nicht sein Fehler.
+_STRIKE_EXEMPT = {"manual", "risk_off", "markt_zu"}
 
 # Confidence-Points/Star (BACKLOG.md, Nutzer-Entscheidung 15.07.): NUR das
 # eigene, durchgehaltene +10%-Ziel (tp) und eine Star-Preemption (der Bot
@@ -882,6 +885,33 @@ class SprintBook:
             self._close_coin(coin, prices, "manual")
         self._settle_ride(prices, "manual")
         return n
+
+    def close_stock_winners(self, prices: dict[str, float]) -> int:
+        """Börsen-Schluss-Gong (Nutzer): profitable AKTIEN-Positionen ('xyz:...')
+        zumachen - nach Feierabend ist der Perp-Kurs stale, also Gewinn sichern.
+        Verlust-Positionen bleiben offen (die 2h-Regel fängt sie ab, kein Panik-
+        Close am Gong). Krypto bleibt UNBERÜHRT (24/7). Reason 'markt_zu' ist
+        strike-exempt (unsere Börsen-Regel, nicht Leader-Schuld). Gibt die Anzahl
+        geschlossener Positionen zurück."""
+        stocks = [c for c in self.paper.sizes() if ":" in c]
+        if not stocks:
+            return 0
+        closed = 0
+        if self.cfg.parallel_rides:
+            for coin in stocks:
+                pnl = self._ride_pnl(coin, prices)
+                if pnl is not None and pnl > 0:
+                    self._settle_one(coin, prices, "markt_zu")
+                    closed += 1
+            return closed
+        # Einzel-Ritt: hält nur EINE Position - ist sie eine profitable Aktie, zu
+        if self.paper.equity(prices) > self.cfg.equity:   # +PnL des Ritts
+            for coin in stocks:
+                self._close_coin(coin, prices, "markt_zu")
+                closed += 1
+            if not self.paper.sizes():
+                self._settle_ride(prices, "markt_zu")
+        return closed
 
     def _settle_ride(self, prices: dict[str, float], reason: str) -> None:
         """Ritt zu Ende = Zyklus zu Ende (v3): sofort verbuchen (banked/won/busted),

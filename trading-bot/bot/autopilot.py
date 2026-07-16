@@ -158,6 +158,7 @@ class Autopilot:
         self._fullreport_thread: threading.Thread | None = None
         self._fullreport_running = False
         self._stale_feed_warned = False  # Sprint scannt Standbilder -> einmal warnen
+        self._market_open: bool | None = None  # zuletzt bekannter US-Börsen-Zustand (Worldclock)
         self.leaders: list[dict] = []
         # Eigener, breiterer Leader-Pool nur fürs Sprint-Buch (siehe sprint.pool_size).
         # Obermenge der Haupt-Leader; das Hauptbuch bleibt bei self.leaders.
@@ -854,6 +855,10 @@ class Autopilot:
                 if self.sprint and self.copier and self.copier.last_snapshots:
                     from .news.guard import RiskLevel
 
+                    # Börsen-Gong VOR dem Tick: schaltet crypto_only um + sichert
+                    # profitable Aktien beim Schluss, damit dieser Tick schon mit
+                    # dem neuen Zustand scannt.
+                    self._maybe_market_gong()
                     off = bool(self.guard and self.guard.last_level == RiskLevel.RISK_OFF)
                     self.sprint.tick(self.sprint_leaders, self.copier.last_snapshots,
                                      self.copier.last_prices, risk_off=off)
@@ -1463,6 +1468,41 @@ class Autopilot:
                  sp["banked"], sp["cycle"])
         self.notifier.send(msg)
         self._digest_equity = sp["banked"]
+
+    def _maybe_market_gong(self, now=None) -> None:
+        """Worldclock (Nutzer): zum US-Börsen-GONG den Aktien-Basket auf/zu.
+        Eröffnung -> crypto_only=false + /analyze (frische, gerade aktive Aktien-
+        Trader in den Pool). Schluss -> crypto_only=true + /analyze + profitable
+        Aktien-Positionen sichern (Verlust fängt die 2h-Regel). Feuert nur an der
+        FLANKE (Zustandswechsel), nicht jeden Tick. `now` injizierbar fürs Testen."""
+        if not (self.sprint and self.cfg.sprint.stock_market_hours):
+            return
+        from .market_hours import us_market_open
+
+        now_open = us_market_open(now)
+        if self._market_open is None:
+            # Erststart: crypto_only nur mit dem aktuellen Marktzustand
+            # synchronisieren - KEIN Gong (kein /analyze, kein Schließen).
+            self.cfg.sprint.crypto_only = not now_open
+            self._market_open = now_open
+            return
+        if now_open == self._market_open:
+            return
+        self._market_open = now_open
+        self._force_analysis = True   # Pool für das neue Regime neu bauen
+        if now_open:
+            self.cfg.sprint.crypto_only = False
+            self.notifier.send("🔔 <b>Börse offen</b> - Aktien-Basket aktiv, "
+                               "frische Analyse läuft.")
+        else:
+            self.cfg.sprint.crypto_only = True
+            prices = self.copier.last_prices if self.copier else {}
+            n = self.sprint.close_stock_winners(prices)
+            self.notifier.send(
+                "🔔 <b>Börse zu</b> - Aktien-Basket aus, frische Analyse läuft."
+                + (f"\n{n} profitable Aktien-Position(en) gesichert." if n else "")
+                + ("\nOffene Verlust-Aktien fängt die 2h-Regel." if not n
+                   and self.sprint.paper.sizes() else ""))
 
     def _maybe_warn_stale_feed(self) -> None:
         """Warnt, wenn Sprint auf eingefrorenen Snapshots scannt (Copier pausiert

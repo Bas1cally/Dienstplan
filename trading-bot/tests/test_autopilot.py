@@ -67,6 +67,91 @@ def _autopilot():
     return Autopilot(load_config())
 
 
+def _gong_autopilot(tmp):
+    from datetime import datetime, timezone
+
+    from bot.sprint import SprintBook
+    ap = _autopilot()
+    ap.cfg.sprint.stock_market_hours = True
+    ap.cfg.sprint.confirm_delay_s = 0   # sofortiger Einstieg im Test (kein 10s-Fenster)
+    ap.cfg.sprint.exclude_coins = []
+    ap.sprint = SprintBook(ap.cfg.sprint, ap.cfg.backtest.fee_rate, runtime_dir=Path(tmp))
+    sent = []
+    ap.notifier = type("N", (), {"send": lambda self, m, **k: sent.append(m)})()
+    ap.copier = type("C", (), {"last_prices": {}})()
+    ap._sent = sent
+    return ap
+
+
+def _utc(y, mo, d, h, mi):
+    from datetime import datetime, timezone
+    return datetime(y, mo, d, h, mi, tzinfo=timezone.utc)
+
+
+def test_market_gong_first_call_syncs_crypto_only_no_action():
+    """Erststart synchronisiert crypto_only mit dem Marktzustand, feuert aber
+    KEINEN Gong (kein /analyze, keine Nachricht)."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _gong_autopilot(tmp)
+        ap._force_analysis = False
+        ap._maybe_market_gong(now=_utc(2026, 7, 15, 17, 0))   # Mi 13:00 ET = offen
+        assert ap.cfg.sprint.crypto_only is False, "offen -> Aktien erlaubt"
+        assert ap._force_analysis is False and ap._sent == [], "kein Gong beim Erststart"
+
+
+def test_market_gong_opening_activates_basket_and_analyze():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _gong_autopilot(tmp)
+        ap._maybe_market_gong(now=_utc(2026, 7, 15, 12, 0))   # 8:00 ET = zu (Erststart)
+        assert ap.cfg.sprint.crypto_only is True
+        ap._force_analysis = False
+        ap._maybe_market_gong(now=_utc(2026, 7, 15, 14, 0))   # 10:00 ET = offen -> Gong
+        assert ap.cfg.sprint.crypto_only is False, "Aktien-Basket aktiv"
+        assert ap._force_analysis is True, "/analyze angefordert"
+        assert any("Börse offen" in m for m in ap._sent)
+
+
+def test_market_gong_close_deactivates_and_secures_winner():
+    import tempfile
+
+    from bot.sprint import SprintBook
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _gong_autopilot(tmp)
+        ap._maybe_market_gong(now=_utc(2026, 7, 15, 14, 0))   # offen (Erststart)
+        assert ap.cfg.sprint.crypto_only is False
+        # profitable Aktien-Position aufbauen
+        from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
+        px = {"xyz:TSLA": 100.0}
+        led = [{"address": "0xbest", "score": 80, "weight": 1.0}]
+        s0 = LeaderSnapshot("0xbest", 50_000, {})
+        s1 = LeaderSnapshot("0xbest", 50_000,
+                            {"xyz:TSLA": LeaderPosition("xyz:TSLA", 300, 100.0, 30_000, 2)})
+        ap.sprint.tick(led, [s0], px)
+        ap.sprint.tick(led, [s1], px)
+        assert "xyz:TSLA" in ap.sprint.paper.sizes()
+        ap.copier.last_prices = {"xyz:TSLA": 101.0}           # +PnL
+        ap._maybe_market_gong(now=_utc(2026, 7, 15, 20, 0))   # 16:00 ET = Schluss -> Gong
+        assert ap.cfg.sprint.crypto_only is True, "Aktien-Basket aus"
+        assert ap.sprint.paper.sizes() == {}, "profitable Aktie gesichert"
+        assert any("Börse zu" in m for m in ap._sent)
+
+
+def test_market_gong_no_transition_is_noop():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _gong_autopilot(tmp)
+        ap._maybe_market_gong(now=_utc(2026, 7, 15, 14, 0))   # offen (Erststart)
+        ap._force_analysis = False
+        ap._sent.clear()
+        ap._maybe_market_gong(now=_utc(2026, 7, 15, 15, 0))   # immer noch offen
+        assert ap._force_analysis is False and ap._sent == [], "kein Zustandswechsel -> nichts"
+
+
 def test_is_sleeper_flat_and_stale_is_excluded():
     """Nutzer-Kernbefund: 20 flache Schläfer-Wallets, kein Signal = sus. Eine
     Wallet ohne offene Position UND seit >max_idle_days ohne Trade ist ein

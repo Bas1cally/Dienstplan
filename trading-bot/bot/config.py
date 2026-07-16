@@ -362,8 +362,18 @@ class SprintConfig:
     max_rides_per_leader: int = 1
     # Krypto-only: Builder-DEX-Assets (Aktien/Gold, Coins mit ':' wie
     # 'xyz:INTC') sind außerhalb der Börsenzeiten reine Spekulation auf HL -
-    # stören die Messlatte für halbwegs stabile Trader.
+    # stören die Messlatte für halbwegs stabile Trader. HINWEIS: bei
+    # stock_market_hours=true wird dieser Wert zur Laufzeit automatisch
+    # umgeschaltet (zum Börsen-Gong), der statische Wert ist dann nur der
+    # Anfangs-/Fallback-Zustand.
     crypto_only: bool = True
+    # Worldclock (Nutzer): Aktien-Perps NUR während der echten US-Börsen-Sitzung
+    # (9:30-16:00 ET, Mo-Fr, kein Feiertag) handeln - außerhalb ist der Kurs
+    # stale/spekulativ. Ist das an, schaltet der Bot crypto_only zum Eröffnungs-
+    # Gong auf false (Aktien-Basket aktiv) und zum Schluss-Gong auf true, macht
+    # je ein /analyze und sichert profitable Aktien-Positionen beim Schluss.
+    # false = statisches crypto_only oben gilt durchgehend.
+    stock_market_hours: bool = True
     bust_frac: float = 0.05         # Liquidations-Modell: darunter ist der Zyklus geplatzt
     # Eigener, breiterer Leader-Pool als das Hauptbuch: Sprint hält immer nur EINE
     # Position und steigt beim bestbewerteten Leader mit frischem Signal ein. Mehr

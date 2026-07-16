@@ -179,13 +179,17 @@ sprint:
                             # blind instant (Live-Befund: Leader schießt nach
                             # Einstieg sofort ins Minus und flippt Sekunden
                             # später zurück). 0 = aus (altes Sofort-Verhalten).
-  crypto_only: false        # Aktien-Perps (Builder-DEX, 'xyz:...') bleiben
-                            # DAUERHAFT erlaubt (Nutzer-Entscheidung 15.07.,
-                            # nach der Mess-Woche bestätigt) - nicht mehr nur
-                            # für die Mess-Woche befristet. Die Mess-Woche
-                            # lieferte gemischte Krypto+Aktien-Ritte, per
-                            # /sprint assets auswertbar; kein Grund, Aktien-
-                            # Signale wieder pauschal auszuschließen.
+  crypto_only: false        # Anfangs-/Fallback-Wert: wird bei stock_market_hours
+                            # (unten, an) zur Laufzeit automatisch umgeschaltet -
+                            # zum Börsen-Gong auf/zu. Nur relevant, wenn
+                            # stock_market_hours=false (dann gilt dieser Wert
+                            # durchgehend).
+  stock_market_hours: true  # WORLDCLOCK (Nutzer): Aktien-Perps nur während der
+                            # echten US-Börsen-Sitzung (9:30-16:00 ET, Mo-Fr,
+                            # kein Feiertag) handeln - außerhalb ist der Kurs
+                            # stale/spekulativ. Eröffnungs-Gong: Aktien-Basket an
+                            # + /analyze. Schluss-Gong: Basket aus + /analyze +
+                            # profitable Aktien sichern (Verlust fängt die 2h-Regel).
   pool_size: 20             # Sprint scannt einen breiteren Leader-Pool als das
                             # Hauptbuch (max_leaders: 6). Sprint hält immer nur EINE
                             # Position -> mehr Quellen = weniger Leerlauf, ohne die
