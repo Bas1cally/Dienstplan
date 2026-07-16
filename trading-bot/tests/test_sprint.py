@@ -55,6 +55,29 @@ def test_never_enters_running_trades():
         assert b.paper.trades == 0
 
 
+def test_flat_leverage_ignores_leader_allocation_fraction():
+    """Nutzer-Fund: die Zahlen bewegten sich schleppend, weil das Notional die
+    ANTEILIGE Leader-Allokation spiegelte (Leader 10% in ETH -> nur 1x statt
+    10x). Jetzt: nur die RICHTUNG des Leaders zählt, immer volle 10x."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)   # equity 1000, leverage 10
+        # Leader hält nur 10% seines Buchs in ETH (exposure 0.1): 50*100/50_000
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, ETH=50)], P)
+        notional = abs(b.paper.sizes()["ETH"]) * 100.0
+        assert 9_900 < notional <= 10_000, \
+            f"volle 10x (10.000$) trotz nur 10% Leader-Allokation, war {notional:.0f}"
+
+
+def test_flat_leverage_follows_leader_short_direction():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, ETH=-50)], P)   # Leader SHORT, klein allokiert
+        assert b.paper.sizes()["ETH"] < 0, "Richtung short übernommen"
+        assert abs(b.paper.sizes()["ETH"]) * 100.0 > 9_900, "volle 10x"
+
+
 def test_fresh_signal_enters_then_holds():
     """Frisches Signal (0 -> Position) -> Einstieg 10x; Wobbeln danach -> null Trades."""
     with tempfile.TemporaryDirectory() as tmp:

@@ -812,15 +812,19 @@ class SprintBook:
         if not price or price <= 0:
             self._reject(coin, snap.address, "kein_hl_preis")
             return
+        # FLAT 10x, nur RICHTUNG (Nutzer-Entscheidung): wir spiegeln NICHT die
+        # anteilige Allokation des Leaders (die machte uns effektiv 1-5x, die
+        # Zahlen bewegten sich schleppend), sondern nehmen nur seine Richtung
+        # (Long/Short) und fahren die VOLLE leverage-Größe. Bei +10%-und-raus
+        # zählt die Richtung, nicht wie viel Kapital der Leader selbst riskiert.
+        direction = 1.0 if snap.exposure(coin) >= 0 else -1.0
         if parallel:
             # Mess-Modus: JEDER Ritt startet auf frischer equity-Basis (1000$),
             # unabhängig vom Sammelbuch - 1 Signal = 1 Ritt = 1k (Nutzer)
-            cap = self.cfg.leverage * self.cfg.equity
-            target = snap.exposure(coin) * self.cfg.leverage * self.cfg.equity
-            notional = max(-cap, min(cap, target))
+            notional = direction * self.cfg.leverage * self.cfg.equity
         else:
             equity = self.paper.equity(prices)
-            target = snap.exposure(coin) * self.cfg.leverage * equity
+            target = direction * self.cfg.leverage * equity
             # Gross-Cap: Gesamtbuch bleibt unter leverage x Equity
             gross = sum(abs(s) * prices.get(c, 0.0) for c, s in self.paper.sizes().items())
             headroom = max(0.0, self.cfg.leverage * equity - gross)

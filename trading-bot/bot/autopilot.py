@@ -1068,6 +1068,14 @@ class Autopilot:
         Sprint aus ist oder das Buch noch nicht existiert."""
         return self.sprint.banned if self.sprint else set()
 
+    def _is_pure_stock_trader(self, m) -> bool:
+        """Reiner Aktien-Perp-Trader: handelt AUSSCHLIESSLICH Builder-DEX-Coins
+        (':' - Aktien/Gold/Öl), kein Krypto. Solche Wallets liefern außerhalb der
+        US-Börsenzeiten nur gesperrte Signale und sind dann totes Pool-Gewicht.
+        Unbekannte Coin-Liste -> nicht als reiner Aktien-Trader werten (sicher)."""
+        coins = getattr(m, "coins", None) or []
+        return bool(coins) and all(":" in c for c in coins)
+
     def _is_sleeper(self, m) -> bool:
         """Schläfer-Wallet fürs Quest-Gate: hält KEINE offene Position UND hat
         seit >max_idle_days nicht getradet. Historisch-gut-aber-jetzt-still -
@@ -1095,10 +1103,18 @@ class Autopilot:
         idle = self.sprint.idle_addrs(self.cfg.sprint.rotate_idle_hours * 3600) \
             if self.sprint else set()
         n = max(self.cfg.sprint.pool_size, len(self.leaders))
+        # Regime-abhängiger Pool (Nutzer): ist der Aktien-Basket gerade zu
+        # (crypto_only, außerhalb der US-Börsenzeiten - ~17.5h/Tag), fliegen REINE
+        # Aktien-Trader raus. Sonst füllt sich der Pool mit Wallets, die die ganzen
+        # geschlossenen Stunden nur gesperrte Aktien-Signale liefern und der Bot
+        # läuft leer. Zum Eröffnungs-Gong (crypto_only=false) kommen sie zurück.
+        crypto_only = self.cfg.sprint.crypto_only
+        cands = [m for m in sprint_ok if m.address.lower() not in banned
+                 and not (crypto_only and self._is_pure_stock_trader(m))]
         # Sortierschlüssel: aktive/neue Wallets (nicht idle) zuerst, Stumme ans
         # Ende; innerhalb jeder Gruppe nach Richtungs-Score. [:n] schneidet die
         # Stummen ab, SOLANGE genug nicht-idle Kandidaten da sind.
-        top = sorted((m for m in sprint_ok if m.address.lower() not in banned),
+        top = sorted(cands,
                      key=lambda m: (m.address.lower() not in idle, m.sprint_score),
                      reverse=True)[:n]
         pool = [{"address": m.address, "score": round(m.sprint_score, 1)} for m in top]

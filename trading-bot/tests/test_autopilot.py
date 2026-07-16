@@ -173,6 +173,48 @@ def test_is_sleeper_flat_and_stale_is_excluded():
     assert ap._is_sleeper(m(0, 999)) is False, "Filter aus -> nie Schläfer"
 
 
+def test_is_pure_stock_trader():
+    ap = _autopilot()
+
+    def m(coins):
+        x = TraderMetrics(address="0xa", account_value=50_000, days=21)
+        x.coins = coins
+        return x
+
+    assert ap._is_pure_stock_trader(m(["xyz:TSLA", "xyz:NVDA"])) is True
+    assert ap._is_pure_stock_trader(m(["ETH", "xyz:TSLA"])) is False, "gemischt = nicht rein"
+    assert ap._is_pure_stock_trader(m(["ETH", "SOL"])) is False, "Krypto = nicht Aktien"
+    assert ap._is_pure_stock_trader(m([])) is False, "unbekannt -> sicher nicht aussortieren"
+
+
+def test_regime_pool_drops_pure_stock_when_market_closed():
+    """Nutzer: außerhalb der Börsenzeiten läuft der Pool leer, weil reine
+    Aktien-Trader nur gesperrte Signale liefern. Bei crypto_only (Börse zu)
+    fliegen sie raus, Krypto-/Misch-Trader füllen die Slots."""
+    ap = _autopilot()
+    ap.cfg.sprint.pool_size = 5
+    ap.leaders = []
+
+    def m(addr, score, coins):
+        x = metrics(addr, score, sprint=score)
+        x.address = addr
+        x.coins = coins
+        return x
+
+    ranked = [m("0xstock", 90, ["xyz:TSLA"]),        # reiner Aktien-Trader, Top-Score
+              m("0xcrypto", 50, ["ETH"]),
+              m("0xmixed", 40, ["BTC", "xyz:NVDA"])]
+
+    ap.cfg.sprint.crypto_only = True                  # Börse zu
+    pool = [p["address"] for p in ap._build_sprint_pool(ranked)]
+    assert "0xstock" not in pool, "reiner Aktien-Trader raus, wenn Börse zu"
+    assert "0xcrypto" in pool and "0xmixed" in pool
+
+    ap.cfg.sprint.crypto_only = False                 # Börse offen
+    pool = [p["address"] for p in ap._build_sprint_pool(ranked)]
+    assert "0xstock" in pool, "zu Börsenzeiten ist der Aktien-Trader wieder dabei"
+
+
 def test_sprint_pool_wider_than_main_and_sorted_by_direction_score():
     """Sprint bekommt einen breiteren Pool (pool_size) als das Hauptbuch,
     sortiert nach RICHTUNGS-Score (sprint_score, nicht Haupt-Score) - das
