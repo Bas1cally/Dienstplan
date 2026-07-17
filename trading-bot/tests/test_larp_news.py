@@ -160,6 +160,21 @@ def test_sprint_gate_rejects_gambler_extreme_drawdown():
     assert not v.passed and any("Gambler" in r for r in v.reasons)
 
 
+def test_sprint_gate_looser_active_days_than_main_book():
+    """Nutzer-Fund (17.07.): min_active_days war der größte Volumen-Killer im
+    Sprint-Funnel - starke Trefferquote-Kandidaten fielen laufend nur wegen
+    'nur 2-8 aktive Tage (< 10)' raus, weil bisher dieselbe Hauptbuch-Schwelle
+    galt. Sprint braucht Richtungs-Beweis, keine lange Historie."""
+    from bot.copytrade.larp import check_sprint
+
+    fills = steady_fills(weeks=1, trades_per_week=10)
+    m = analyze_fills("0xshort_history", fills, account_value=10000, days=35)
+    assert m.active_days < 10, f"Vorbedingung: unter Hauptbuch-Schwelle, war {m.active_days}"
+    assert not LarpFilter().check(m).passed, "Hauptbuch lehnt wegen zu kurzer Historie ab"
+    v = check_sprint(m)
+    assert v.passed, f"Sprint-Gate muss trotzdem durchlassen: {v.reasons}"
+
+
 def test_sprint_gate_rejects_systematic_loser_allows_coinflip():
     """Philosophie-Wechsel (Nutzer): Strikes sind der echte Filter - ein
     Münzwurf-Trader (50%) darf in den PAPIER-Pool (max. 2 Verlust-Ritte, dann

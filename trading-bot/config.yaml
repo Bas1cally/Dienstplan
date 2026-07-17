@@ -106,6 +106,12 @@ copytrade:
                                       # ein Gambler"). Lockerer als das Hauptbuch (0.25):
                                       # mehr Wallets sind weiter erwünscht, aber keine
                                       # historisch übertreibenden Konten mehr.
+      sprint_min_active_days: 3      # QUEST (Nutzer 17.07., "3 und 4"): größter
+                                      # Volumen-Killer im Sprint-Funnel war bisher
+                                      # dieselbe 10-Tage-Schwelle wie im Hauptbuch -
+                                      # starke Trefferquote-Kandidaten fielen laufend
+                                      # nur wegen "nur 2-8 aktive Tage" raus. Sprint
+                                      # braucht Richtungs-Beweis, keine lange Historie.
 
 # === Marktüberwachung: News + Preis-Schocks ===
 # Schaltet beide Bots in CAUTION (nichts Neues) oder RISK_OFF (alles schließen).

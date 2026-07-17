@@ -35,6 +35,13 @@ class LarpConfig:
     # "wir wollen mehr Wallets, aber keine Gambler" - dieser Wert ist der
     # Kompromiss, kein Duplikat des strengen Hauptbuch-Gates.
     sprint_max_drawdown: float = 0.50
+    # Sprint-eigene, lockerere Aktivitäts-Schwelle (Nutzer-Fund 17.07.: größter
+    # Volumen-Killer im Sprint-Funnel - viele Wallets mit starker Trefferquote
+    # fielen nur wegen 'nur 2-8 aktive Tage (< 10)' raus, weil bisher dieselbe
+    # Hauptbuch-Schwelle galt). Sprint braucht Richtungs-Beweis, keine lange
+    # Historie - 3 aktive Tage reichen, um Ein-Tages-Zufall auszuschließen,
+    # ohne sonst starke Kandidaten pauschal wegzuschneiden.
+    sprint_min_active_days: int = 3
 
 
 @dataclass
@@ -136,8 +143,14 @@ def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict
     min_trips = max(8, c.min_round_trips // 4)
     if m.round_trips < min_trips:
         a.append(f"nur {m.round_trips} Round-Trips (< {min_trips})")
-    # Bei verkürztem Messfenster (7d-Retry sehr aktiver Trader) anteilig fordern
-    min_days = min(c.min_active_days, max(1, int(m.days * 0.6)))
+    # Nutzer-Fund (17.07.): min_active_days war der größte Volumen-Killer im
+    # Sprint-Funnel - Wallets mit starker Trefferquote/genug Trips fielen
+    # laufend nur wegen 'nur 2-8 aktive Tage (< 10)' raus, weil hier bisher
+    # dieselbe Hauptbuch-Schwelle (10 Tage) galt. Sprint will Richtungs-
+    # Beweis, keine lange Historie - eigene, deutlich lockerere Schwelle
+    # (sprint_min_active_days). Bei verkürztem Messfenster (7d-Retry sehr
+    # aktiver Trader) weiterhin zusätzlich anteilig gedeckelt.
+    min_days = min(c.sprint_min_active_days, max(1, int(m.days * 0.6)))
     if m.active_days < min_days:
         a.append(f"nur {m.active_days} aktive Tage (< {min_days})")
     # Halber Scalper-Boden des Hauptbuchs: Ritte brauchen Zeit für ~1% Bewegung,
