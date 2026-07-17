@@ -215,6 +215,69 @@ def test_regime_pool_drops_pure_stock_when_market_closed():
     assert "0xstock" in pool, "zu Börsenzeiten ist der Aktien-Trader wieder dabei"
 
 
+# ---------- /quest funnel: Trichter-Diagnose (Nutzer: 'proper Analyse-Tools') ----------
+
+def test_build_sprint_pool_records_funnel_stats():
+    """_build_sprint_pool füllt _pool_funnel mit den Rohzahlen jeder Filterstufe -
+    Grundlage für /quest funnel. Deckt genau den Live-Fund ab: 14 Kandidaten
+    < 20 Slots -> Idle-Rotation kann nicht abschneiden."""
+    ap = _autopilot()
+    ap.cfg.sprint.pool_size = 20
+    ap.leaders = []
+    ranked = [metrics(f"0x{i}", 50, sprint=50) for i in range(14)]
+    for m in ranked:
+        m.coins = ["ETH"]
+    ap._build_sprint_pool(ranked)
+    pf = ap._pool_funnel
+    assert pf["sprint_ok_in"] == 14
+    assert pf["cands_after_filters"] == 14
+    assert pf["pool_size_target"] == 20
+    assert pf["final_pool"] == 14
+    assert pf["truncated_by_size"] == 0, "unter pool_size -> niemand fällt wegen Platzmangel raus"
+
+
+def test_build_sprint_pool_funnel_truncation_when_oversubscribed():
+    """Gegenprobe: sind es MEHR Kandidaten als Slots, schneidet [:n] tatsächlich
+    ab - truncated_by_size > 0."""
+    ap = _autopilot()
+    ap.cfg.sprint.pool_size = 3
+    ap.leaders = []
+    ranked = [metrics(f"0x{i}", 50 - i, sprint=50 - i) for i in range(6)]
+    for m in ranked:
+        m.coins = ["ETH"]
+    ap._build_sprint_pool(ranked)
+    pf = ap._pool_funnel
+    assert pf["cands_after_filters"] == 6 and pf["pool_size_target"] == 3
+    assert pf["truncated_by_size"] == 3
+
+
+def test_cmd_quest_funnel_renders_without_analysis():
+    ap = _autopilot()
+    out = ap._cmd_quest_funnel()
+    assert "keine analyse" in out.lower()
+
+
+def test_cmd_quest_funnel_renders_full_report():
+    ap = _autopilot()
+    ap._analysis_funnel = {
+        "candidates": 50, "source": "CMM 30 + HL 20", "main_ranked": 6, "min_score": 35,
+        "sprint_gate_ko": 20, "sprint_score_ko": 8, "sprint_idle_ko": 5, "sprint_ok": 17,
+        "pool_min_score": 10, "truncated": 3, "larp_ko": 2, "larp_reasons": {"lucky_punch": 2},
+        "errors": 1,
+    }
+    ap._pool_funnel = {
+        "sprint_ok_in": 17, "banned_out": 0, "regime_out": 3, "crypto_only": True,
+        "cands_after_filters": 14, "idle_total": 6, "idle_in_pool": 6,
+        "truncated_by_size": 0, "pool_size_target": 20, "forced_main": 0, "final_pool": 14,
+    }
+    out = ap._cmd_quest_funnel()
+    assert "50 Kandidaten" in out
+    assert "17 Sprint-tauglich" in out
+    assert "Pool NICHT voll" in out and "14/20" in out
+    assert "6 von 6 idle" in out
+    assert "finaler Pool: 14" in out
+
+
 def test_sprint_pool_wider_than_main_and_sorted_by_direction_score():
     """Sprint bekommt einen breiteren Pool (pool_size) als das Hauptbuch,
     sortiert nach RICHTUNGS-Score (sprint_score, nicht Haupt-Score) - das

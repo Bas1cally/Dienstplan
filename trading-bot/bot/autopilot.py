@@ -159,6 +159,13 @@ class Autopilot:
         self._fullreport_running = False
         self._stale_feed_warned = False  # Sprint scannt Standbilder -> einmal warnen
         self._market_open: bool | None = None  # zuletzt bekannter US-Börsen-Zustand (Worldclock)
+        # Trichter-Zahlen für /quest funnel (Nutzer: 'proper Analyse-Tools, die
+        # ich selbst durchspiegeln kann') - je Filterstufe, wie viele Kandidaten
+        # übrig blieben. Zwei Teile: die Analyse selbst (_reanalyze_body, läuft
+        # alle reanalyze_hours bzw. per /analyze) und der Pool-Aufbau
+        # (_build_sprint_pool, läuft danach + bei jedem Gong).
+        self._analysis_funnel: dict = {}
+        self._pool_funnel: dict = {}
         self.leaders: list[dict] = []
         # Eigener, breiterer Leader-Pool nur fürs Sprint-Buch (siehe sprint.pool_size).
         # Obermenge der Haupt-Leader; das Hauptbuch bleibt bei self.leaders.
@@ -226,6 +233,7 @@ class Autopilot:
                 "/quest – Quest-Bot (1000$ x10, Ziel +100$/Zyklus)\n"
                 "/quest pool – Quest-Pool mit Richtungs-Scores\n"
                 "/quest assets – Krypto vs. Aktien-Perps PnL-Vergleich\n"
+                "/quest funnel – Trichter-Diagnose (warum ist der Pool so klein/idle?)\n"
                 "/quest reset – Bilanz (Zyklus/Schatztruhe) auf 0, Strikes/Bans bleiben\n"
                 "/report – Quest-Auswertung\n/positions – offene Positionen + PnL\n"
                 "/leaders – Quest-Pool + ROI\n"
@@ -474,6 +482,8 @@ class Autopilot:
             return "\n".join(lines)
         if arg.lower().strip() == "assets":
             return self._sprint_asset_breakdown()
+        if arg.lower().strip() == "funnel":
+            return self._cmd_quest_funnel()
         s = self.sprint.stats(prices)
         lead = (f"<code>{s['leader'][:10]}…</code>" + (" ⭐" if s.get("leader_is_star") else "")
                 if s.get("leader") else "n/a")
@@ -564,7 +574,8 @@ class Autopilot:
                 f"Baselines: {s.get('baseline_status', 'n/a')}\n"
                 f"\n"
                 f"<i>/quest close = schließen | /quest pool = Pool-Liste | "
-                f"/quest assets = Krypto vs. Aktien | /quest reset = Bilanz auf 0</i>")
+                f"/quest assets = Krypto vs. Aktien | /quest funnel = Trichter-Diagnose | "
+                f"/quest reset = Bilanz auf 0</i>")
 
     def _sprint_asset_breakdown(self) -> str:
         """Krypto vs. Aktien-Perps NUR für die aktuelle Ära (seit dem letzten
@@ -588,6 +599,48 @@ class Autopilot:
                          f"(Trefferquote {wr:.0f}%)")
         if assets["unbekannt"]["n"]:
             lines.append("<i>'unbekannt' = Zyklen ohne coin-Feld</i>")
+        return "\n".join(lines)
+
+    def _cmd_quest_funnel(self) -> str:
+        """Trichter-Diagnose (Nutzer: 'proper Analyse-Tools, die ich selbst
+        durchspiegeln kann'): zeigt je Filterstufe, wie viele Kandidaten übrig
+        blieben - von der Discovery bis zum fertigen Pool. Beantwortet direkt
+        Fragen wie 'warum sind's nur 14/20, und warum fliegt Idle nicht raus'."""
+        af = self._analysis_funnel
+        pf = self._pool_funnel
+        if not af and not pf:
+            return "Noch keine Analyse gelaufen (/analyze anstoßen)."
+        lines = ["<b>Quest-Trichter</b>"]
+        if af:
+            lines.append(f"1. Discovery: {af['candidates']} Kandidaten ({af['source']})")
+            lines.append(f"2. Haupt-Gate (≥{af['min_score']:g}): {af['main_ranked']} bestanden")
+            lines.append(f"3. Sprint-LARP-Gate: {af['sprint_gate_ko']} raus"
+                         + (f" ({', '.join(f'{k}×{n}' for k, n in sorted(af['larp_reasons'].items(), key=lambda t: -t[1])[:3])})"
+                            if af.get("larp_reasons") else ""))
+            lines.append(f"4. Richtung <{af['pool_min_score']:g}: {af['sprint_score_ko']} raus")
+            lines.append(f"5. Schläfer (kein Trade, keine Position): {af['sprint_idle_ko']} raus")
+            lines.append(f"   → {af['sprint_ok']} Sprint-tauglich nach der Analyse")
+            if af.get("errors"):
+                lines.append(f"   ⚠️ {af['errors']} Wallets nicht abrufbar (übersprungen)")
+        if pf:
+            lines.append("")
+            lines.append(f"6. Gesperrt (LARP enttarnt): {pf['banned_out']} raus")
+            regime = f"7. Regime-Filter ({'Börse zu' if pf['crypto_only'] else 'Börse offen'}): " \
+                     f"{pf['regime_out']} raus"
+            lines.append(regime + (" (reine Aktien-Trader)" if pf["regime_out"] else ""))
+            lines.append(f"   → {pf['cands_after_filters']} Kandidaten für {pf['pool_size_target']} Pool-Slots")
+            if pf["truncated_by_size"]:
+                lines.append(f"8. Zu viele Kandidaten: {pf['truncated_by_size']} nicht reingepasst "
+                             f"(niedrigster Score/idle zuerst raus)")
+            elif pf["idle_total"]:
+                lines.append(f"8. Pool NICHT voll ({pf['final_pool'] - pf['forced_main']}/"
+                             f"{pf['pool_size_target']}) - Idle-Rotation kann nicht abschneiden, "
+                             f"es gibt niemand zum Nachrücken ({pf['idle_in_pool']} von "
+                             f"{pf['idle_total']} idle Wallets sitzen trotzdem noch drin)")
+            if pf["forced_main"]:
+                lines.append(f"   + {pf['forced_main']} Haupt-Buch-Leader zwangsergänzt")
+            lines.append(f"→ finaler Pool: {pf['final_pool']}")
+        lines.append("\n<i>/analyze = Trichter neu laufen lassen</i>")
         return "\n".join(lines)
 
     def _cmd_twap(self) -> str:
@@ -1109,8 +1162,10 @@ class Autopilot:
         # geschlossenen Stunden nur gesperrte Aktien-Signale liefern und der Bot
         # läuft leer. Zum Eröffnungs-Gong (crypto_only=false) kommen sie zurück.
         crypto_only = self.cfg.sprint.crypto_only
+        banned_out = sum(1 for m in sprint_ok if m.address.lower() in banned)
         cands = [m for m in sprint_ok if m.address.lower() not in banned
                  and not (crypto_only and self._is_pure_stock_trader(m))]
+        regime_out = len(sprint_ok) - banned_out - len(cands)
         # Sortierschlüssel: aktive/neue Wallets (nicht idle) zuerst, Stumme ans
         # Ende; innerhalb jeder Gruppe nach Richtungs-Score. [:n] schneidet die
         # Stummen ab, SOLANGE genug nicht-idle Kandidaten da sind.
@@ -1119,9 +1174,23 @@ class Autopilot:
                      reverse=True)[:n]
         pool = [{"address": m.address, "score": round(m.sprint_score, 1)} for m in top]
         have = {p["address"] for p in pool}
+        forced_main = 0
         for l in self.leaders:
             if l["address"] not in have and l["address"].lower() not in banned:
                 pool.append({"address": l["address"], "score": l.get("score", 0)})
+                forced_main += 1
+        # Rohzahlen für /quest funnel (siehe _analysis_funnel) - zeigt, OB und WO
+        # der Pool unter pool_size bleibt (Nutzer-Befund: 14/20, Idle-Rotation
+        # schneidet dann nie ab, weil gar keine Konkurrenz um die Slots besteht).
+        self._pool_funnel = {
+            "sprint_ok_in": len(sprint_ok), "banned_out": banned_out,
+            "regime_out": regime_out, "crypto_only": crypto_only,
+            "cands_after_filters": len(cands),
+            "idle_total": len(idle), "idle_in_pool": sum(1 for m in top if m.address.lower() in idle),
+            "truncated_by_size": max(0, len(cands) - n),
+            "pool_size_target": n, "forced_main": forced_main,
+            "final_pool": len(pool),
+        }
         return pool
 
     def _prune_banned_from_pool(self) -> None:
@@ -1309,6 +1378,18 @@ class Autopilot:
                     sprint_ok.append(m)
             sprint_ok.sort(key=lambda m: m.sprint_score, reverse=True)
 
+        # Rohzahlen für /quest funnel - separat von der formatierten Notiz unten,
+        # damit der Befehl sie sauber tabellarisch zeigen kann statt Text zu parsen.
+        self._analysis_funnel = {
+            "candidates": len(addresses), "source": src_note,
+            "main_ranked": len(main_ranked), "min_score": an.min_score,
+            "sprint_gate_ko": sprint_gate_ko, "sprint_score_ko": sprint_score_ko,
+            "sprint_idle_ko": sprint_idle_ko, "sprint_ok": len(sprint_ok),
+            "pool_min_score": self.cfg.sprint.pool_min_score,
+            "truncated": report.get("truncated", 0), "larp_ko": report.get("larp_ko", 0),
+            "larp_reasons": dict(report.get("larp_reasons", {})),
+            "errors": report.get("errors", 0),
+        }
         top_scores = "/".join(f"{s:.0f}" for _, s in report.get("scores", [])[:3]) or "-"
         larp_top = ", ".join(f"{k}×{n}" for k, n in sorted(
             report.get("larp_reasons", {}).items(), key=lambda t: -t[1])[:2]) or "-"
