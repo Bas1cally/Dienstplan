@@ -156,6 +156,34 @@ def test_maybe_push_status_fires_again_after_interval():
     assert len(calls) == 2
 
 
+def test_funnel_cache_survives_restart():
+    """Nutzer (17.07.): 'kein blinder Fleck mehr' - analysis_funnel/pool_funnel
+    waren bisher nach JEDEM Neustart bis zu reanalyze_hours lang blank, weil
+    _load_or_analyze_leaders() den Pool nur aus der Datei lädt statt neu zu
+    bauen. Jetzt persistiert (runtime/funnel_cache.json) und beim nächsten
+    Konstruktor-Aufruf wieder geladen - Datei danach wieder entfernen, sonst
+    leckt das in andere Tests im selben Lauf (echtes globales RUNTIME-Dir,
+    kein Tempdir-Override möglich)."""
+    from bot.autopilot import RUNTIME
+
+    cache_path = RUNTIME / "funnel_cache.json"
+    orig = cache_path.read_text() if cache_path.exists() else None
+    try:
+        ap1 = _autopilot()
+        ap1._analysis_funnel = {"candidates": 42}
+        ap1._pool_funnel = {"final_pool": 7}
+        ap1._save_funnel_cache()
+
+        ap2 = _autopilot()
+        assert ap2._analysis_funnel == {"candidates": 42}
+        assert ap2._pool_funnel == {"final_pool": 7}
+    finally:
+        if orig is None:
+            cache_path.unlink(missing_ok=True)
+        else:
+            cache_path.write_text(orig)
+
+
 def test_cmd_set_status_push_rejects_invalid_token():
     """Nutzer (17.07.): /setstatuspush vom Handy, Muster wie /setcmm - hier NUR
     die Ablehnungspfade testen, damit nie versehentlich in die echte .env
@@ -386,6 +414,13 @@ def test_build_sprint_pool_funnel_truncation_when_oversubscribed():
 
 def test_cmd_quest_funnel_renders_without_analysis():
     ap = _autopilot()
+    # Explizit leer, nicht auf den Konstruktor-Default verlassen: seit die
+    # Funnel-Zahlen einen Neustart überleben (Nutzer 17.07., persistiert in
+    # runtime/funnel_cache.json), ist "frisch konstruiert" NICHT mehr
+    # automatisch "keine Analyse" - das hängt jetzt vom Cache-File ab, das
+    # andere Tests im selben Lauf (dieselbe globale RUNTIME) füllen können.
+    ap._analysis_funnel = {}
+    ap._pool_funnel = {}
     out = ap._cmd_quest_funnel()
     assert "keine analyse" in out.lower()
 

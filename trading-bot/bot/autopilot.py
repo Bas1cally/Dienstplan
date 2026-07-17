@@ -20,6 +20,7 @@ import os
 import subprocess
 import threading
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -151,6 +152,12 @@ class Autopilot:
         self._lock = threading.Lock()
         self._last_analysis = 0.0
         self._last_status_push = 0.0   # siehe _maybe_push_status
+        # Tick-Loop-Gesundheit fürs Status-Spiegel (Nutzer 17.07., 'kein blinder
+        # Fleck mehr') - bisher nur im Server-Log sichtbar, wenn ein Tick
+        # crasht; jetzt auch im Snapshot, ohne dass jemand den Log lesen muss.
+        self._last_tick_t = 0.0
+        self._last_tick_error: str | None = None
+        self._tick_error_count = 0
         self._force_analysis = False   # /analyze: nächster Loop-Tick analysiert sofort
         self._analysis_note = ""       # Trichter der letzten Analyse (für /status)
         self._analysis_running = False # Analyse läuft im Hintergrund-Thread -
@@ -164,9 +171,14 @@ class Autopilot:
         # ich selbst durchspiegeln kann') - je Filterstufe, wie viele Kandidaten
         # übrig blieben. Zwei Teile: die Analyse selbst (_reanalyze_body, läuft
         # alle reanalyze_hours bzw. per /analyze) und der Pool-Aufbau
-        # (_build_sprint_pool, läuft danach + bei jedem Gong).
-        self._analysis_funnel: dict = {}
-        self._pool_funnel: dict = {}
+        # (_build_sprint_pool, läuft danach + bei jedem Gong). Persistiert
+        # (Nutzer 17.07., 'kein blinder Fleck mehr'): sonst sind diese Zahlen
+        # nach JEDEM Neustart bis zu reanalyze_hours lang blank, weil
+        # _load_or_analyze_leaders() den Pool aus der Datei lädt statt neu zu
+        # bauen - genau dann, wenn eine Diagnose sie am ehesten bräuchte.
+        _cache = self._load_funnel_cache()
+        self._analysis_funnel: dict = _cache.get("analysis_funnel", {})
+        self._pool_funnel: dict = _cache.get("pool_funnel", {})
         self.leaders: list[dict] = []
         # Eigener, breiterer Leader-Pool nur fürs Sprint-Buch (siehe sprint.pool_size).
         # Obermenge der Haupt-Leader; das Hauptbuch bleibt bei self.leaders.
@@ -965,7 +977,13 @@ class Autopilot:
                 self._maybe_watchdog()
                 self._maybe_push_status()
                 self._publish()
+                self._last_tick_t = time.time()
             except Exception:
+                # Blinder Fleck (Nutzer 17.07., 'kein blinder Fleck mehr'):
+                # bisher nur im Server-Log sichtbar, den Claude nicht lesen
+                # kann - jetzt zusätzlich im Status-Spiegel (siehe status_push.py).
+                self._tick_error_count += 1
+                self._last_tick_error = traceback.format_exc()[-2000:]
                 log.exception("Autopilot-Tick fehlgeschlagen")
             # Ereignisgesteuert: Leader-Fill weckt sofort, sonst normales Intervall
             if self.feed and self.feed.connected:
@@ -1255,6 +1273,7 @@ class Autopilot:
             "pool_size_target": n, "forced_main": forced_main,
             "final_pool": len(pool),
         }
+        self._save_funnel_cache()
         return pool
 
     def _prune_banned_from_pool(self) -> None:
@@ -1454,6 +1473,7 @@ class Autopilot:
             "larp_reasons": dict(report.get("larp_reasons", {})),
             "errors": report.get("errors", 0),
         }
+        self._save_funnel_cache()
         top_scores = "/".join(f"{s:.0f}" for _, s in report.get("scores", [])[:3]) or "-"
         larp_top = ", ".join(f"{k}×{n}" for k, n in sorted(
             report.get("larp_reasons", {}).items(), key=lambda t: -t[1])[:2]) or "-"
@@ -1806,6 +1826,24 @@ class Autopilot:
             return json.loads((RUNTIME / "leader_perf.json").read_text())
         except (OSError, ValueError):
             return {}
+
+    def _load_funnel_cache(self) -> dict:
+        """analysis_funnel/pool_funnel überleben einen Neustart (Nutzer 17.07.,
+        'kein blinder Fleck mehr') - siehe Kommentar am Zuweisungsort in __init__."""
+        try:
+            return json.loads((RUNTIME / "funnel_cache.json").read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def _save_funnel_cache(self) -> None:
+        try:
+            RUNTIME.mkdir(exist_ok=True)
+            (RUNTIME / "funnel_cache.json").write_text(json.dumps(
+                {"analysis_funnel": self._analysis_funnel,
+                 "pool_funnel": self._pool_funnel,
+                 "saved_at": datetime.now(timezone.utc).isoformat()}, indent=2))
+        except OSError:
+            pass
 
     def _save_perf(self) -> None:
         try:

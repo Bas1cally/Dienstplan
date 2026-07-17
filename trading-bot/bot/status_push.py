@@ -20,6 +20,9 @@ import base64
 import json
 import logging
 import os
+import subprocess
+import time
+from datetime import datetime, timezone
 
 import requests
 
@@ -29,15 +32,70 @@ TOKEN_ENV = "STATUS_PUSH_TOKEN"
 GITHUB_API = "https://api.github.com"
 
 
+def _git_commit(root) -> dict:
+    """Kurzer Commit-Hash + Zeitpunkt des laufenden Deploys (Nutzer 17.07.,
+    'kein blinder Fleck mehr') - beantwortet direkt 'läuft mein Fix schon',
+    statt raten zu müssen, ob der letzte /update den fraglichen Commit traf.
+    Läuft wie /update mit `-C root` (git findet .git selbst eine Ebene höher,
+    siehe deploy/trading-bot.service)."""
+    try:
+        sha = subprocess.run(["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        when = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%cI"],
+                              capture_output=True, text=True, timeout=5).stdout.strip()
+        return {"sha": sha or None, "committed_at": when or None}
+    except Exception:
+        return {"sha": None, "committed_at": None}
+
+
+def _tail_file(path, max_lines: int = 150, max_bytes: int = 262_144) -> list[str]:
+    """Letzte `max_lines` Zeilen von `path`, ohne bei einem großen File die
+    ganze Datei einzulesen (nur die letzten `max_bytes`). Fehlt die Datei
+    oder ist sie nicht lesbar: leere Liste, nie ein Fehler nach oben."""
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+            data = f.read()
+        lines = data.decode("utf-8", errors="replace").splitlines()
+        return lines[-max_lines:]
+    except OSError:
+        return []
+
+
 def build_snapshot(ap) -> dict:
     """Kompakter Zustands-Schnappschuss: dieselben Daten, die /status, /quest,
     /quest pool und /quest funnel per Telegram zeigen, hier als JSON statt
     formatiertem Text - Claude soll GENAU das sehen können, ohne dass es
-    jemand abtippen/kopieren muss."""
+    jemand abtippen/kopieren muss. Deckt auch das ab, was NUR im Server-Log
+    stand (Deploy-Version, Tick-Fehler, Feed-/Risiko-Zustand, Log-Tail) -
+    Nutzer 17.07.: 'keinen blinden Fleck mehr'."""
+    from .config import ROOT
+
     prices = ap.copier.last_prices if ap.copier else {}
     snap: dict = {
         "autopilot": dict(ap.status()),
         "wallet": ap.account_address,
+        "deploy": _git_commit(ROOT),
+        "started_at": datetime.fromtimestamp(ap._start_time, tz=timezone.utc).isoformat(),
+        "uptime_s": round(time.time() - ap._start_time, 0),
+        "risk_level": ap.guard.last_level.name if ap.guard else None,
+        "analysis_note": getattr(ap, "_analysis_note", ""),
+        "tick_health": {
+            "last_tick_ago_s": (round(time.time() - ap._last_tick_t, 0)
+                                if ap._last_tick_t else None),
+            "error_count": ap._tick_error_count,
+            "last_error": ap._last_tick_error,
+        },
+    }
+    tracker = getattr(ap.copier, "tracker", None) if ap.copier else None
+    snap["feed"] = {
+        "snapshot_age_s": (round(time.time() - ap.copier.last_snapshots_t, 0)
+                           if ap.copier and ap.copier.last_snapshots_t else None),
+        "fresh": getattr(tracker, "last_fresh", None),
+        "total": getattr(tracker, "last_total", None),
+        "stale": getattr(tracker, "last_stale", None),
     }
     if ap.sprint:
         quest = ap.sprint.stats(prices)
@@ -47,6 +105,7 @@ def build_snapshot(ap) -> dict:
         snap["quest"] = quest
     if ap.journal:
         snap["journal_tail"] = ap.journal.tail(50)
+    snap["log_tail"] = _tail_file(ROOT / "autopilot.log")
     return snap
 
 

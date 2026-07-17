@@ -149,19 +149,48 @@ class _FakeSprint:
         return {"equity": 1000.0, "state": "wartet auf frisches Signal"}
 
 
-class _FakeCopier:
-    last_prices = {"BTC": 100.0}
+class _FakeTracker:
+    last_fresh = 18
+    last_total = 20
+    last_stale = 2
+
+
+def _fake_copier(snapshots_age_s):
+    import time as _t
+
+    class _C:
+        last_prices = {"BTC": 100.0}
+        last_snapshots_t = _t.time() - snapshots_age_s
+        tracker = _FakeTracker()
+
+    return _C()
+
+
+class _FakeGuard:
+    class _Level:
+        name = "NORMAL"
+    last_level = _Level()
 
 
 def test_build_snapshot_bundles_autopilot_quest_and_journal():
+    import time as _t
+
+    now = _t.time()
+
     class _Ap:
         sprint = _FakeSprint()
-        copier = _FakeCopier()
+        copier = _fake_copier(5.0)
         journal = _FakeJournal()
+        guard = _FakeGuard()
         sprint_leaders = [{"address": "0xabc", "score": 42}]
         account_address = "0xwallet"
         _analysis_funnel = {"candidates": 10}
         _pool_funnel = {"final_pool": 5}
+        _analysis_note = "17 Kandidaten"
+        _start_time = now - 3600
+        _last_tick_t = now
+        _tick_error_count = 0
+        _last_tick_error = None
 
         def status(self):
             return {"state": "running"}
@@ -174,6 +203,15 @@ def test_build_snapshot_bundles_autopilot_quest_and_journal():
     assert snap["quest"]["analysis_funnel"] == {"candidates": 10}
     assert snap["quest"]["pool_funnel"] == {"final_pool": 5}
     assert snap["journal_tail"] == [{"kind": "sprint_entry", "coin": "BTC"}]
+    assert snap["risk_level"] == "NORMAL"
+    assert snap["analysis_note"] == "17 Kandidaten"
+    assert snap["feed"]["fresh"] == 18 and snap["feed"]["total"] == 20 and snap["feed"]["stale"] == 2
+    assert 4.0 <= snap["feed"]["snapshot_age_s"] <= 6.0
+    assert snap["tick_health"]["error_count"] == 0 and snap["tick_health"]["last_error"] is None
+    assert 0.0 <= snap["tick_health"]["last_tick_ago_s"] <= 1.0
+    assert 3599.0 <= snap["uptime_s"] <= 3601.0
+    assert "sha" in snap["deploy"]   # netzfrei, aber git-Aufruf läuft im echten Repo
+    assert isinstance(snap["log_tail"], list)   # fehlende autopilot.log -> []
 
 
 def test_build_snapshot_without_sprint_or_journal_omits_sections():
@@ -181,8 +219,13 @@ def test_build_snapshot_without_sprint_or_journal_omits_sections():
         sprint = None
         copier = None
         journal = None
+        guard = None
         sprint_leaders = []
         account_address = None
+        _start_time = 1_700_000_000.0
+        _last_tick_t = 0.0
+        _tick_error_count = 0
+        _last_tick_error = None
 
         def status(self):
             return {"state": "stopped"}
@@ -190,6 +233,9 @@ def test_build_snapshot_without_sprint_or_journal_omits_sections():
     snap = build_snapshot(_Ap())
     assert "quest" not in snap
     assert "journal_tail" not in snap
+    assert snap["risk_level"] is None
+    assert snap["feed"] == {"snapshot_age_s": None, "fresh": None, "total": None, "stale": None}
+    assert snap["tick_health"]["last_tick_ago_s"] is None, "0.0 heißt 'noch nie' -> None, kein Fake-Alter"
 
 
 if __name__ == "__main__":
