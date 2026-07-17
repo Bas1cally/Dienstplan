@@ -100,6 +100,35 @@ def test_leverage_without_override_uses_base():
             f"ETH ohne Override bleibt bei Basis x10, war {notional:.0f}"
 
 
+def test_max_leverage_fn_caps_notional_below_configured_leverage():
+    """Live-Fund (Nutzer 17.07.): Hyperliquid bietet auf manchen Coins (z.B.
+    Meme-Perps wie PENGU) gar nicht den konfigurierten Hebel an - der Bot
+    eröffnete den Trade trotzdem mit dem vollen konfigurierten Hebel. Paper-
+    Zahlen müssen das ECHTE Exchange-Limit respektieren, sonst wären sie beim
+    Live-Gang gar nicht 1:1 übernehmbar."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = SprintConfig(exclude_coins=[], confirm_delay_s=0, leverage=10)
+        b = SprintBook(cfg, FEE, runtime_dir=Path(tmp),
+                       max_leverage_fn=lambda coin: {"BTC": 3}.get(coin))
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        notional = abs(b.paper.sizes()["BTC"]) * 100.0
+        assert 2_900 < notional <= 3_000, \
+            f"HL erlaubt hier nur x3 auf BTC, Bot sollte NICHT x10 fahren, war {notional:.0f}"
+
+
+def test_max_leverage_fn_none_for_coin_leaves_configured_leverage():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = SprintConfig(exclude_coins=[], confirm_delay_s=0, leverage=10)
+        b = SprintBook(cfg, FEE, runtime_dir=Path(tmp),
+                       max_leverage_fn=lambda coin: None)  # kein Live-Datenpunkt
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        notional = abs(b.paper.sizes()["BTC"]) * 100.0
+        assert 9_900 < notional <= 10_000, \
+            "ohne Live-Datenpunkt bleibt der konfigurierte Hebel maßgeblich"
+
+
 def test_fresh_signal_enters_then_holds():
     """Frisches Signal (0 -> Position) -> Einstieg 10x; Wobbeln danach -> null Trades."""
     with tempfile.TemporaryDirectory() as tmp:

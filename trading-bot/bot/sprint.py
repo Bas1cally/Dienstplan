@@ -93,12 +93,20 @@ _PENDING_MAX_AGE_S = 120.0
 
 class SprintBook:
     def __init__(self, cfg, fee_rate: float, notifier=None, journal=None,
-                 runtime_dir=None, clock=time.time):
+                 runtime_dir=None, clock=time.time, max_leverage_fn=None):
         runtime = runtime_dir or RUNTIME
         self.cfg = cfg
         self.notifier = notifier
         self.journal = journal
         self.clock = clock
+        # Live-Fund (Nutzer 17.07.): Hyperliquid erlaubt nicht auf jedem Coin
+        # denselben Hebel (z.B. Meme-Perps oft nur 3-5x statt 10-20x bei
+        # Majors) - der Bot eröffnete PENGU trotzdem mit dem konfigurierten
+        # Hebel, ein Trade, den die echte Exchange so gar nicht anbietet.
+        # coin -> echtes Hebel-Limit (z.B. HyperliquidClient.max_leverage);
+        # None = kein Live-Datenpunkt (Tests, kein Client verdrahtet) -
+        # dann bleibt NUR der konfigurierte Wert maßgeblich, kein Kappen.
+        self._max_leverage_fn = max_leverage_fn
         self.paper = PaperBroker(cfg.equity, fee_rate, path=runtime / "sprint_book.json")
         self.fee_rate = fee_rate
         self.state_path = runtime / "sprint_cycles.json"
@@ -805,8 +813,18 @@ class SprintBook:
     def _leverage_for(self, coin: str) -> float:
         """Hebel für DIESEN Coin: Override falls in leverage_overrides gelistet
         (Nutzer 17.07.: BTC/ETH liquider, vertragen mehr Hebel), sonst Basis-
-        `leverage`."""
-        return self.cfg.leverage_overrides.get(coin, self.cfg.leverage)
+        `leverage` - GEKAPPT auf das echte Hyperliquid-Limit für diesen Coin,
+        falls bekannt (Live-Fund: PENGU wurde mit einem Hebel eröffnet, den
+        die Exchange für diesen Coin gar nicht anbietet - Paper-Zahlen, die
+        beim Live-Gang so nicht übernehmbar wären)."""
+        lev = self.cfg.leverage_overrides.get(coin, self.cfg.leverage)
+        if self._max_leverage_fn is not None:
+            real_max = self._max_leverage_fn(coin)
+            if real_max is not None and real_max < lev:
+                log.info("Sprint: Hebel für %s von x%.0f auf HL-Limit x%d gekappt",
+                         coin, lev, real_max)
+                return float(real_max)
+        return lev
 
     def _enter(self, coin: str, snap, prices: dict[str, float],
                parallel: bool = False) -> None:

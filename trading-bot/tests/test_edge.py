@@ -247,6 +247,60 @@ def test_hyperliquid_client_default_timeout_stays_none():
     assert all(t is None for t in _FakeInfo.calls)
 
 
+# ---------- HyperliquidClient: max_leverage (Live-Fund PENGU) ----------
+
+class _FakeMarket:
+    """Ersetzt HyperliquidClient.market: zeichnet auf, wie oft meta() wirklich
+    einen Netz-Call macht (soll EINMAL je Prozess-Lauf gecacht werden)."""
+
+    def __init__(self, universe):
+        self.universe = universe
+        self.calls = 0
+
+    def meta(self, dex=""):
+        self.calls += 1
+        return {"universe": self.universe}
+
+
+def test_max_leverage_reads_hl_per_asset_limit_and_caches():
+    """Live-Fund (Nutzer 17.07.): PENGU wurde vom Bot mit dem konfigurierten
+    Hebel eröffnet, den Hyperliquid für diesen Coin gar nicht anbietet (Meme-
+    Perps haben oft ein niedrigeres Limit als Majors). max_leverage() muss das
+    ECHTE Limit liefern - und darf es nur EINMAL je Prozess-Lauf abfragen."""
+    c = HyperliquidClient.__new__(HyperliquidClient)
+    c.dexs = [""]
+    c.market = _FakeMarket([
+        {"name": "PENGU", "szDecimals": 0, "maxLeverage": 5},
+        {"name": "BTC", "szDecimals": 5, "maxLeverage": 40},
+    ])
+    c._max_leverage_cache = None
+
+    assert c.max_leverage("PENGU") == 5
+    assert c.max_leverage("BTC") == 40
+    assert c.max_leverage("UNKNOWN") is None, "kein Datenpunkt -> None, kein Raten"
+    assert c.market.calls == 1, "gecacht - drei Abfragen, nur ein echter meta()-Call"
+
+
+def test_max_leverage_merges_across_dexs():
+    """Aktien/Gold laufen auf Builder-DEXs mit eigener meta() - das Limit muss
+    über ALLE konfigurierten DEXs zusammengeführt werden, nicht nur den Haupt-DEX."""
+    c = HyperliquidClient.__new__(HyperliquidClient)
+    c.dexs = ["", "xyz"]
+    markets = {
+        "": _FakeMarket([{"name": "BTC", "szDecimals": 5, "maxLeverage": 40}]),
+        "xyz": _FakeMarket([{"name": "xyz:TSLA", "szDecimals": 2, "maxLeverage": 5}]),
+    }
+
+    class _Multi:
+        def meta(self, dex=""):
+            return markets[dex].meta(dex)
+
+    c.market = _Multi()
+    c._max_leverage_cache = None
+    assert c.max_leverage("BTC") == 40
+    assert c.max_leverage("xyz:TSLA") == 5
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

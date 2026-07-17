@@ -1056,7 +1056,8 @@ class Autopilot:
             from .sprint import SprintBook
 
             self.sprint = SprintBook(self.cfg.sprint, self.cfg.backtest.fee_rate,
-                                     notifier=self.notifier, journal=self.journal)
+                                     notifier=self.notifier, journal=self.journal,
+                                     max_leverage_fn=self.client.max_leverage)
             log.info("Sprint-Buch aktiv: %.0f$ %s auf den besten Leader, Ziel +%.0f$/Zyklus",
                      self.cfg.sprint.equity, self._leverage_desc(),
                      self.cfg.sprint.target_profit)

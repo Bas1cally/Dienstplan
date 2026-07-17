@@ -53,6 +53,7 @@ class HyperliquidClient:
             self.market = Info(api_url(False), skip_ws=True, timeout=timeout)
         # Builder-DEXs existieren nur auf Mainnet - Testnet-Orders nur Haupt-DEX
         self.exec_dexs = self.dexs if not testnet else [""]
+        self._max_leverage_cache: dict[str, int] | None = None  # lazy, s. max_leverage()
         self.exchange = None
         if private_key:
             from eth_account import Account
@@ -115,6 +116,29 @@ class HyperliquidClient:
     def sz_decimals(self, coin: str) -> int:
         """Nachkommastellen für Ordergrößen laut Exchange-Metadaten (alle DEXs)."""
         return self.market.asset_to_sz_decimals[self.market.coin_to_asset[coin]]
+
+    def max_leverage(self, coin: str) -> int | None:
+        """Hyperliquids ECHTES Hebel-Limit für diesen Coin (Live-Fund, Nutzer
+        17.07.: je Asset unterschiedlich - Meme-Perps wie PENGU oft nur 3-5x
+        statt der 10-50x bei Majors; ein Paper-Bot, der das ignoriert, testet
+        Trades, die die Exchange gar nicht anbietet). EINMAL je Prozess-Lauf
+        über alle DEXs gecacht (Hebel-Limits ändern sich selten, Neustart/
+        Deploy reicht als Refresh-Zyklus - wie asset_to_sz_decimals der SDK).
+        None = kein Datenpunkt (unbekannter Coin oder Metadaten nicht ladbar) -
+        Aufrufer soll dann NICHT kappen, kein Limit ist kein Freifahrtschein."""
+        if self._max_leverage_cache is None:
+            cache: dict[str, int] = {}
+            for dex in self.dexs:
+                try:
+                    for a in self.market.meta(dex=dex)["universe"]:
+                        lev = a.get("maxLeverage")
+                        if lev:
+                            cache[a["name"]] = int(lev)
+                except Exception:
+                    log.warning("max_leverage-Metadaten für DEX %r nicht ladbar",
+                               dex, exc_info=True)
+            self._max_leverage_cache = cache
+        return self._max_leverage_cache.get(coin)
 
     # ---------- Account ----------
 
