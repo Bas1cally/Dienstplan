@@ -255,7 +255,8 @@ class Autopilot:
                 "/update – Update ziehen + neu starten\n"
                 "/probe – Multi-DEX-Scan-Probe (Extended/Lighter/…)\n"
                 "/lighter &lt;ref&gt; – Lighter-Konto prüfen (Verifikation)\n"
-                "/setcmm &lt;token&gt; – HyperTracker-API-Token setzen\n"
+                "/setcmm &lt;token&gt; [slot] – HyperTracker-API-Token setzen "
+                "(slot 2-5 = Fallback bei ausgeschöpftem Tageslimit)\n"
                 "/cmm – HyperTracker-Leaderboard live proben\n"
                 "/setstatuspush &lt;token&gt; – GitHub-PAT für den Status-Spiegel setzen\n"
                 "/statuspush – Status-Spiegel sofort schreiben (Test)\n"
@@ -750,20 +751,37 @@ class Autopilot:
         return "\n".join(lines)
 
     def _cmd_setcmm(self, arg: str = "") -> str:
-        """Setzt den HyperTracker/CoinMarketMan-API-Token (COINMARKETMAN_TOKEN) in
-        die .env UND live in den Prozess - vom Handy, ohne SSH. NUR für diesen
-        read-only Free-Tier-Token, NICHT für Wallet-Keys. Chat-ID-geschützt."""
-        tok = arg.strip()
-        if not tok:
-            return "Nutzung: <code>/setcmm &lt;token&gt;</code> (JWT von coinmarketman.com)"
+        """Setzt einen HyperTracker/CoinMarketMan-API-Token in die .env UND live
+        in den Prozess - vom Handy, ohne SSH. NUR für read-only Free-Tier-Tokens,
+        NICHT für Wallet-Keys. Chat-ID-geschützt.
+
+        Optionaler zweiter Parameter (Slot 1-5, Default 1): Nutzer-Entscheidung
+        (17.07., mehrere Free-Tier-Tokens rotieren lassen) - Slot 1 ist der
+        Haupt-Token (COINMARKETMAN_TOKEN), Slot 2-5 sind Fallback-Tokens
+        (COINMARKETMAN_TOKEN_2.._5), auf die automatisch gewechselt wird, wenn
+        der vorherige Slot sein 100/Tag-Limit erreicht (siehe coinmarketman.py)."""
+        parts = arg.strip().split()
+        if not parts:
+            return ("Nutzung: <code>/setcmm &lt;token&gt; [slot]</code> (JWT von "
+                    "coinmarketman.com; slot 1 = Haupt-Token, 2-5 = Fallback bei "
+                    "ausgeschöpftem Tageslimit, Default 1)")
+        tok = parts[0]
+        from .sources.coinmarketman import MAX_FALLBACK_TOKENS, TOKEN_ENV, CMMClient
+
+        slot = 1
+        if len(parts) > 1:
+            if not parts[1].isdigit() or not 1 <= int(parts[1]) <= MAX_FALLBACK_TOKENS:
+                return f"Slot muss eine Zahl zwischen 1 und {MAX_FALLBACK_TOKENS} sein."
+            slot = int(parts[1])
         if tok.count(".") != 2 or len(tok) < 40:
             return "Das sieht nicht nach einem JWT aus (drei punkt-getrennte Teile erwartet)."
-        from .sources.coinmarketman import TOKEN_ENV
-
-        set_env_var(TOKEN_ENV, tok)
-        os.environ[TOKEN_ENV] = tok   # sofort live, kein Neustart nötig
-        return (f"✅ Token gespeichert (…{tok[-6:]}) und live geladen.\n"
-                f"Jetzt <code>/cmm</code> für die Live-Probe der API.")
+        key = TOKEN_ENV if slot == 1 else f"{TOKEN_ENV}_{slot}"
+        set_env_var(key, tok)
+        os.environ[key] = tok   # sofort live, kein Neustart nötig
+        n = len(CMMClient.tokens())
+        return (f"✅ Token für Slot {slot} gespeichert (…{tok[-6:]}) und live geladen.\n"
+                f"Aktuell konfiguriert: {n} Token(s). Jetzt <code>/cmm</code> für die "
+                f"Live-Probe der API.")
 
     def _cmd_cmm(self, arg: str = "") -> str:
         """Live-Probe der HyperTracker-API: holt das Perp-PnL-Leaderboard und zeigt

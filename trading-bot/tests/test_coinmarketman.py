@@ -102,6 +102,140 @@ def test_client_error_includes_response_body():
         cmm.os.environ.update(orig_env)
 
 
+# ---------- Token-Rotation (Nutzer-Entscheidung 17.07.: mehrere Free-Tier-
+# Tokens, automatischer Wechsel bei ausgeschöpftem Tageslimit) ----------
+
+def _reset_token_state(cmm):
+    """Der Rotations-Zeiger ist bewusst Modul-weit (siehe coinmarketman.py) -
+    muss also zwischen Tests im selben Prozess sauber zurückgesetzt werden,
+    sonst leckt der Fortschritt eines Tests in den nächsten."""
+    cmm._active_token_idx = 0
+
+
+def test_tokens_collects_primary_and_fallback_slots_in_order():
+    import bot.sources.coinmarketman as cmm
+
+    orig_env = dict(cmm.os.environ)
+    cmm.os.environ[cmm.TOKEN_ENV] = "primary"
+    cmm.os.environ[f"{cmm.TOKEN_ENV}_2"] = "fallback2"
+    cmm.os.environ[f"{cmm.TOKEN_ENV}_4"] = "fallback4"   # Lücke bei _3 wird übersprungen
+    try:
+        assert CMMClient.tokens() == ["primary", "fallback2", "fallback4"]
+    finally:
+        cmm.os.environ.clear()
+        cmm.os.environ.update(orig_env)
+
+
+def test_get_rotates_to_next_token_on_429():
+    import bot.sources.coinmarketman as cmm
+
+    calls = []
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append(headers["Authorization"])
+        if headers["Authorization"] == "Bearer tok1":
+            return _FakeResp(status=429)
+        return _FakeResp(status=200, payload={"ok": True})
+
+    orig_get, orig_env = cmm.requests.get, dict(cmm.os.environ)
+    cmm.requests.get = fake_get
+    cmm.os.environ[cmm.TOKEN_ENV] = "tok1"
+    cmm.os.environ[f"{cmm.TOKEN_ENV}_2"] = "tok2"
+    _reset_token_state(cmm)
+    try:
+        result = CMMClient("https://api.example/api/external").leaderboard()
+    finally:
+        cmm.requests.get = orig_get
+        cmm.os.environ.clear()
+        cmm.os.environ.update(orig_env)
+        _reset_token_state(cmm)
+    assert result == {"ok": True}
+    assert calls == ["Bearer tok1", "Bearer tok2"], "erst Token 1 probiert, dann rotiert"
+
+
+def test_get_sticky_rotation_skips_known_exhausted_token():
+    """Nach dem ersten 429 sollen FOLGE-Calls nicht erneut bei Token 1 anfangen
+    - das würde das ohnehin knappe Budget weiter verschwenden."""
+    import bot.sources.coinmarketman as cmm
+
+    calls = []
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append(headers["Authorization"])
+        if headers["Authorization"] == "Bearer tok1":
+            return _FakeResp(status=429)
+        return _FakeResp(status=200, payload={"ok": True})
+
+    orig_get, orig_env = cmm.requests.get, dict(cmm.os.environ)
+    cmm.requests.get = fake_get
+    cmm.os.environ[cmm.TOKEN_ENV] = "tok1"
+    cmm.os.environ[f"{cmm.TOKEN_ENV}_2"] = "tok2"
+    _reset_token_state(cmm)
+    try:
+        c = CMMClient("https://api.example/api/external")
+        c.leaderboard()
+        calls.clear()
+        c.leaderboard()   # zweiter, unabhängiger Call
+    finally:
+        cmm.requests.get = orig_get
+        cmm.os.environ.clear()
+        cmm.os.environ.update(orig_env)
+        _reset_token_state(cmm)
+    assert calls == ["Bearer tok2"], "zweiter Call startet direkt bei Token 2"
+
+
+def test_get_raises_when_all_tokens_exhausted():
+    import bot.sources.coinmarketman as cmm
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        return _FakeResp(status=429)
+
+    orig_get, orig_env = cmm.requests.get, dict(cmm.os.environ)
+    cmm.requests.get = fake_get
+    cmm.os.environ[cmm.TOKEN_ENV] = "tok1"
+    cmm.os.environ[f"{cmm.TOKEN_ENV}_2"] = "tok2"
+    _reset_token_state(cmm)
+    try:
+        CMMClient("https://api.example/api/external").leaderboard()
+        assert False, "alle Tokens ausgeschöpft muss RuntimeError werfen"
+    except RuntimeError as e:
+        assert "2 Token(s) ausgeschöpft" in str(e)
+    finally:
+        cmm.requests.get = orig_get
+        cmm.os.environ.clear()
+        cmm.os.environ.update(orig_env)
+        _reset_token_state(cmm)
+
+
+def test_get_does_not_rotate_on_401():
+    """Ein 401 heißt 'dieser Token ist kaputt', nicht 'Budget alle' - Rotation
+    löst das nicht, sofort fehlschlagen statt sinnlos weiterzuprobieren."""
+    import bot.sources.coinmarketman as cmm
+
+    calls = []
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append(headers["Authorization"])
+        return _FakeResp(status=401)
+
+    orig_get, orig_env = cmm.requests.get, dict(cmm.os.environ)
+    cmm.requests.get = fake_get
+    cmm.os.environ[cmm.TOKEN_ENV] = "tok1"
+    cmm.os.environ[f"{cmm.TOKEN_ENV}_2"] = "tok2"
+    _reset_token_state(cmm)
+    try:
+        CMMClient("https://api.example/api/external").leaderboard()
+        assert False, "401 muss RuntimeError werfen"
+    except RuntimeError as e:
+        assert "Token #1" in str(e)
+    finally:
+        cmm.requests.get = orig_get
+        cmm.os.environ.clear()
+        cmm.os.environ.update(orig_env)
+        _reset_token_state(cmm)
+    assert calls == ["Bearer tok1"], "kein Versuch mit Token 2 bei 401"
+
+
 def test_set_env_var_replaces_and_preserves():
     with tempfile.TemporaryDirectory() as tmp:
         p = Path(tmp) / ".env"
@@ -163,6 +297,21 @@ def test_cmd_setcmm_rejects_non_jwt():
     assert "JWT" in ap._cmd_setcmm("not-a-token"), "kein Punkt -> abgelehnt"
     assert "Nutzung" in ap._cmd_setcmm(""), "leeres Arg -> Hilfe"
     assert "JWT" in ap._cmd_setcmm("a.b.c"), "zu kurz -> abgelehnt"
+
+
+def test_cmd_setcmm_rejects_invalid_slot():
+    """Nutzer-Entscheidung (17.07.): /setcmm bekommt einen optionalen Slot-
+    Parameter (2-5 = Fallback-Token) - nur die Ablehnungspfade testen, damit
+    nie versehentlich in die echte .env geschrieben wird (wie bei den
+    JWT-Ablehnungen oben)."""
+    from bot.autopilot import Autopilot
+    from bot.config import load_config
+
+    ap = Autopilot(load_config())
+    jwt = "a" * 20 + "." + "b" * 20 + "." + "c" * 20   # gültige JWT-Form
+    assert "Slot" in ap._cmd_setcmm(f"{jwt} 0"), "Slot 0 ungültig"
+    assert "Slot" in ap._cmd_setcmm(f"{jwt} 6"), "Slot > MAX_FALLBACK_TOKENS ungültig"
+    assert "Slot" in ap._cmd_setcmm(f"{jwt} abc"), "nicht-numerischer Slot ungültig"
 
 
 # Exakt das live bestätigte Contract (Probe 13.07.2026): Zahlen als STRINGS.

@@ -18,9 +18,19 @@ Boards: GET /leaderboards/perp-pnl   (perp-only - unser Hauptboard, wir kopieren
 Kür:    GET /closed-trades/summary?address=0x... - totalTrades, wins, losses,
         longTrades, shortTrades, avgDuration -> echte Winrate fürs Tiefen-Scoring.
 
-RATE-BUDGET (kritisch): Free-Tier = 100 Requests/TAG. Discovery-Scan alle 6h =
-4 Board-Reads/Tag; Tiefen-Scoring der Top-K via closed-trades/summary muss
-budgetiert werden (K<=15 je Scan -> <=64 Req/Tag gesamt). Niemals je Tick callen.
+RATE-BUDGET (kritisch): Free-Tier = 100 Requests/TAG JE TOKEN. Discovery-Scan
+alle 6h = 4 Board-Reads/Tag; Tiefen-Scoring der Top-K via closed-trades/summary
+muss budgetiert werden (K<=15 je Scan -> <=64 Req/Tag gesamt). Niemals je Tick
+callen.
+
+TOKEN-ROTATION (Nutzer-Entscheidung 17.07., bewusstes ToS-Risiko akzeptiert):
+bis zu MAX_FALLBACK_TOKENS Tokens (COINMARKETMAN_TOKEN, _2, _3, ...) - ist
+Token N an seinem 100/Tag-Limit (429), wechselt der Client automatisch auf
+Token N+1. NUR bei 429 gewechselt, nie bei 401 (ein kaputter Token wird durch
+Rotation nicht repariert). Der aktive Index ist Prozess-weit (Modul-State) und
+bewusst NICHT persistiert - ein Neustart/Deploy ist ohnehin der natürliche
+Reset-Punkt, und die echten Tages-Budgets laufen serverseitig bei CMM weiter,
+unabhängig davon, was wir hier merken.
 """
 import json
 import logging
@@ -32,8 +42,17 @@ import requests
 log = logging.getLogger(__name__)
 
 TOKEN_ENV = "COINMARKETMAN_TOKEN"
+MAX_FALLBACK_TOKENS = 5   # COINMARKETMAN_TOKEN (Slot 1) + _2.._5
 
 RANK_FIELDS = ("pnlDay", "pnlWeek", "pnlMonth", "pnlAllTime")
+
+# Prozess-weiter Rotations-Zeiger: welcher Token-Slot (Index in tokens())
+# gerade als "noch nicht ausgeschöpft" gilt. Bewusst NICHT pro CMMClient-
+# Instanz (die werden an vielen Stellen frisch konstruiert), sonst würde
+# jede neue Instanz wieder bei Slot 1 anfangen und ihn erneut vergeblich
+# probieren, bis das nächste 429 kommt - reine Verschwendung des ohnehin
+# knappen Budgets.
+_active_token_idx = 0
 
 
 class CMMClient:
@@ -42,28 +61,59 @@ class CMMClient:
         self.timeout = timeout
 
     @staticmethod
+    def tokens() -> list[str]:
+        """Alle konfigurierten Tokens in Reihenfolge (Haupt-Token zuerst)."""
+        out = []
+        primary = os.environ.get(TOKEN_ENV, "").strip()
+        if primary:
+            out.append(primary)
+        for i in range(2, MAX_FALLBACK_TOKENS + 1):
+            tok = os.environ.get(f"{TOKEN_ENV}_{i}", "").strip()
+            if tok:
+                out.append(tok)
+        return out
+
+    @staticmethod
     def token() -> str:
-        return os.environ.get(TOKEN_ENV, "").strip()
+        """Der aktuell aktive Token (für /cmm-Probe & 'ist überhaupt einer
+        gesetzt'-Checks) - der erste, der noch nicht als ausgeschöpft gilt."""
+        toks = CMMClient.tokens()
+        if not toks:
+            return ""
+        return toks[min(_active_token_idx, len(toks) - 1)]
 
     def _get(self, path: str, params: dict | None = None):
-        tok = self.token()
-        if not tok:
+        global _active_token_idx
+        toks = self.tokens()
+        if not toks:
             raise RuntimeError(f"{TOKEN_ENV} fehlt in der .env (per /setcmm setzen)")
-        r = requests.get(
-            f"{self.base_url}/{path.lstrip('/')}",
-            params=params or {},
-            headers={"Authorization": f"Bearer {tok}", "Accept": "application/json"},
-            timeout=self.timeout,
-        )
-        if r.status_code == 401:
-            raise RuntimeError("401: Token ungültig/abgelaufen")
-        if r.status_code == 429:
-            raise RuntimeError("429: Tages-Limit erreicht (Free-Tier: 100 Requests/Tag)")
-        if r.status_code >= 400:
-            # Der Body sagt bei 400/403 meist EXAKT, welcher Parameter fehlt/falsch
-            # ist - ohne ihn debuggen wir blind (gelernt aus der ersten 400-Probe).
-            raise RuntimeError(f"{r.status_code} auf /{path.lstrip('/')}: {r.text[:300]}")
-        return r.json()
+        start = min(_active_token_idx, len(toks) - 1)
+        for offset in range(len(toks) - start):
+            idx = start + offset
+            r = requests.get(
+                f"{self.base_url}/{path.lstrip('/')}",
+                params=params or {},
+                headers={"Authorization": f"Bearer {toks[idx]}", "Accept": "application/json"},
+                timeout=self.timeout,
+            )
+            if r.status_code == 401:
+                raise RuntimeError(f"401: Token #{idx + 1} ungültig/abgelaufen")
+            if r.status_code == 429:
+                _active_token_idx = idx + 1
+                if idx + 1 < len(toks):
+                    log.warning("CMM: Token #%d Tageslimit erreicht - wechsle auf Token #%d",
+                               idx + 1, idx + 2)
+                else:
+                    log.warning("CMM: Token #%d Tageslimit erreicht - keine weiteren "
+                               "Tokens konfiguriert (siehe /setcmm)", idx + 1)
+                continue
+            if r.status_code >= 400:
+                # Der Body sagt bei 400/403 meist EXAKT, welcher Parameter fehlt/falsch
+                # ist - ohne ihn debuggen wir blind (gelernt aus der ersten 400-Probe).
+                raise RuntimeError(f"{r.status_code} auf /{path.lstrip('/')}: {r.text[:300]}")
+            return r.json()
+        raise RuntimeError(f"429: alle {len(toks)} Token(s) ausgeschöpft "
+                           f"(Free-Tier: 100 Requests/Tag je Token)")
 
     def leaderboard(self, board: str = "perp-pnl", rank_by: str = "pnlMonth",
                     limit: int = 100, offset: int = 0, order: str = "desc"):
