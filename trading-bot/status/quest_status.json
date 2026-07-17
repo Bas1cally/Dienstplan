@@ -1,6 +1,6 @@
 {
   "autopilot": {
-    "updated": "2026-07-17T18:17:19.067379+00:00",
+    "updated": "2026-07-17T18:22:26.410710+00:00",
     "state": "running",
     "mode": "dry_run",
     "network": "testnet",
@@ -85,7 +85,7 @@
             "grund": "unbestaetigt_negativ"
           }
         ],
-        "last_fresh_min": 11.0,
+        "last_fresh_min": 16.1,
         "last_entry_min": null
       }
     },
@@ -107,11 +107,11 @@
         "profit_factor": 2.21,
         "max_drawdown_pct": 24.97,
         "closed_trades": 710,
-        "roi_since_copy_pct": -32.32
+        "roi_since_copy_pct": -34.77
       }
     ],
     "account": null,
-    "next_analysis_in_h": 5.5
+    "next_analysis_in_h": 5.4
   },
   "wallet": null,
   "deploy": {
@@ -119,11 +119,11 @@
     "committed_at": "2026-07-17T17:45:54Z"
   },
   "started_at": "2026-07-17T17:46:42.554610+00:00",
-  "uptime_s": 1881.0,
+  "uptime_s": 2187.0,
   "risk_level": "NORMAL",
   "analysis_note": "41 Kandidaten (CMM 0 + HL 40) \u2192 0 Haupt(\u226535) / 7 Sprint-tauglich (Gate-K.O. 9, Richtung unter 10: 0, Schl\u00e4fer: 23)\nAussortiert: 2 zu aktiv, 39 LARP (netto unprofitabel\u00d725, \u00fcberhebelt\u00d72), 0 Fehler | Top-Scores: -",
   "tick_health": {
-    "last_tick_ago_s": 44.0,
+    "last_tick_ago_s": 43.0,
     "error_count": 0,
     "last_error": null
   },
@@ -182,9 +182,9 @@
     "pending": [],
     "baseline_status": "warm \u00fcbernommen (24s alt beim Start)",
     "scan": {
-      "fresh_seen": 3,
+      "fresh_seen": 4,
       "rejected": {
-        "unbestaetigt_negativ": 3
+        "unbestaetigt_negativ": 4
       },
       "last_rejected": [
         {
@@ -204,9 +204,15 @@
           "coin": "ARB",
           "leader": "0x8d7d49eb",
           "grund": "unbestaetigt_negativ"
+        },
+        {
+          "t": 1784312589,
+          "coin": "GALA",
+          "leader": "0xc9c78160",
+          "grund": "unbestaetigt_negativ"
         }
       ],
-      "last_fresh_min": 11.7,
+      "last_fresh_min": 0.0,
       "last_entry_min": null
     },
     "analysis_funnel": {
@@ -750,7 +756,6 @@
     }
   ],
   "log_tail": [
-    "2026-07-17 17:26:11,164 INFO   LARP-Filter K.O. f\u00fcr 0xe1b8ebfc: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
     "2026-07-17 17:26:14,701 INFO Analysiert 0xc9c78160: score=97.3 sprint=87.8 wr=100% roi=68.1% pf=inf trips=31 dd=0.1% hold=918min",
     "2026-07-17 17:26:14,701 INFO   LARP-Filter K.O. f\u00fcr 0xc9c78160: nur 8 aktive Tage (< 10); Swing-Trader: mediane Haltedauer 15.3h (> 12h) - passt nicht zum Day-Trading-Profil",
     "2026-07-17 17:26:17,732 INFO Analysiert 0x341892ca: score=0.0 sprint=77.5 wr=0% roi=-50.9% pf=0.00 trips=0 dd=50.9% hold=0min",
@@ -899,6 +904,7 @@
     "2026-07-17 17:49:17,269 WARNING Analyse fand keine geeigneten Leader - behalte bisherige",
     "2026-07-17 17:50:07,797 INFO Sprint: frisches Signal LIT von 0x8d7d49eb VERWORFEN (unbestaetigt_negativ)",
     "2026-07-17 18:03:24,359 INFO Sprint: frisches Signal MET von 0x8d7d49eb VERWORFEN (unbestaetigt_negativ)",
-    "2026-07-17 18:07:04,488 INFO Sprint: frisches Signal ARB von 0x8d7d49eb VERWORFEN (unbestaetigt_negativ)"
+    "2026-07-17 18:07:04,488 INFO Sprint: frisches Signal ARB von 0x8d7d49eb VERWORFEN (unbestaetigt_negativ)",
+    "2026-07-17 18:23:09,472 INFO Sprint: frisches Signal GALA von 0xc9c78160 VERWORFEN (unbestaetigt_negativ)"
   ]
 }
