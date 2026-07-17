@@ -1,6 +1,6 @@
 {
   "autopilot": {
-    "updated": "2026-07-17T16:37:22.960674+00:00",
+    "updated": "2026-07-17T16:42:38.322896+00:00",
     "state": "running",
     "mode": "dry_run",
     "network": "testnet",
@@ -13,19 +13,19 @@
     "polymarket": [],
     "labs": null,
     "sprint": {
-      "equity": 1016.51,
+      "equity": 1007.06,
       "cycle": 1,
-      "cycle_pnl": 16.51,
+      "cycle_pnl": 7.06,
       "positions": [
         {
           "coin": "BTC",
           "size": -0.31494823038463055,
           "entry": 63502.5,
-          "unrealized_pnl": 25.51
+          "unrealized_pnl": 16.06
         }
       ],
       "target": 1100,
-      "progress_pct": 16.5,
+      "progress_pct": 7.1,
       "state": "h\u00e4lt",
       "held": [
         "BTC SHORT"
@@ -80,8 +80,8 @@
             "grund": "unbestaetigt_negativ"
           }
         ],
-        "last_fresh_min": 26.2,
-        "last_entry_min": 24.9
+        "last_fresh_min": 31.5,
+        "last_entry_min": 30.1
       }
     },
     "lighter": null,
@@ -102,11 +102,11 @@
         "profit_factor": 2.21,
         "max_drawdown_pct": 24.97,
         "closed_trades": 710,
-        "roi_since_copy_pct": -40.16
+        "roi_since_copy_pct": -39.54
       }
     ],
     "account": null,
-    "next_analysis_in_h": 5.5
+    "next_analysis_in_h": 5.4
   },
   "wallet": null,
   "deploy": {
@@ -114,11 +114,11 @@
     "committed_at": "2026-07-17T15:59:39Z"
   },
   "started_at": "2026-07-17T16:01:04.044958+00:00",
-  "uptime_s": 2256.0,
+  "uptime_s": 2573.0,
   "risk_level": "NORMAL",
   "analysis_note": "90 Kandidaten (CMM 177 + HL 39) \u2192 0 Haupt(\u226535) / 30 Sprint-tauglich (Gate-K.O. 24, Richtung unter 10: 0, Schl\u00e4fer: 29)\nAussortiert: 7 zu aktiv, 83 LARP (netto unprofitabel\u00d762, nur 0 Round-Trips\u00d75), 0 Fehler | Top-Scores: -",
   "tick_health": {
-    "last_tick_ago_s": 77.0,
+    "last_tick_ago_s": 79.0,
     "error_count": 0,
     "last_error": null
   },
@@ -129,19 +129,19 @@
     "stale": 0
   },
   "quest": {
-    "equity": 1004.86,
+    "equity": 992.26,
     "cycle": 1,
-    "cycle_pnl": 4.86,
+    "cycle_pnl": -7.74,
     "positions": [
       {
         "coin": "BTC",
         "size": -0.31494823038463055,
         "entry": 63502.5,
-        "unrealized_pnl": 13.86
+        "unrealized_pnl": 1.26
       }
     ],
     "target": 1100,
-    "progress_pct": 4.9,
+    "progress_pct": -7.7,
     "state": "h\u00e4lt",
     "held": [
       "BTC SHORT"
@@ -196,8 +196,8 @@
           "grund": "unbestaetigt_negativ"
         }
       ],
-      "last_fresh_min": 27.5,
-      "last_entry_min": 26.1
+      "last_fresh_min": 32.8,
+      "last_entry_min": 31.4
     },
     "analysis_funnel": {
       "candidates": 90,
