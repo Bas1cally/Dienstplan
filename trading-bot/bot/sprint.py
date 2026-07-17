@@ -1017,10 +1017,22 @@ class SprintBook:
             elif pnl > 0 and self.strikes.get(key):
                 self.strikes[key] = max(0, self.strikes[key] - 1)  # profitabel heilt
 
+        # Nutzer-Fund (17.07.): '2 erfolgreiche Trader gestern, aber ich hab
+        # NICHTS von Confidence-Punkten gesehen' - die Vergabe selbst war
+        # korrekt (im Journal/confidence-dict nachweisbar), aber komplett
+        # STUMM: weder Telegram-Push noch Journal-Eintrag für den normalen
+        # +5-Fall, nur beim seltenen Star-Sprung (>=100) gab es überhaupt ein
+        # Signal. confidence_line hängt sich jetzt an die ohnehin schon
+        # gesendete Zyklus-Ende-Meldung an - kein Extra-Rauschen, aber
+        # sichtbar bei GENAU dem Ereignis, das die Punkte auslöst.
+        confidence_line = ""
         if leader and reason in _CONFIDENCE_EARNING and pnl > 0:
             key = leader.lower()
             was_star = self.confidence.get(key, 0) >= STAR_THRESHOLD
             self.confidence[key] = self.confidence.get(key, 0) + CONFIDENCE_PER_WIN
+            confidence_line = (f"\n+{CONFIDENCE_PER_WIN} Confidence für "
+                               f"<code>{leader[:10]}…</code> "
+                               f"({self.confidence[key]}/{STAR_THRESHOLD})")
             if self.confidence[key] >= STAR_THRESHOLD and not was_star:
                 log.warning("Sprint: %s ist jetzt ein STAR (%d Confidence-Punkte)",
                             leader[:10], self.confidence[key])
@@ -1047,6 +1059,7 @@ class SprintBook:
             self.notifier.send(
                 f"{icon} <b>{what} beendet</b> ({reason_txt}): {pnl:+,.2f} $\n"
                 f"Bilanz: {self.won}✅ {self.busted}💥 | Schatztruhe {self.banked:+,.2f} $"
+                f"{confidence_line}"
             )
         self._save_state()
 
@@ -1247,6 +1260,11 @@ class SprintBook:
 
     def is_star(self, addr: str) -> bool:
         return self.confidence.get(addr.lower(), 0) >= STAR_THRESHOLD
+
+    def confidence_of(self, addr: str) -> int:
+        """Rohe Confidence-Punktzahl (Nutzer 17.07.: bisher nur als binäres
+        ⭐ ab STAR_THRESHOLD sichtbar, der Fortschritt davor komplett blind)."""
+        return self.confidence.get(addr.lower(), 0)
 
     @staticmethod
     def _book_of(snap) -> dict[str, float]:

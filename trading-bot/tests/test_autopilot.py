@@ -489,6 +489,32 @@ def _autopilot_with_sprint(tmp):
     return ap
 
 
+def test_cmd_quest_pool_shows_confidence_progress_and_star_badge():
+    """Nutzer-Fund (17.07.): '2 erfolgreiche Trader, aber ich hab nichts von
+    Confidence-Punkten gesehen' - vorher zeigte /quest pool NUR das binäre
+    ⭐ ab 100 Punkten, der Fortschritt davor war unsichtbar."""
+    import tempfile
+
+    from bot.sprint import STAR_THRESHOLD
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        progressing = "0x" + "1" * 40
+        star = "0x" + "2" * 40
+        plain = "0x" + "3" * 40
+        ap.sprint.confidence[progressing] = 15
+        ap.sprint.confidence[star] = STAR_THRESHOLD
+        ap.sprint_leaders = [
+            {"address": progressing, "score": 70},
+            {"address": star, "score": 80},
+            {"address": plain, "score": 60},
+        ]
+        out = ap._cmd_sprint("pool")
+        assert f"🔸15/{STAR_THRESHOLD}" in out
+        assert "⭐" in out
+        assert "Confidence-Fortschritt" in out   # Legende nur, wenn wirklich einer fortschreitet
+
+
 def test_build_sprint_pool_evicts_banned_larp_next_candidate_rises():
     """Nutzer-Kernbefund: der Sinn der Strikes ist 'LARPs raus, neue Wallets
     rein'. Ein gebannter Leader darf keinen Pool-Slot mehr blockieren - der

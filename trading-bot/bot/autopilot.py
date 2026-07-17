@@ -471,6 +471,8 @@ class Autopilot:
         if arg.lower().strip() == "pool":
             if not self.sprint_leaders:
                 return "Quest-Pool ist leer (nächste Analyse: /analyze)."
+            from .sprint import STAR_THRESHOLD
+
             banned = self.sprint.banned
             idle = self.sprint.idle_addrs(self.cfg.sprint.rotate_idle_hours * 3600)
             # Halten die Pool-Wallets gerade überhaupt Positionen? (aus den
@@ -482,20 +484,31 @@ class Autopilot:
                          if holds.get(str(l.get("address", "")).lower()))
             lines = [f"<b>Quest-Pool</b> ({n_hold}/{len(self.sprint_leaders)} halten "
                      f"gerade Positionen)"]
+            any_confidence = False
             for l in self.sprint_leaders:
                 a = str(l.get("address", ""))
+                badges = []
                 if a.lower() in banned:
-                    mark = " 🚫"
+                    badges.append("🚫")
                 elif self.sprint.is_star(a):
-                    mark = " ⭐"
-                elif a.lower() in idle:
-                    mark = " 💤"   # stumm, rotiert beim nächsten Rebuild nach hinten
+                    badges.append("⭐")
                 else:
-                    mark = ""
+                    # Nutzer-Fund (17.07.): Confidence-Fortschritt vor dem
+                    # ⭐-Sprung war komplett unsichtbar ("2 erfolgreiche
+                    # Trader, aber keine Punkte gesehen") - jetzt als
+                    # Fortschritt zum Star sichtbar, nicht erst binär bei 100.
+                    conf = self.sprint.confidence_of(a)
+                    if conf:
+                        badges.append(f"🔸{conf}/{STAR_THRESHOLD}")
+                        any_confidence = True
+                if a.lower() in idle and a.lower() not in banned:
+                    badges.append("💤")   # stumm, rotiert beim nächsten Rebuild nach hinten
+                mark = (" " + " ".join(badges)) if badges else ""
                 pos = "📈" if holds.get(a.lower()) else "· "   # hält gerade / flach
                 lines.append(f"{pos}<code>{a[:12]}…</code> Score {l.get('score', '?')}{mark}")
             lines.append("<i>📈 = hält gerade eine Position | · = flach</i>"
-                         + (f" | 💤 = >{self.cfg.sprint.rotate_idle_hours:.0f}h stumm" if idle else ""))
+                         + (f" | 💤 = >{self.cfg.sprint.rotate_idle_hours:.0f}h stumm" if idle else "")
+                         + (" | 🔸 = Confidence-Fortschritt zum ⭐" if any_confidence else ""))
             return "\n".join(lines)
         if arg.lower().strip() == "assets":
             return self._sprint_asset_breakdown()

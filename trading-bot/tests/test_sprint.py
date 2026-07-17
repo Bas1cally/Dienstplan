@@ -1333,6 +1333,42 @@ def test_tp_reason_grants_five_confidence():
         assert b.confidence.get("0xbest", 0) == CONFIDENCE_PER_WIN
 
 
+def test_confidence_of_exposes_raw_points():
+    """Vorher nur is_star() (binär ab 100) abrufbar - der Fortschritt davor
+    war für /quest pool nicht auslesbar (Nutzer-Fund 17.07.)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        assert b.confidence_of("0xBest") == 0
+        b.confidence["0xbest"] = 15
+        assert b.confidence_of("0xBEST") == 15, "case-insensitiv wie is_star"
+
+
+def test_tp_confidence_visible_in_telegram_message():
+    """Nutzer-Fund (17.07.): '2 erfolgreiche Trader gestern, aber ich hab
+    nichts von Confidence-Punkten gesehen' - die Vergabe selbst lief korrekt
+    (Punkte landeten im confidence-dict), war aber komplett STUMM: kein Push,
+    kein Journal-Eintrag für den normalen +5-Fall, nur beim seltenen Star-
+    Sprung (>=100) gab's überhaupt ein Signal. Jetzt hängt die Info an der
+    ohnehin gesendeten Zyklus-Ende-Meldung."""
+    sent = []
+
+    class N:
+        def send(self, m):
+            sent.append(m)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        b = SprintBook(SprintConfig(exclude_coins=[], confirm_delay_s=0), FEE,
+                       notifier=N(), runtime_dir=Path(tmp))
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        sent.clear()
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 101.5, "ETH": 100.0})
+        assert b.won == 1
+        msg = next(m for m in sent if "beendet" in m)
+        assert f"+{CONFIDENCE_PER_WIN} Confidence" in msg
+        assert f"({CONFIDENCE_PER_WIN}/{STAR_THRESHOLD})" in msg
+
+
 def test_star_marked_at_threshold_and_stays_strike_prone():
     """Star ab genau STAR_THRESHOLD Punkten (= 20 TP-Ritte). Ein Star ist
     NICHT strike-immun - ein Verlust-Ritt striked ihn wie jeden anderen."""
