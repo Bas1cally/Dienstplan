@@ -196,14 +196,30 @@ class CopyTrader:
         self._load_risk_state()
 
     def tick(self) -> None:
-        if self.halted:
-            return
         prices = {c: float(p) for c, p in self.client.all_mids().items()}
         if self.feed:
             ws = self.feed.mids()
             if ws:
                 prices.update(ws)  # frischere WS-Preise überschreiben (nur Haupt-DEX)
         self.last_prices = prices
+        if self.ct.feed_only:
+            # Quest-Bot-Modus: das Kopier-Buch handelt nicht mehr selbst, es ist
+            # NUR NOCH der Feed (Preise + Leader-Snapshots) für den Quest-Bot und
+            # die Discovery. Deshalb VOR jedem halted/Drawdown/RISK_OFF-Gate: die
+            # schützen ein Handeln, das hier gar nicht mehr stattfindet - ein
+            # ALTER halted=true (aus der Zeit vor feed_only, oder ein historischer
+            # Circuit-Breaker) oder ein RISK_OFF-Marktschock würden sonst den
+            # Feed-Refresh komplett aushungern (last_snapshots bleibt für immer
+            # leer/uralt) und den Quest-Bot dauerhaft blind machen, obwohl es gar
+            # nichts glattzustellen gibt (Deep-Dive-Fund). Kein Targets/Shadows/
+            # Orders mehr danach.
+            snapshots = self.tracker.snapshot_all()
+            if snapshots:
+                self.last_snapshots = snapshots
+                self.last_snapshots_t = time.time()
+            return
+        if self.halted:
+            return
         equity = self._equity(prices)
         self.last_equity = equity
         self._roll_day(equity)
@@ -250,12 +266,6 @@ class CopyTrader:
             return
         self.last_snapshots = snapshots
         self.last_snapshots_t = time.time()
-        if self.ct.feed_only:
-            # Quest-Bot-Modus: das Kopier-Buch handelt nicht mehr selbst, es
-            # liefert nur noch Preise + Leader-Snapshots (oben schon gesetzt)
-            # für den Quest-Bot und die Discovery. HIER Schluss - keine Targets,
-            # keine Shadows, keine Orders.
-            return
         targets = compute_targets(
             snapshots, self.weights, equity, self.ct, self.cfg.risk,
             convergence=self.convergence,

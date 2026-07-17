@@ -55,10 +55,19 @@ class LeaderTracker:
         self.last_fresh = 0              # Abdeckung der letzten Runde (Diagnose)
         self.last_stale = 0
         self.last_total = 0
+        self._last_snapshot_partial = False   # Seitenkanal, siehe snapshot()
 
     def snapshot(self, address: str) -> LeaderSnapshot:
         equity = 0.0
         raw_positions: list = []
+        # Seitenkanal für snapshot_all(): war DIESER Aufruf vollständig (alle
+        # DEXs erreichbar) oder hat ein Builder-DEX (i>0) transient gefehlt?
+        # Ein Direktaufruf von snapshot() (z.B. /leaders <addr>) bekommt trotzdem
+        # das best-effort Ergebnis - nur snapshot_all() muss den Unterschied
+        # kennen, um es NICHT als vollwertigen 'letzten guten Stand' zu cachen
+        # (siehe dort: sonst verschwindet eine Position auf dem ausgefallenen
+        # DEX fälschlich aus dem gecachten Buch -> falscher 'Leader raus'-Exit).
+        self._last_snapshot_partial = False
         for i, dex in enumerate(self.dexs):
             try:
                 state = self.info.user_state(address, dex=dex) if dex else self.info.user_state(address)
@@ -69,6 +78,7 @@ class LeaderTracker:
                     # auslösen und Baselines zerstören (alles sähe 'frisch' aus).
                     raise
                 log.debug("Leader %s: DEX %r nicht abrufbar", address[:10], dex, exc_info=True)
+                self._last_snapshot_partial = True
                 continue
             equity += float(state["marginSummary"]["accountValue"])
             raw_positions.extend(state.get("assetPositions", []))
@@ -106,8 +116,27 @@ class LeaderTracker:
                 _time.sleep(self.throttle_s)   # Bursts glätten (Rate-Limit-Hygiene)
             try:
                 s = self.snapshot(addr)
-                self._last_good[addr] = s
-                fresh += 1
+                if self._last_snapshot_partial:
+                    # Ein Builder-DEX (z.B. der Aktien-Perp-Basket) war diese
+                    # Runde transient nicht erreichbar - der zurückgegebene
+                    # Snapshot fehlt dessen Positionen KOMPLETT. Das NICHT als
+                    # 'letzter guter Stand' cachen (sonst verschwindet die
+                    # Position auf dem ausgefallenen DEX fälschlich aus dem
+                    # gecachten Buch -> falscher 'Leader raus'-Exit/Baseline-
+                    # Zerstörung). Stattdessen wie ein Totalausfall behandeln:
+                    # letzten wirklich vollständigen Stand weiterreichen, falls
+                    # vorhanden - sonst bleibt der unvollständige Snapshot die
+                    # einzige verfügbare Information (besser als nichts).
+                    cached = self._last_good.get(addr)
+                    if cached is not None:
+                        s = cached
+                    stale += 1
+                    log.warning("Snapshot %s teilweise fehlgeschlagen (Builder-DEX) - "
+                                "nutze letzten VOLLSTÄNDIGEN Stand statt lückenhafter Daten",
+                                addr[:10])
+                else:
+                    self._last_good[addr] = s
+                    fresh += 1
             except Exception:
                 s = self._last_good.get(addr)
                 if s is None:

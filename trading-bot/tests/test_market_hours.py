@@ -44,6 +44,23 @@ def test_holiday_closed():
     assert us_market_open(utc(2026, 12, 25, 17, 0)) is False
 
 
+def test_fails_safe_closed_without_tzdata():
+    """Deep-Dive-Fund: fehlt tzdata (_ET=None), behandelte _to_et() UTC bisher
+    unverändert als 'ET' - der Gong feuerte 4-5h verschoben, Aktien-Perps
+    wurden zur falschen Zeit auf stale Kursen gehandelt. Jetzt fail-safe: ohne
+    verlässliche Zeitzone gilt der Markt als geschlossen, egal welche Uhrzeit."""
+    import bot.market_hours as mh
+
+    orig = mh._ET
+    try:
+        mh._ET = None
+        # Eine Zeit, die bei korrekter ET-Umrechnung eindeutig 'offen' wäre
+        # (Mi 14:00 UTC = 10:00 EDT im Juli) - mit _ET=None MUSS trotzdem False gelten.
+        assert mh.us_market_open(utc(2026, 7, 15, 14, 0)) is False
+    finally:
+        mh._ET = orig
+
+
 def test_holidays_2026_complete_and_correct():
     from datetime import date
 

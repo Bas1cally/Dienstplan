@@ -246,6 +246,42 @@ def test_not_feed_only_still_trades():
     assert ct.paper.trades > 0, "im Normalmodus spiegelt der Copier das Leader-Signal"
 
 
+def test_feed_only_ignores_stale_halted_flag():
+    """Deep-Dive-Fund (HIGH): ein ALTER halted=true (aus der Zeit vor feed_only,
+    oder ein historischer Circuit-Breaker) darf im Feed-Only-Betrieb den Quest-
+    Feed nicht dauerhaft lahmlegen - es gibt ohnehin nichts mehr glattzustellen.
+    Ohne den Fix kehrte tick() sofort zurück, last_snapshots blieb für immer
+    leer/uralt, der Quest-Bot handelte nie wieder."""
+    ct = _isolated_copier(feed_only=True)
+    ct.halted = True   # simuliert einen Alt-Halt aus der Zeit vor feed_only
+    ct.tick()
+    assert ct.last_snapshots, "Feed läuft trotz altem halted=true weiter"
+    assert ct.last_prices.get("BTC") == 100.0
+
+
+def test_feed_only_ignores_risk_off():
+    """RISK_OFF darf den Feed-Only-Betrieb ebenfalls nicht aushungern - gerade in
+    der volatilen Phase braucht der Quest-Bot frische Leader-Daten am meisten."""
+    class RiskOffGuard:
+        def level(self):
+            from bot.news.guard import RiskLevel
+            return RiskLevel.RISK_OFF
+
+    ct = _isolated_copier(feed_only=True)
+    ct.guard = RiskOffGuard()
+    ct.tick()
+    assert ct.last_snapshots, "Feed läuft trotz RISK_OFF weiter (nichts zu flatten)"
+
+
+def test_non_feed_only_still_respects_halted_and_risk_off():
+    """Gegenprobe: außerhalb von feed_only bleiben halted/RISK_OFF wirksam -
+    der Fix betrifft NUR den reinen Feed-Betrieb."""
+    ct = _isolated_copier(feed_only=False)
+    ct.halted = True
+    ct.tick()
+    assert not ct.last_snapshots, "halted blockt weiterhin, wenn das Buch selbst handelt"
+
+
 # ---------- Tracker: kein Phantom-Snapshot, Cache statt Lücke ----------
 
 def _state(equity, **positions):
@@ -302,6 +338,64 @@ def test_tracker_snapshot_all_uses_last_good_cache():
     t2 = LeaderTracker(_FlakyInfo(fail={"0xa"}), ["0xa"], throttle_s=0)
     assert t2.snapshot_all() == [], "ohne je einen guten Stand: überspringen"
     assert t2.last_fresh == 0 and t2.last_stale == 0
+
+
+class _PartialDexInfo:
+    """Haupt-DEX (dex='') liefert immer; ein Builder-DEX (z.B. 'xyz') schlägt
+    für konfigurierbare Adressen fehl - simuliert einen transienten Ausfall
+    NUR des Aktien-Perp-Basket-DEX, während der Leader auf dem Haupt-DEX
+    weiter erreichbar ist."""
+
+    def __init__(self, fail_dex: str, fail: set):
+        self.fail_dex = fail_dex
+        self.fail = fail
+
+    def user_state(self, address, dex=None):
+        if dex == self.fail_dex and address in self.fail:
+            raise RuntimeError("429 Too Many Requests (Builder-DEX)")
+        if dex == self.fail_dex:
+            return _state(50_000)   # Builder-DEX ok, aber keine Aktien-Position
+        return _state(50_000, ETH=200)   # Haupt-DEX: immer eine Krypto-Position
+
+
+def test_tracker_partial_dex_failure_not_cached_as_last_good():
+    """Deep-Dive-Fund (MEDIUM): fällt NUR ein Builder-DEX (z.B. der Aktien-
+    Basket) transient aus, lieferte snapshot() bisher einen unvollständigen
+    Snapshot (Haupt-DEX-Position da, Aktien-Position fehlt) OHNE Exception -
+    snapshot_all() cachte das stillschweigend als 'letzter guter Stand' und
+    überschrieb den echten. Der Quest-Bot hätte die Aktien-Position als
+    verschwunden gesehen -> falscher Leader-Exit / Baseline-Zerstörung."""
+    from bot.copytrade.tracker import LeaderTracker
+
+    info = _PartialDexInfo(fail_dex="xyz", fail=set())
+    t = LeaderTracker(info, ["0xa"], dexs=["", "xyz"], throttle_s=0)
+    # Erste Runde: beide DEXs ok, Aktien-Position da -> echter 'letzter guter Stand'
+    info.fail = set()
+
+    class _FullInfo(_PartialDexInfo):
+        def user_state(self, address, dex=None):
+            if dex == self.fail_dex:
+                return _state(50_000, **{"xyz:TSLA": 300})
+            return _state(50_000, ETH=200)
+
+    t.info = _FullInfo(fail_dex="xyz", fail=set())
+    snaps = t.snapshot_all()
+    assert snaps[0].positions.get("xyz:TSLA") is not None
+    assert t.last_fresh == 1 and t.last_stale == 0
+
+    # Zweite Runde: Builder-DEX fällt für 0xa aus -> Snapshot fehlt die Aktien-Position
+    t.info = _PartialDexInfo(fail_dex="xyz", fail={"0xa"})
+    snaps = t.snapshot_all()
+    assert t.last_stale == 1 and t.last_fresh == 0, \
+        "partieller Ausfall zählt als stale, NICHT als fresh"
+    assert snaps[0].positions.get("xyz:TSLA") is not None, \
+        "letzter VOLLSTÄNDIGER Stand bleibt erhalten statt der lückenhaften Daten"
+
+    # Dritte Runde: wieder alles ok -> der echte, aktuelle Stand gilt wieder
+    t.info = _FullInfo(fail_dex="xyz", fail=set())
+    snaps = t.snapshot_all()
+    assert t.last_fresh == 1
+    assert snaps[0].positions.get("xyz:TSLA") is not None
 
 
 def test_tracker_coverage_consistent_when_analysis_swaps_addresses_mid_round():

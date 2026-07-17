@@ -10,13 +10,25 @@ ganzjährig zur ECHTEN Glocke feuert (Sommer-/Winterzeit inklusive), nicht zu
 einer festen UTC-Zeit. Reine Zeit-Logik, injizierbares `now` fürs Testen.
 """
 
+import logging
 from datetime import date, datetime, time, timedelta, timezone
+
+log = logging.getLogger(__name__)
 
 try:
     from zoneinfo import ZoneInfo
     _ET = ZoneInfo("America/New_York")
-except Exception:  # pragma: no cover - Fallback, falls tzdata fehlt
+except Exception:  # Fallback, falls tzdata auf dem Host fehlt
     _ET = None
+    # Deep-Dive-Fund: OHNE tzdata behandelte _to_et() bisher UTC unveraendert
+    # als "ET" - der Boersen-Gong feuerte 4-5h verschoben (je nach Sommer-/
+    # Winterzeit), und Aktien-Perps wurden zur FALSCHEN Zeit auf stale Kursen
+    # gehandelt - genau das, was diese Uhr verhindern soll. Fail-SAFE statt
+    # falsch: ohne verlaessliche Zeitzone gilt der Markt als geschlossen (der
+    # Aktien-Basket bleibt einfach aus, statt zur falschen Zeit zu handeln).
+    log.error("market_hours: tzdata/zoneinfo für America/New_York nicht "
+              "verfügbar - US-Börse gilt bis zur Behebung als GESCHLOSSEN "
+              "(Aktien-Basket bleibt aus, statt zur falschen Zeit zu handeln).")
 
 _OPEN = time(9, 30)
 _CLOSE = time(16, 0)
@@ -91,6 +103,8 @@ def _to_et(now: datetime | None) -> datetime:
 def us_market_open(now: datetime | None = None) -> bool:
     """Ist die reguläre US-Aktien-Sitzung gerade offen? (9:30-16:00 ET, Mo-Fr,
     kein Feiertag). `now` als aware/naive UTC-datetime injizierbar fürs Testen."""
+    if _ET is None:
+        return False   # fail-safe ohne verlässliche Zeitzone, siehe Modul-Header
     et = _to_et(now)
     if et.weekday() >= 5:                       # Wochenende
         return False
