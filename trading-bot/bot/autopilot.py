@@ -150,6 +150,7 @@ class Autopilot:
         self._status: dict = {"state": "stopped"}
         self._lock = threading.Lock()
         self._last_analysis = 0.0
+        self._last_status_push = 0.0   # siehe _maybe_push_status
         self._force_analysis = False   # /analyze: nächster Loop-Tick analysiert sofort
         self._analysis_note = ""       # Trichter der letzten Analyse (für /status)
         self._analysis_running = False # Analyse läuft im Hintergrund-Thread -
@@ -920,6 +921,7 @@ class Autopilot:
                     self.lighter.tick(self.copier.last_prices)
                 self._maybe_digest()
                 self._maybe_watchdog()
+                self._maybe_push_status()
                 self._publish()
             except Exception:
                 log.exception("Autopilot-Tick fehlgeschlagen")
@@ -1585,6 +1587,24 @@ class Autopilot:
                  sp["banked"], sp["cycle"])
         self.notifier.send(msg)
         self._digest_equity = sp["banked"]
+
+    def _maybe_push_status(self) -> None:
+        """Status-Spiegel (Nutzer 17.07.): schreibt periodisch einen JSON-
+        Schnappschuss übers Repo, damit der aktuelle Bot-Zustand direkt per
+        Lesezugriff verfügbar ist statt manuell aus Telegram kopiert werden zu
+        müssen. Kein Token gesetzt oder push fehlgeschlagen -> niemals fatal,
+        einfach beim nächsten Intervall erneut versuchen (siehe status_push.py)."""
+        sp = self.cfg.status_push
+        if not sp.enabled:
+            return
+        if time.time() - self._last_status_push < sp.interval_minutes * 60:
+            return
+        self._last_status_push = time.time()
+        from .status_push import build_snapshot, push_snapshot
+
+        ok = push_snapshot(build_snapshot(self), repo=sp.repo, branch=sp.branch, path=sp.path)
+        if not ok:
+            log.debug("Status-Push nicht geschrieben (kein Token oder Fehler, siehe Log)")
 
     def _maybe_market_gong(self, now=None) -> None:
         """Worldclock (Nutzer): zum US-Börsen-GONG den Aktien-Basket auf/zu.

@@ -104,6 +104,58 @@ def test_leverage_desc_lists_overrides_sorted():
     assert ap._leverage_desc() == "x10 (BTC x20, ETH x15)"
 
 
+def test_maybe_push_status_respects_enabled_flag():
+    ap = _autopilot()
+    ap.cfg.status_push.enabled = False
+    import bot.status_push as sp_mod
+
+    calls = []
+    orig = sp_mod.push_snapshot
+    sp_mod.push_snapshot = lambda *a, **k: calls.append(1) or True
+    try:
+        ap._maybe_push_status()
+    finally:
+        sp_mod.push_snapshot = orig
+    assert calls == [], "enabled=false -> nie pushen"
+
+
+def test_maybe_push_status_respects_interval_gate():
+    """Nutzer (17.07.): periodischer Status-Spiegel, nicht jeder Tick - sonst
+    Rauschen im dedizierten Branch und unnötige API-Calls."""
+    ap = _autopilot()
+    ap.cfg.status_push.enabled = True
+    ap.cfg.status_push.interval_minutes = 5
+    import bot.status_push as sp_mod
+
+    calls = []
+    orig = sp_mod.push_snapshot
+    sp_mod.push_snapshot = lambda *a, **k: calls.append(1) or True
+    try:
+        ap._maybe_push_status()
+        ap._maybe_push_status()   # sofort erneut - Intervall noch nicht um
+    finally:
+        sp_mod.push_snapshot = orig
+    assert len(calls) == 1
+
+
+def test_maybe_push_status_fires_again_after_interval():
+    ap = _autopilot()
+    ap.cfg.status_push.enabled = True
+    ap.cfg.status_push.interval_minutes = 5
+    import bot.status_push as sp_mod
+
+    calls = []
+    orig = sp_mod.push_snapshot
+    sp_mod.push_snapshot = lambda *a, **k: calls.append(1) or True
+    try:
+        ap._maybe_push_status()
+        ap._last_status_push -= 301   # Intervall künstlich verstreichen lassen
+        ap._maybe_push_status()
+    finally:
+        sp_mod.push_snapshot = orig
+    assert len(calls) == 2
+
+
 def test_market_gong_first_call_syncs_crypto_only_no_action():
     """Erststart synchronisiert crypto_only mit dem Marktzustand, feuert aber
     KEINEN Gong (kein /analyze, keine Nachricht)."""

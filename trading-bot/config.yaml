@@ -302,6 +302,22 @@ coinmarketman:
                             # 100/Tag - weiter Puffer für /cmm-Proben.
   pages: 3                  # Board-Seiten JE FENSTER je Scan (je 1 Request)
 
+# === Status-Spiegel: JSON-Schnappschuss fürs Repo (Claude-Lesezugriff) ===
+# Nutzer (17.07.): "Ressourcen Verschwendung alles hier spiegeln zu müssen" -
+# statt jeden Zustand manuell aus Telegram zu kopieren, schreibt der Bot
+# periodisch einen Snapshot (Positionen, Pool, Funnel, Journal-Tail) über
+# GitHubs Contents-API in einen dedizierten Branch. Kein Tunnel, kein neuer
+# öffentlicher Endpunkt, rührt den bestehenden manuellen git-pull-Deploy-Flow
+# NICHT an (eigener API-Call, keine lokalen git-Befehle in der Arbeitskopie).
+status_push:
+  enabled: false            # AN erst, wenn STATUS_PUSH_TOKEN in der .env steht
+                            # (fine-grained PAT, NUR 'Contents: Read and write'
+                            # auf dieses eine Repo - siehe .env.example).
+  repo: bas1cally/dienstplan
+  branch: status-feed       # dedizierter Branch, kein Rauschen im Code-Verlauf
+  path: trading-bot/status/quest_status.json
+  interval_minutes: 5       # wie oft (Mindestabstand) neu geschrieben wird
+
 # === Strategie-Labor: eigene Signale parallel im Paper-Schatten messen ===
 # Der Copy-Bot folgt fremden Tradern (kein originäres Alpha). Hier laufen EIGENE
 # Strategien mit Spielgeld parallel mit, damit der Report (python report.py)

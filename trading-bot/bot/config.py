@@ -548,6 +548,24 @@ class CoinMarketManConfig:
 
 
 @dataclass
+class StatusPushConfig:
+    """Status-Spiegel für Claude (Nutzer 17.07.: 'alles hier spiegeln zu
+    müssen' kostet Ressourcen) - schreibt periodisch einen JSON-Schnappschuss
+    (Positionen, Pool, Funnel, Journal-Tail) über GitHubs Contents-API in einen
+    dedizierten Branch. Claude hat in dieser wie in jeder künftigen Session
+    ohnehin Lesezugriff auf das Repo und kann so live nachschauen statt sich
+    Text kopieren zu lassen. Token (STATUS_PUSH_TOKEN, fine-grained PAT NUR
+    'Contents: Read and write' auf dieses eine Repo) steht in der .env, nie
+    hier. Default AUS - erst scharf, wenn der Token gesetzt ist (siehe
+    bot/status_push.py, lazy Token-Read)."""
+    enabled: bool = False
+    repo: str = "bas1cally/dienstplan"
+    branch: str = "status-feed"
+    path: str = "trading-bot/status/quest_status.json"
+    interval_minutes: float = 5.0
+
+
+@dataclass
 class Config:
     network: str
     dry_run: bool
@@ -573,6 +591,7 @@ class Config:
     sprint: SprintConfig
     lighter: LighterConfig
     coinmarketman: CoinMarketManConfig
+    status_push: StatusPushConfig
 
     @property
     def is_testnet(self) -> bool:
@@ -611,6 +630,7 @@ def load_config(path: Path | None = None) -> Config:
         sprint=SprintConfig(**raw.get("sprint", {})),
         lighter=LighterConfig(**raw.get("lighter", {})),
         coinmarketman=CoinMarketManConfig(**raw.get("coinmarketman", {})),
+        status_push=StatusPushConfig(**raw.get("status_push", {})),
     )
     _validate(cfg)
     return cfg
