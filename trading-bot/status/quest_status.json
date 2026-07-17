@@ -1,6 +1,6 @@
 {
   "autopilot": {
-    "updated": "2026-07-17T17:03:41.871047+00:00",
+    "updated": "2026-07-17T17:09:00.557014+00:00",
     "state": "running",
     "mode": "dry_run",
     "network": "testnet",
@@ -13,19 +13,19 @@
     "polymarket": [],
     "labs": null,
     "sprint": {
-      "equity": 945.02,
+      "equity": 894.0,
       "cycle": 1,
-      "cycle_pnl": -54.98,
+      "cycle_pnl": -106.0,
       "positions": [
         {
           "coin": "BTC",
           "size": -0.31494823038463055,
           "entry": 63502.5,
-          "unrealized_pnl": -45.98
+          "unrealized_pnl": -97.0
         }
       ],
       "target": 1100,
-      "progress_pct": -55.0,
+      "progress_pct": -106.0,
       "state": "h\u00e4lt",
       "held": [
         "BTC SHORT"
@@ -68,9 +68,10 @@
       "pending": [],
       "baseline_status": "warm \u00fcbernommen (67s alt beim Start)",
       "scan": {
-        "fresh_seen": 2,
+        "fresh_seen": 3,
         "rejected": {
-          "unbestaetigt_negativ": 1
+          "unbestaetigt_negativ": 1,
+          "korb_begrenzt": 1
         },
         "last_rejected": [
           {
@@ -78,10 +79,16 @@
             "coin": "REZ",
             "leader": "0x8d7d49eb",
             "grund": "unbestaetigt_negativ"
+          },
+          {
+            "t": 1784308140,
+            "coin": "ETH",
+            "leader": "0xcaaacd1e",
+            "grund": "korb_begrenzt"
           }
         ],
-        "last_fresh_min": 52.5,
-        "last_entry_min": 51.2
+        "last_fresh_min": 0.0,
+        "last_entry_min": 56.5
       }
     },
     "lighter": null,
@@ -102,11 +109,11 @@
         "profit_factor": 2.21,
         "max_drawdown_pct": 24.97,
         "closed_trades": 710,
-        "roi_since_copy_pct": -36.49
+        "roi_since_copy_pct": -33.13
       }
     ],
     "account": null,
-    "next_analysis_in_h": 5.1
+    "next_analysis_in_h": 5.0
   },
   "wallet": null,
   "deploy": {
@@ -114,11 +121,11 @@
     "committed_at": "2026-07-17T15:59:39Z"
   },
   "started_at": "2026-07-17T16:01:04.044958+00:00",
-  "uptime_s": 3837.0,
+  "uptime_s": 4155.0,
   "risk_level": "NORMAL",
   "analysis_note": "90 Kandidaten (CMM 177 + HL 39) \u2192 0 Haupt(\u226535) / 30 Sprint-tauglich (Gate-K.O. 24, Richtung unter 10: 0, Schl\u00e4fer: 29)\nAussortiert: 7 zu aktiv, 83 LARP (netto unprofitabel\u00d762, nur 0 Round-Trips\u00d75), 0 Fehler | Top-Scores: -",
   "tick_health": {
-    "last_tick_ago_s": 79.0,
+    "last_tick_ago_s": 78.0,
     "error_count": 0,
     "last_error": null
   },
@@ -129,19 +136,19 @@
     "stale": 0
   },
   "quest": {
-    "equity": 942.5,
+    "equity": 854.0,
     "cycle": 1,
-    "cycle_pnl": -57.5,
+    "cycle_pnl": -146.0,
     "positions": [
       {
         "coin": "BTC",
         "size": -0.31494823038463055,
         "entry": 63502.5,
-        "unrealized_pnl": -48.5
+        "unrealized_pnl": -137.0
       }
     ],
     "target": 1100,
-    "progress_pct": -57.5,
+    "progress_pct": -146.0,
     "state": "h\u00e4lt",
     "held": [
       "BTC SHORT"
@@ -184,9 +191,10 @@
     "pending": [],
     "baseline_status": "warm \u00fcbernommen (67s alt beim Start)",
     "scan": {
-      "fresh_seen": 2,
+      "fresh_seen": 3,
       "rejected": {
-        "unbestaetigt_negativ": 1
+        "unbestaetigt_negativ": 1,
+        "korb_begrenzt": 1
       },
       "last_rejected": [
         {
@@ -194,10 +202,16 @@
           "coin": "REZ",
           "leader": "0x8d7d49eb",
           "grund": "unbestaetigt_negativ"
+        },
+        {
+          "t": 1784308140,
+          "coin": "ETH",
+          "leader": "0xcaaacd1e",
+          "grund": "korb_begrenzt"
         }
       ],
-      "last_fresh_min": 53.8,
-      "last_entry_min": 52.5
+      "last_fresh_min": 1.3,
+      "last_entry_min": 57.8
     },
     "analysis_funnel": {
       "candidates": 90,
@@ -810,7 +824,6 @@
     }
   ],
   "log_tail": [
-    "2026-07-17 16:03:00,506 INFO Analysiert 0x8c830d21: score=0.0 sprint=77.5 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
     "2026-07-17 16:03:00,507 INFO   LARP-Filter K.O. f\u00fcr 0x8c830d21: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
     "2026-07-17 16:03:00,659 WARNING Snapshot 0x11eee2e0 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
     "2026-07-17 16:03:05,756 INFO Analysiert 0xcd87ea21: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
@@ -959,6 +972,7 @@
     "2026-07-17 16:07:03,834 INFO Analysiert 0x985f02b1: score=0.0 sprint=73.7 wr=57% roi=-0.0% pf=1.01 trips=0 dd=0.0% hold=0min [Fills-Fenster VOLL]",
     "2026-07-17 16:07:03,835 INFO Analyse-Trichter: 90 Kandidaten (CMM 177 + HL 39) \u2192 0 Haupt(\u226535) / 30 Sprint-tauglich (Gate-K.O. 24, Richtung unter 10: 0, Schl\u00e4fer: 29) | Aussortiert: 7 zu aktiv, 83 LARP (netto unprofitabel\u00d762, nur 0 Round-Trips\u00d75), 0 Fehler | Top-Scores: -",
     "2026-07-17 16:07:03,835 WARNING Analyse fand keine geeigneten Leader - behalte bisherige",
-    "2026-07-17 16:12:31,338 INFO Sprint: SHORT BTC $20000 (frisches Signal von 0xcaaacd1e, Zyklus 1)"
+    "2026-07-17 16:12:31,338 INFO Sprint: SHORT BTC $20000 (frisches Signal von 0xcaaacd1e, Zyklus 1)",
+    "2026-07-17 17:09:00,544 INFO Sprint: frisches Signal ETH von 0xcaaacd1e VERWORFEN (korb_begrenzt)"
   ]
 }
