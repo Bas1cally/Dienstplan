@@ -79,8 +79,20 @@ copytrade:
                                # Quest-Bot, der die Schatztruhe füllt (Nutzer 15.07.).
   analysis:
     days: 21                   # kürzeres Fenster - Day-Trader-Form ist schnelllebig
-    min_account_value: 10000   # Mindest-Kontogröße der Kandidaten
-    min_volume: 500000         # Mindest-Monatsvolumen (statistische Aussagekraft)
+    min_account_value: 1000    # Nutzer-Fund (17.07.): 10.000 filterte "Shrimps"
+                               # (kleine, aktive Day-Trader mit guter Trefferquote)
+                               # schon VOR der Sortierung raus - obwohl HLs eigenes
+                               # Board nach ROI% sortiert (leaderboard.py), nicht
+                               # nach absolutem PnL, sind sie size-unabhängig
+                               # sichtbar, sobald sie diesen Boden schaffen. Das
+                               # Hauptbuch handelt ohnehin nicht mehr (feed_only),
+                               # kein Risiko durch mehr Klein-Wallets im Rohpool -
+                               # die Qualitätskontrolle bleibt bei Trefferquote/
+                               # Drawdown/aktive Tage, nicht bei der Kontogröße.
+    min_volume: 75000          # war 500000 - für ein 1000-2000$-Konto unrealistisch
+                               # hoch, selbst bei aktivem Trading. Senkt NICHT die
+                               # Qualitätslatte (das tun die LARP-/Sprint-Gates),
+                               # nur den Größen-Boden.
     top_percent: 2.0           # Top-2% (nach Monats-ROI) gehen in die Tiefenanalyse
     top_n: 90                  # harter Deckel für die Tiefenanalyse (API-Calls je
                                # Wallet; 70->90 (17.07.): drittes CMM-Fenster
@@ -310,7 +322,15 @@ coinmarketman:
   enabled: true
   period: pnlMonth          # pnlDay | pnlWeek | pnlMonth | pnlAllTime
   limit: 100                # Leaderboard-Zeilen pro Abruf (25 | 50 | 100)
-  min_equity: 10000         # Kandidaten-Grobfilter: Mindest-Perp-Equity
+  min_equity: 1000          # Nutzer-Fund (17.07.): 10.000 schloss "Shrimps" (kleine,
+                            # aktive Day-Trader mit guter Trefferquote) schon vorab
+                            # aus. WICHTIG: CMM rankt weiterhin nach absolutem PnL
+                            # (pnlDay/Week/Month, kein Win-Rate-Feld) - ein Shrimp
+                            # mit kleinem PnL bleibt auf dem Board trotzdem weit
+                            # unten, dieser Boden nimmt nur die HARTE Ausschluss-
+                            # Grenze weg. Der eigentliche Hebel für Shrimps ist HLs
+                            # eigenes Board (leaderboard.py, sortiert nach ROI% -
+                            # size-unabhängig), s. copytrade.analysis.min_account_value.
   min_pnl: 0                # ... und Monats-PnL muss positiv sein
   # Kopierbarkeits-Filter (Live-Befund 13.07.: Board-Spitze = MM/HFT-Whales mit
   # 400x Monats-Umsatz - unkopierbar, und ihre >2000 Fills sprengen HLs
