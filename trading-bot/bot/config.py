@@ -501,6 +501,15 @@ class LighterConfig:
     max_leaders: int = 5          # so viele Beste werden gemessen
     initial_equity: float = 10_000  # Paper-Konto der Lighter-Messung
     throttle_s: float = 0.25      # Pause zwischen Konto-Reads (Rate-Limit-Hygiene)
+    # Nutzer-Entscheidung (17.07., Option B): Lighter-Signale zusätzlich ins
+    # Sprint-Buch einspeisen, nicht nur isoliert in lighter_shadow.json messen.
+    # EIGENER Schalter, getrennt von `enabled` - die isolierte Messung soll
+    # weiterlaufen können, ohne automatisch auch das Sprint-Buch zu beeinflussen.
+    # Lighter hat kein Ranking-API (keine Fill-Historie -> kein LARP-/Drawdown-
+    # Gate möglich wie bei HL-Kandidaten) - die Qualitätskontrolle übernehmen
+    # bei diesen Leadern ausschließlich die normalen Sprint-Strikes/der
+    # Zeit+negativ-Cut, kein Vorab-Filter.
+    sprint_promote: bool = False
 
     def __post_init__(self):
         if self.accounts is None:

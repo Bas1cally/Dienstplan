@@ -270,10 +270,15 @@ sprint:
 # gleichgewichtet in ein PAPER-Buch, gepreist mit HL-Preisen - reine Messung,
 # kein Einfluss aufs Haupt-Buch. Read-only, Ausführung bleibt Hyperliquid.
 lighter:
-  enabled: false           # SPRINT-FOKUS (15.07.): aus. Reine Mess-Spur ohne
-                          # Einfluss auf Haupt-Buch ODER Sprint (kein Promotion-
-                          # Pfad in den Sprint-Pool implementiert) - im 33-Tage-
-                          # Report -8.22%, kostet nur API-Last ohne Sprint-Nutzen.
+  enabled: false           # AUS: Reine Mess-Spur ohne Einfluss auf Haupt-Buch
+                          # ODER Sprint, solange dieses Flag aus bleibt. Der
+                          # 33-Tage-Report der isolierten Messung war -8.22% -
+                          # das war aber eine andere Mechanik (Dauer-Rebalancing
+                          # auf Zielgewichte), nicht das Sprint-Signalmodell
+                          # (frisches 0->Position, Strike-Bann). Seit 17.07.
+                          # existiert ein Promotion-Pfad ins Sprint-Buch (s.u.
+                          # sprint_promote) - erst EXPLIZIT beide Flags an
+                          # scharf schalten, keine automatische Aktivierung.
   auto_discover: true
   coins: [BTC, ETH, SOL, HYPE, DOGE, AVAX, LINK, ARB]  # nur auf HL handelbare
   scan_seconds: 300
@@ -281,6 +286,16 @@ lighter:
   min_equity: 5000
   max_leaders: 5
   copy_ratio: 0.5
+  sprint_promote: false    # Nutzer-Entscheidung (17.07., Option B): Lighter-
+                          # Signale zusätzlich ins Sprint-Buch einspeisen
+                          # (eigener lighter:-Adress-Namensraum, kollidiert nie
+                          # mit echten HL-Adressen). EIGENER Schalter, getrennt
+                          # von enabled oben - braucht BEIDE an. Lighter hat
+                          # kein Ranking-API (keine Fill-Historie -> kein LARP-/
+                          # Drawdown-Gate wie bei HL-Kandidaten möglich) - die
+                          # Qualitätskontrolle übernehmen bei diesen Leadern
+                          # ausschließlich Strikes (2 Verlust-Ritte -> Bann)
+                          # und der Zeit+negativ-Cut, kein Vorab-Filter.
 
 # === HyperTracker (CoinMarketMan): reichhaltiges Leader-Leaderboard ===
 # Vorberechnetes Perp-PnL-Leaderboard (Tag/Woche/Monat/all-time) + Exposure,

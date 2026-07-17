@@ -163,6 +163,88 @@ def test_rank_filters_and_tops():
     assert addrs[0] == "1", "aktivstes Konto zuerst (Equity x Positionen)"
 
 
+def test_sprint_snapshots_prefixes_addresses_and_filters_priceable_coins():
+    """Nutzer-Entscheidung (17.07., Option B): Lighter-Leader fürs Sprint-Buch
+    bekommen einen eigenen Adress-Namensraum (lighter:-Präfix), damit sie nie
+    mit echten HL-Adressen in strikes/banned/confidence kollidieren. Score
+    bewusst fix und niedrig (kein Ranking-API bei Lighter)."""
+    import tempfile
+
+    from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
+    from bot.sources.lighter import LighterShadow
+
+    cfg = LighterConfig(max_leaders=5)
+    with tempfile.TemporaryDirectory() as tmp:
+        sh = LighterShadow(cfg, 0.00045, source=LighterSource(cfg), runtime_dir=Path(tmp))
+        sh._leaders = [LeaderSnapshot("42", 10_000.0, {
+            "BTC": LeaderPosition(coin="BTC", size=1.0, entry=100.0,
+                                  position_value=1000.0, leverage=1),
+            "UNPRICEABLE": LeaderPosition(coin="UNPRICEABLE", size=1.0, entry=1.0,
+                                          position_value=1.0, leverage=1),
+        })]
+        leaders, snaps = sh.sprint_snapshots({"BTC": 65_000.0})
+
+    assert leaders == [{"address": "lighter:42", "score": 15.0, "weight": 1.0}]
+    assert len(snaps) == 1 and snaps[0].address == "lighter:42"
+    assert list(snaps[0].positions.keys()) == ["BTC"], "unpreisbarer Coin rausgefiltert"
+
+
+def test_sprint_snapshots_respects_max_leaders_cap():
+    import tempfile
+
+    from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
+    from bot.sources.lighter import LighterShadow
+
+    cfg = LighterConfig(max_leaders=2)
+    with tempfile.TemporaryDirectory() as tmp:
+        sh = LighterShadow(cfg, 0.00045, source=LighterSource(cfg), runtime_dir=Path(tmp))
+        sh._leaders = [
+            LeaderSnapshot(str(i), 10_000.0, {
+                "BTC": LeaderPosition(coin="BTC", size=1.0, entry=100.0,
+                                      position_value=1000.0, leverage=1),
+            }) for i in range(5)
+        ]
+        leaders, snaps = sh.sprint_snapshots({"BTC": 65_000.0})
+    assert len(leaders) == 2 and len(snaps) == 2
+
+
+def test_sprint_snapshots_drops_leader_without_any_priceable_position():
+    import tempfile
+
+    from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
+    from bot.sources.lighter import LighterShadow
+
+    cfg = LighterConfig()
+    with tempfile.TemporaryDirectory() as tmp:
+        sh = LighterShadow(cfg, 0.00045, source=LighterSource(cfg), runtime_dir=Path(tmp))
+        sh._leaders = [LeaderSnapshot("9", 10_000.0, {
+            "UNPRICEABLE": LeaderPosition(coin="UNPRICEABLE", size=1.0, entry=1.0,
+                                          position_value=1.0, leverage=1),
+        })]
+        leaders, snaps = sh.sprint_snapshots({"BTC": 65_000.0})
+    assert leaders == [] and snaps == []
+
+
+def test_sprint_snapshots_uses_cached_leaders_no_extra_network_call():
+    """KEIN eigener rank()-Aufruf - nutzt exakt den scan_seconds-gedrosselten
+    Cache aus tick(), kein zusätzliches Lighter-API-Budget."""
+    import tempfile
+
+    from bot.copytrade.tracker import LeaderSnapshot
+    from bot.sources.lighter import LighterShadow
+
+    cfg = LighterConfig()
+
+    class _BoomSource(LighterSource):
+        def rank(self):
+            raise AssertionError("sprint_snapshots darf rank() nicht selbst aufrufen")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        sh = LighterShadow(cfg, 0.00045, source=_BoomSource(cfg), runtime_dir=Path(tmp))
+        sh._leaders = [LeaderSnapshot("1", 1000.0, {})]
+        sh.sprint_snapshots({"BTC": 1.0})   # darf nicht raisen
+
+
 def test_lighter_shadow_reconciles_and_persists():
     import tempfile
     accounts = {"1": acct(20_000, pos("BTC", 1, 1, 60_000))}

@@ -305,6 +305,39 @@ class LighterShadow:
         for o in plan_rebalance(targets, self.paper.sizes(), hl_prices, equity, self._ct):
             self.paper.execute(o.coin, o.delta_size, o.price)
 
+    def sprint_snapshots(self, hl_prices: dict[str, float],
+                         prefix: str = "lighter:") -> tuple[list[dict], list]:
+        """Liefert die zuletzt gescannten Lighter-Leader im Sprint-tick()-Format
+        (leaders, snapshots) - Nutzer-Entscheidung (17.07., Option B): Sprint
+        soll Lighter-Signale direkt lesen können, nicht nur isoliert im
+        lighter_shadow.json messen. Adressen bekommen `prefix`, damit sie NIE
+        mit echten HL-Adressen in strikes/banned/confidence kollidieren (Lighter
+        liefert i.d.R. numerische Konto-Indizes statt 0x-Adressen, aber sicher
+        ist sicher - dasselbe Muster wie 'xyz:' bei Aktien-Coins).
+
+        KEIN eigener Netz-Call: nutzt exakt den scan_seconds-gedrosselten Cache
+        aus tick() (self._leaders) - kostet kein zusätzliches Lighter-API-
+        Budget, egal wie oft Sprint tickt. Score bewusst NIEDRIG und FIX (kein
+        Ranking-API bei Lighter, siehe LighterSource-Docstring - es gibt
+        schlicht keine Historie, aus der sich ein Score ableiten ließe): bei
+        einem vollen Pool sollen vetted HL-Kandidaten Lighter-Funde immer
+        verdrängen, nicht umgekehrt. Die eigentliche Qualitätskontrolle
+        übernehmen wie bei jedem anderen Sprint-Leader die Strikes (2 Verlust-
+        Ritte -> Bann) und der Zeit+negativ-Cut - hier ohne den Vorab-Filter
+        (LARP/Drawdown-Gate), den es für HL-Kandidaten gibt, weil Lighter dafür
+        keine Fill-Historie hergibt."""
+        LIGHTER_SPRINT_SCORE = 15.0
+        leaders: list[dict] = []
+        snaps: list = []
+        for snap in self._leaders[: self.cfg.max_leaders]:
+            pos = {c: p for c, p in snap.positions.items() if hl_prices.get(c)}
+            if not pos:
+                continue
+            addr = f"{prefix}{snap.address}"
+            leaders.append({"address": addr, "score": LIGHTER_SPRINT_SCORE, "weight": 1.0})
+            snaps.append(LeaderSnapshot(addr, snap.equity, pos))
+        return leaders, snaps
+
     def stats(self, hl_prices: dict[str, float]) -> dict:
         eq = self.paper.equity(hl_prices) if hl_prices else self.cfg.initial_equity + self.paper.realized_pnl
         return {

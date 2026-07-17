@@ -517,6 +517,22 @@ class Autopilot:
             lines.append("<i>📈 = hält gerade eine Position | · = flach</i>"
                          + (f" | 💤 = >{self.cfg.sprint.rotate_idle_hours:.0f}h stumm" if idle else "")
                          + (" | 🔸 = Confidence-Fortschritt zum ⭐" if any_confidence else ""))
+            # Lighter-Signale (Nutzer 17.07., Option B) separat anzeigen - sie
+            # stehen nie in self.sprint_leaders (nur ad-hoc pro Tick beigemischt,
+            # siehe _sprint_tick_inputs), wären hier sonst unsichtbar obwohl sie
+            # tatsächlich mitscannen.
+            if self.lighter and self.cfg.lighter.sprint_promote:
+                extra_leaders, extra_snaps = self.lighter.sprint_snapshots(prices)
+                if extra_leaders:
+                    extra_holds = {s.address.lower(): bool(s.positions) for s in extra_snaps}
+                    lines.append(f"\n<b>+ Lighter-Signale</b> "
+                                f"({sum(extra_holds.values())}/{len(extra_leaders)} halten "
+                                f"Positionen, kein Vorab-Filter - nur Strikes/Zeit-Cut)")
+                    for l in extra_leaders:
+                        a = str(l["address"])
+                        mark = " 🚫" if a.lower() in banned else ""
+                        pos = "📈" if extra_holds.get(a.lower()) else "· "
+                        lines.append(f"{pos}<code>{a}</code> Score {l['score']:.0f}{mark}")
             return "\n".join(lines)
         if arg.lower().strip() == "assets":
             return self._sprint_asset_breakdown()
@@ -998,6 +1014,8 @@ class Autopilot:
                 if self.labs and self.copier:
                     self.labs.tick(self.copier.last_prices)
                     self.labs.persist_stats(self.copier.last_prices)
+                if self.lighter and self.copier:
+                    self.lighter.tick(self.copier.last_prices)
                 if self.sprint and self.copier and self.copier.last_snapshots:
                     from .news.guard import RiskLevel
 
@@ -1006,11 +1024,10 @@ class Autopilot:
                     # dem neuen Zustand scannt.
                     self._maybe_market_gong()
                     off = bool(self.guard and self.guard.last_level == RiskLevel.RISK_OFF)
-                    self.sprint.tick(self.sprint_leaders, self.copier.last_snapshots,
+                    sprint_leaders, sprint_snaps = self._sprint_tick_inputs()
+                    self.sprint.tick(sprint_leaders, sprint_snaps,
                                      self.copier.last_prices, risk_off=off)
                     self._maybe_warn_stale_feed()
-                if self.lighter and self.copier:
-                    self.lighter.tick(self.copier.last_prices)
                 self._maybe_digest()
                 self._maybe_watchdog()
                 self._maybe_push_status()
@@ -1191,6 +1208,25 @@ class Autopilot:
     # ---------- Leader-Analyse & Rotation ----------
 
     _SPRINT_POOL_FILE = "sprint_leaders.json"
+
+    def _sprint_tick_inputs(self) -> tuple[list[dict], list]:
+        """Baut (leaders, snapshots) für sprint.tick(): der HL-Pool, plus
+        optional Lighter-Signale (Nutzer-Entscheidung 17.07., Option B), wenn
+        lighter.sprint_promote an ist. Eigene Methode statt Inline-Logik im
+        Tick-Loop, damit der Merge ohne den ganzen Hintergrund-Loop testbar
+        ist. Lighter-Adressen kommen mit eigenem Namensraum (lighter:-Präfix,
+        siehe LighterShadow.sprint_snapshots) - kollidieren nie mit echten
+        HL-Adressen in strikes/banned/confidence. Nutzt lighter.tick()s (im
+        Aufrufer VOR diesem Call) ohnehin scan_seconds-gedrosselten Cache -
+        kein zusätzlicher Lighter-Netz-Call hier."""
+        leaders = self.sprint_leaders
+        snaps = self.copier.last_snapshots if self.copier else []
+        if self.lighter and self.cfg.lighter.sprint_promote:
+            extra_leaders, extra_snaps = self.lighter.sprint_snapshots(
+                self.copier.last_prices if self.copier else {})
+            leaders = leaders + extra_leaders
+            snaps = snaps + extra_snaps
+        return leaders, snaps
 
     def _load_or_analyze_leaders(self) -> None:
         path = Path(self.cfg.copytrade.leaders_file)

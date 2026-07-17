@@ -280,6 +280,53 @@ def test_cmd_status_push_forces_immediate_push_bypassing_interval():
     assert "✅" in out and "status-feed" in out
 
 
+def test_sprint_tick_inputs_without_lighter_promote_returns_hl_only():
+    ap = _autopilot()
+    ap.sprint_leaders = [{"address": "0xabc", "score": 80}]
+    ap.copier = type("C", (), {"last_snapshots": ["snap1"], "last_prices": {"BTC": 1.0}})()
+    ap.lighter = None
+    leaders, snaps = ap._sprint_tick_inputs()
+    assert leaders == [{"address": "0xabc", "score": 80}]
+    assert snaps == ["snap1"]
+
+
+def test_sprint_tick_inputs_merges_lighter_when_promote_enabled():
+    """Nutzer-Entscheidung (17.07., Option B): Lighter-Signale zusätzlich ins
+    Sprint-Buch, eigener Adress-Namensraum, kein Duplizieren der HL-Liste."""
+    ap = _autopilot()
+    ap.cfg.lighter.sprint_promote = True
+    ap.sprint_leaders = [{"address": "0xabc", "score": 80}]
+    ap.copier = type("C", (), {"last_snapshots": ["snap1"], "last_prices": {"BTC": 1.0}})()
+
+    class _FakeLighter:
+        def sprint_snapshots(self, prices):
+            assert prices == {"BTC": 1.0}
+            return ([{"address": "lighter:1", "score": 15.0, "weight": 1.0}],
+                    ["lighter_snap"])
+
+    ap.lighter = _FakeLighter()
+    leaders, snaps = ap._sprint_tick_inputs()
+    assert leaders == [{"address": "0xabc", "score": 80},
+                       {"address": "lighter:1", "score": 15.0, "weight": 1.0}]
+    assert snaps == ["snap1", "lighter_snap"]
+
+
+def test_sprint_tick_inputs_ignores_lighter_when_promote_disabled():
+    ap = _autopilot()
+    ap.cfg.lighter.sprint_promote = False
+    ap.sprint_leaders = [{"address": "0xabc", "score": 80}]
+    ap.copier = type("C", (), {"last_snapshots": ["snap1"], "last_prices": {}})()
+
+    class _BoomLighter:
+        def sprint_snapshots(self, prices):
+            raise AssertionError("darf nicht aufgerufen werden, wenn sprint_promote aus ist")
+
+    ap.lighter = _BoomLighter()
+    leaders, snaps = ap._sprint_tick_inputs()
+    assert leaders == [{"address": "0xabc", "score": 80}]
+    assert snaps == ["snap1"]
+
+
 def test_market_gong_first_call_syncs_crypto_only_no_action():
     """Erststart synchronisiert crypto_only mit dem Marktzustand, feuert aber
     KEINEN Gong (kein /analyze, keine Nachricht)."""
@@ -559,6 +606,51 @@ def test_cmd_quest_pool_shows_confidence_progress_and_star_badge():
         assert f"🔸15/{STAR_THRESHOLD}" in out
         assert "⭐" in out
         assert "Confidence-Fortschritt" in out   # Legende nur, wenn wirklich einer fortschreitet
+
+
+def test_cmd_quest_pool_shows_lighter_signals_when_promoted():
+    """Nutzer-Entscheidung (17.07., Option B): Lighter-Leader stehen nie in
+    self.sprint_leaders (nur ad-hoc pro Tick beigemischt, siehe
+    _sprint_tick_inputs) - ohne eigene Anzeige wären sie in /quest pool
+    unsichtbar, obwohl sie tatsächlich mitscannen."""
+    import tempfile
+
+    from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.lighter.sprint_promote = True
+        ap.sprint_leaders = [{"address": "0x" + "1" * 40, "score": 70}]
+
+        class _FakeLighter:
+            def sprint_snapshots(self, prices):
+                return ([{"address": "lighter:42", "score": 15.0, "weight": 1.0}],
+                        [LeaderSnapshot("lighter:42", 1000.0, {
+                            "BTC": LeaderPosition(coin="BTC", size=1.0, entry=100.0,
+                                                  position_value=1000.0, leverage=1)})])
+
+        ap.lighter = _FakeLighter()
+        out = ap._cmd_sprint("pool")
+        assert "Lighter-Signale" in out
+        assert "lighter:42" in out
+        assert "📈" in out   # hält gerade eine Position
+
+
+def test_cmd_quest_pool_omits_lighter_section_when_not_promoted():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.lighter.sprint_promote = False
+        ap.sprint_leaders = [{"address": "0x" + "1" * 40, "score": 70}]
+
+        class _BoomLighter:
+            def sprint_snapshots(self, prices):
+                raise AssertionError("darf nicht aufgerufen werden, wenn sprint_promote aus ist")
+
+        ap.lighter = _BoomLighter()
+        out = ap._cmd_sprint("pool")
+        assert "Lighter-Signale" not in out
 
 
 def test_build_sprint_pool_evicts_banned_larp_next_candidate_rises():
