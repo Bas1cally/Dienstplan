@@ -16,7 +16,6 @@ COINMARKETMAN_TOKEN, damit ein per Telegram/`.env`-Edit gesetzter Token ohne
 Neustart wirkt. Fehlt der Token oder schlägt der Push fehl: niemals fatal für
 den Tick-Loop, nur eine Warnung im Log (wie jede andere optionale Quelle hier).
 """
-import base64
 import json
 import logging
 import os
@@ -111,35 +110,74 @@ def build_snapshot(ap) -> dict:
 
 def push_snapshot(data: dict, repo: str, branch: str, path: str,
                   timeout: float = 15.0) -> bool:
-    """Schreibt `data` als JSON nach `path` auf `branch` von `repo`, via PUT
-    /repos/{repo}/contents/{path} (GitHub Contents API). Holt vorher den
-    aktuellen `sha` (nötig, um eine bestehende Datei zu überschreiben statt
-    einen Konflikt zu produzieren); 404 = Datei existiert noch nicht, dann
-    ohne sha anlegen. `branch` MUSS bereits existieren (die Contents-API legt
-    keine Branches an). True = geschrieben, False = kein Token oder Fehler."""
+    """Schreibt `data` als JSON nach `path` auf `branch` von `repo` - per GIT
+    DATA API als 'Amend' des jeweils letzten Commits, NICHT per einfachem PUT
+    über die Contents-API.
+
+    Wave-2-Audit-Fund (17.07.): ein simples 'PUT /contents' erzeugt bei GitHub
+    strukturell IMMER einen neuen Commit - bei interval_minutes=5 im 24/7-
+    Betrieb wären das ~288 Commits/Tag, unbegrenzt wachsend, ohne dass die
+    alten Commits für den eigentlichen Zweck (Claude liest den JEWEILS
+    AKTUELLEN Zustand) irgendeinen Wert hätten. Deshalb hier der Amend-Trick
+    rein über die REST-API (rührt KEINE lokale git-Arbeitskopie an, genau wie
+    vorher): neuer Commit bekommt denselben Eltern-Commit wie der aktuelle
+    HEAD und der Branch-Ref wird per force darauf umgebogen - der Branch
+    bleibt dauerhaft bei ~2 Commits (Ursprung + der eine, ständig ersetzte
+    Snapshot-Commit) statt unbegrenzt zu wachsen.
+
+    `branch` MUSS bereits existieren UND mindestens einen Commit haben (die
+    Git-Data-API legt keine Branches an). True = geschrieben, False = kein
+    Token oder Fehler (nie fatal für den Tick-Loop, siehe Aufrufer)."""
     token = os.environ.get(TOKEN_ENV, "").strip()
     if not token:
         return False
     headers = {"Authorization": f"Bearer {token}",
                "Accept": "application/vnd.github+json"}
-    url = f"{GITHUB_API}/repos/{repo}/contents/{path}"
+    base = f"{GITHUB_API}/repos/{repo}"
+    content = json.dumps(data, default=str, indent=2)
     try:
-        r = requests.get(url, headers=headers, params={"ref": branch}, timeout=timeout)
-        sha = r.json().get("sha") if r.status_code == 200 else None
-        if r.status_code not in (200, 404):
-            log.warning("Status-Push: GET %s -> %s: %s", path, r.status_code, r.text[:200])
+        r = requests.get(f"{base}/git/refs/heads/{branch}", headers=headers, timeout=timeout)
+        if r.status_code != 200:
+            log.warning("Status-Push: Branch-Ref %s nicht lesbar -> %s: %s",
+                       branch, r.status_code, r.text[:200])
             return False
-        body = {
-            "message": "status: Quest-Bot Snapshot",
-            "content": base64.b64encode(
-                json.dumps(data, default=str, indent=2).encode()).decode(),
-            "branch": branch,
-        }
-        if sha:
-            body["sha"] = sha
-        r = requests.put(url, headers=headers, json=body, timeout=timeout)
+        head_sha = r.json()["object"]["sha"]
+
+        r = requests.get(f"{base}/git/commits/{head_sha}", headers=headers, timeout=timeout)
+        if r.status_code != 200:
+            log.warning("Status-Push: HEAD-Commit nicht lesbar -> %s: %s",
+                       r.status_code, r.text[:200])
+            return False
+        head_commit = r.json()
+        parent_shas = [p["sha"] for p in head_commit.get("parents", [])]
+        base_tree = head_commit["tree"]["sha"]
+
+        r = requests.post(f"{base}/git/trees", headers=headers, timeout=timeout, json={
+            "base_tree": base_tree,
+            "tree": [{"path": path, "mode": "100644", "type": "blob", "content": content}],
+        })
         if r.status_code not in (200, 201):
-            log.warning("Status-Push: PUT %s -> %s: %s", path, r.status_code, r.text[:200])
+            log.warning("Status-Push: Baum-Erstellung fehlgeschlagen -> %s: %s",
+                       r.status_code, r.text[:200])
+            return False
+        new_tree_sha = r.json()["sha"]
+
+        r = requests.post(f"{base}/git/commits", headers=headers, timeout=timeout, json={
+            "message": "status: Quest-Bot Snapshot",
+            "tree": new_tree_sha,
+            "parents": parent_shas,
+        })
+        if r.status_code not in (200, 201):
+            log.warning("Status-Push: Commit-Erstellung fehlgeschlagen -> %s: %s",
+                       r.status_code, r.text[:200])
+            return False
+        new_commit_sha = r.json()["sha"]
+
+        r = requests.patch(f"{base}/git/refs/heads/{branch}", headers=headers, timeout=timeout,
+                           json={"sha": new_commit_sha, "force": True})
+        if r.status_code not in (200, 201):
+            log.warning("Status-Push: Ref-Update fehlgeschlagen -> %s: %s",
+                       r.status_code, r.text[:200])
             return False
         return True
     except Exception:

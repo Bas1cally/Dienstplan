@@ -1,9 +1,14 @@
 """Tests für den Status-Spiegel (bot/status_push.py): schreibt einen JSON-
 Schnappschuss übers GitHub-Repo, damit Claude den Bot-Zustand direkt lesen
 kann statt ihn manuell aus Telegram kopiert zu bekommen (Nutzer 17.07.).
-Netzfrei - requests.get/put werden gefaked."""
+Netzfrei - requests.get/post/patch werden gefaked.
 
-import base64
+push_snapshot() 'amended' den letzten Commit über die Git-Data-API (Wave-2-
+Audit-Fund 17.07.: eine simple Contents-API-PUT hätte bei alle-5min-Pushes
+im 24/7-Betrieb unbegrenzt viele Commits erzeugt) - die Fakes hier bilden
+den kompletten Fünf-Schritt-Ablauf nach (GET ref -> GET commit -> POST tree
+-> POST commit -> PATCH ref, force)."""
+
 import json
 import sys
 from pathlib import Path
@@ -23,6 +28,57 @@ class _FakeResp:
         return self._payload
 
 
+def _fake_git_api(calls, ref_status=200, commit_status=200, tree_status=201,
+                  commit_create_status=201, patch_status=200, parents=None):
+    """Baut fake get/post/patch-Funktionen für den Amend-Ablauf. `parents`:
+    Liste von Parent-SHAs des HEAD-Commits (Default: ein Parent)."""
+    parents = [{"sha": "parent1"}] if parents is None else parents
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        calls.append(("GET", url))
+        if url.endswith("/git/refs/heads/status-feed"):
+            if ref_status != 200:
+                return _FakeResp(status=ref_status, text="not found")
+            return _FakeResp(status=200, payload={"object": {"sha": "head1"}})
+        if "/git/commits/head1" in url:
+            if commit_status != 200:
+                return _FakeResp(status=commit_status, text="error")
+            return _FakeResp(status=200, payload={
+                "tree": {"sha": "tree1"}, "parents": parents})
+        raise AssertionError(f"unerwartetes GET {url}")
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(("POST", url, json))
+        if url.endswith("/git/trees"):
+            if tree_status not in (200, 201):
+                return _FakeResp(status=tree_status, text="tree error")
+            return _FakeResp(status=tree_status, payload={"sha": "tree2"})
+        if url.endswith("/git/commits"):
+            if commit_create_status not in (200, 201):
+                return _FakeResp(status=commit_create_status, text="commit error")
+            return _FakeResp(status=commit_create_status, payload={"sha": "commit2"})
+        raise AssertionError(f"unerwartetes POST {url}")
+
+    def fake_patch(url, headers=None, json=None, timeout=None):
+        calls.append(("PATCH", url, json))
+        return _FakeResp(status=patch_status, text="" if patch_status in (200, 201) else "conflict")
+
+    return fake_get, fake_post, fake_patch
+
+
+def _patch_requests(sp, fake_get, fake_post, fake_patch):
+    orig = (sp.requests.get, sp.requests.post, sp.requests.patch, dict(sp.os.environ))
+    sp.requests.get, sp.requests.post, sp.requests.patch = fake_get, fake_post, fake_patch
+    sp.os.environ[TOKEN_ENV] = "ghp_test"
+    return orig
+
+
+def _restore_requests(sp, orig):
+    sp.requests.get, sp.requests.post, sp.requests.patch = orig[0], orig[1], orig[2]
+    sp.os.environ.clear()
+    sp.os.environ.update(orig[3])
+
+
 def test_push_without_token_is_a_noop():
     import bot.status_push as sp
 
@@ -36,86 +92,96 @@ def test_push_without_token_is_a_noop():
         sp.os.environ.update(orig_env)
 
 
-def test_push_creates_new_file_without_sha_when_missing():
-    """Datei existiert noch nicht (404 auf GET) -> PUT OHNE sha, sonst lehnt
-    GitHub die Erstellung ab (sha ist nur für ÜBERSCHREIBEN Pflicht)."""
+def test_push_amends_head_commit_with_same_parent():
+    """Kernverhalten: der neue Commit bekommt DENSELBEN Parent wie der
+    aktuelle HEAD (Amend, kein Anhängen) und der Ref wird per force
+    umgebogen - der Branch wächst dadurch nie über ~2 Commits hinaus."""
     import bot.status_push as sp
 
     calls = []
-
-    def fake_get(url, headers=None, params=None, timeout=None):
-        calls.append(("GET", url, params))
-        return _FakeResp(status=404, text="Not Found")
-
-    def fake_put(url, headers=None, json=None, timeout=None):
-        calls.append(("PUT", url, json))
-        return _FakeResp(status=201, payload={"content": {"sha": "new"}})
-
-    orig_get, orig_put, orig_env = sp.requests.get, sp.requests.put, dict(sp.os.environ)
-    sp.requests.get, sp.requests.put = fake_get, fake_put
-    sp.os.environ[TOKEN_ENV] = "ghp_test"
+    fake_get, fake_post, fake_patch = _fake_git_api(calls)
+    orig = _patch_requests(sp, fake_get, fake_post, fake_patch)
     try:
         ok = push_snapshot({"quest": "ok"}, repo="x/y", branch="status-feed",
                            path="trading-bot/status/quest_status.json")
     finally:
-        sp.requests.get, sp.requests.put = orig_get, orig_put
-        sp.os.environ.clear()
-        sp.os.environ.update(orig_env)
+        _restore_requests(sp, orig)
 
     assert ok is True
-    assert calls[0][0] == "GET" and calls[0][2] == {"ref": "status-feed"}
-    method, url, body = calls[1]
-    assert method == "PUT" and "sha" not in body
-    decoded = json.loads(base64.b64decode(body["content"]))
-    assert decoded == {"quest": "ok"}
+    kinds = [c[0] for c in calls]
+    assert kinds == ["GET", "GET", "POST", "POST", "PATCH"]
+    tree_call = calls[2]
+    assert tree_call[1].endswith("/git/trees")
+    assert tree_call[2]["base_tree"] == "tree1"
+    leaf = tree_call[2]["tree"][0]
+    assert leaf["path"] == "trading-bot/status/quest_status.json"
+    assert json.loads(leaf["content"]) == {"quest": "ok"}, "Klartext, kein base64 nötig"
+    commit_call = calls[3]
+    assert commit_call[1].endswith("/git/commits")
+    assert commit_call[2]["parents"] == ["parent1"], "amend: gleicher Parent wie HEAD"
+    assert commit_call[2]["tree"] == "tree2"
+    patch_call = calls[4]
+    assert patch_call[2] == {"sha": "commit2", "force": True}
 
 
-def test_push_reuses_sha_when_file_exists():
-    """Datei existiert schon (200 auf GET mit sha) -> PUT MUSS den sha
-    mitschicken, sonst lehnt GitHub die Überschreibung als Konflikt ab."""
+def test_push_root_commit_without_parents_stays_rootless():
+    """Randfall: HEAD hat keinen Parent (Root-Commit) - der neue Commit
+    bekommt dann ebenfalls keinen, statt an einem nicht-existenten Parent
+    zu crashen."""
     import bot.status_push as sp
 
     calls = []
-
-    def fake_get(url, headers=None, params=None, timeout=None):
-        return _FakeResp(status=200, payload={"sha": "abc123"})
-
-    def fake_put(url, headers=None, json=None, timeout=None):
-        calls.append(json)
-        return _FakeResp(status=200)
-
-    orig_get, orig_put, orig_env = sp.requests.get, sp.requests.put, dict(sp.os.environ)
-    sp.requests.get, sp.requests.put = fake_get, fake_put
-    sp.os.environ[TOKEN_ENV] = "ghp_test"
+    fake_get, fake_post, fake_patch = _fake_git_api(calls, parents=[])
+    orig = _patch_requests(sp, fake_get, fake_post, fake_patch)
     try:
         ok = push_snapshot({"a": 1}, repo="x/y", branch="status-feed", path="p.json")
     finally:
-        sp.requests.get, sp.requests.put = orig_get, orig_put
-        sp.os.environ.clear()
-        sp.os.environ.update(orig_env)
-
+        _restore_requests(sp, orig)
     assert ok is True
-    assert calls[0]["sha"] == "abc123"
+    commit_call = next(c for c in calls if c[0] == "POST" and c[1].endswith("/git/commits"))
+    assert commit_call[2]["parents"] == []
 
 
-def test_push_returns_false_on_put_failure_without_raising():
+def test_push_returns_false_when_ref_unreadable():
     import bot.status_push as sp
 
-    def fake_get(url, headers=None, params=None, timeout=None):
-        return _FakeResp(status=404)
-
-    def fake_put(url, headers=None, json=None, timeout=None):
-        return _FakeResp(status=403, text="rate limited")
-
-    orig_get, orig_put, orig_env = sp.requests.get, sp.requests.put, dict(sp.os.environ)
-    sp.requests.get, sp.requests.put = fake_get, fake_put
-    sp.os.environ[TOKEN_ENV] = "ghp_test"
+    calls = []
+    fake_get, fake_post, fake_patch = _fake_git_api(calls, ref_status=404)
+    orig = _patch_requests(sp, fake_get, fake_post, fake_patch)
     try:
         ok = push_snapshot({"a": 1}, repo="x/y", branch="status-feed", path="p.json")
     finally:
-        sp.requests.get, sp.requests.put = orig_get, orig_put
-        sp.os.environ.clear()
-        sp.os.environ.update(orig_env)
+        _restore_requests(sp, orig)
+    assert ok is False
+    assert len(calls) == 1, "kein weiterer Call, wenn der Branch-Ref schon fehlschlägt"
+
+
+def test_push_returns_false_when_tree_creation_fails():
+    import bot.status_push as sp
+
+    calls = []
+    fake_get, fake_post, fake_patch = _fake_git_api(calls, tree_status=422)
+    orig = _patch_requests(sp, fake_get, fake_post, fake_patch)
+    try:
+        ok = push_snapshot({"a": 1}, repo="x/y", branch="status-feed", path="p.json")
+    finally:
+        _restore_requests(sp, orig)
+    assert ok is False
+
+
+def test_push_returns_false_on_ref_conflict_without_raising():
+    """Zwei gleichzeitige Pushes (Haupt-Loop + manuelles /statuspush) könnten
+    um den Ref konkurrieren - ein Fehlschlag beim finalen PATCH darf nie
+    eine Exception werfen, nur False liefern."""
+    import bot.status_push as sp
+
+    calls = []
+    fake_get, fake_post, fake_patch = _fake_git_api(calls, patch_status=409)
+    orig = _patch_requests(sp, fake_get, fake_post, fake_patch)
+    try:
+        ok = push_snapshot({"a": 1}, repo="x/y", branch="status-feed", path="p.json")
+    finally:
+        _restore_requests(sp, orig)
     assert ok is False
 
 

@@ -104,6 +104,15 @@ def test_leverage_desc_lists_overrides_sorted():
     assert ap._leverage_desc() == "x10 (BTC x20, ETH x15)"
 
 
+def _join_status_push(ap, timeout=2.0):
+    """Wave-2-Fund (17.07.): push_snapshot läuft jetzt im Hintergrund-Thread
+    (löst das Blockier-Problem) - Tests müssen deterministisch auf ihn warten,
+    statt sich auf Zufalls-Timing zu verlassen."""
+    t = ap._status_push_thread
+    if t is not None:
+        t.join(timeout=timeout)
+
+
 def test_maybe_push_status_respects_enabled_flag():
     ap = _autopilot()
     ap.cfg.status_push.enabled = False
@@ -114,6 +123,7 @@ def test_maybe_push_status_respects_enabled_flag():
     sp_mod.push_snapshot = lambda *a, **k: calls.append(1) or True
     try:
         ap._maybe_push_status()
+        _join_status_push(ap)
     finally:
         sp_mod.push_snapshot = orig
     assert calls == [], "enabled=false -> nie pushen"
@@ -132,7 +142,9 @@ def test_maybe_push_status_respects_interval_gate():
     sp_mod.push_snapshot = lambda *a, **k: calls.append(1) or True
     try:
         ap._maybe_push_status()
+        _join_status_push(ap)
         ap._maybe_push_status()   # sofort erneut - Intervall noch nicht um
+        _join_status_push(ap)
     finally:
         sp_mod.push_snapshot = orig
     assert len(calls) == 1
@@ -149,11 +161,45 @@ def test_maybe_push_status_fires_again_after_interval():
     sp_mod.push_snapshot = lambda *a, **k: calls.append(1) or True
     try:
         ap._maybe_push_status()
+        _join_status_push(ap)
         ap._last_status_push -= 301   # Intervall künstlich verstreichen lassen
         ap._maybe_push_status()
+        _join_status_push(ap)
     finally:
         sp_mod.push_snapshot = orig
     assert len(calls) == 2
+
+
+def test_maybe_push_status_skips_while_previous_push_still_running():
+    """Neu (Wave-2-Fund 17.07.): der Hintergrund-Thread darf nicht doppelt
+    laufen, wenn ein vorheriger Push (Netzwerk) noch nicht fertig ist."""
+    import threading
+
+    ap = _autopilot()
+    ap.cfg.status_push.enabled = True
+    ap.cfg.status_push.interval_minutes = 5
+    import bot.status_push as sp_mod
+
+    calls = []
+    release = threading.Event()
+
+    def slow_push(*a, **k):
+        calls.append(1)
+        release.wait(timeout=2)
+        return True
+
+    orig = sp_mod.push_snapshot
+    sp_mod.push_snapshot = slow_push
+    try:
+        ap._maybe_push_status()          # startet den (blockierten) Hintergrund-Push
+        ap._last_status_push -= 301      # Intervall künstlich verstreichen lassen
+        ap._maybe_push_status()          # sollte NICHT parallel pushen (noch "running")
+        release.set()
+        _join_status_push(ap)
+    finally:
+        sp_mod.push_snapshot = orig
+        release.set()
+    assert len(calls) == 1, "kein Parallel-Push, solange der vorherige noch läuft"
 
 
 def test_funnel_cache_survives_restart():

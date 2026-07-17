@@ -26,8 +26,10 @@ ZYKLUS = RITT (v3, vorher: mehrere Ritte akkumulierten in einem Zyklus).
 
   LARP-Strikes bleiben ritt-scharf: Verlust-Ritt -> Strike +1, Gewinn-Ritt
   heilt einen Strike (min 0); 2 Strikes -> Leader fürs Sprint-Buch gesperrt.
-  Ausnahme: manueller Close und RISK_OFF sind nicht die Entscheidung/Schuld
-  des Leaders - kein Strike, PnL wird trotzdem sofort verbucht.
+  Ausnahme: RISK_OFF/Börsen-Schluss sind erzwungene Schließungen, nicht die
+  Entscheidung/Schuld des Leaders - kein Strike. Ein manueller Close (Nutzer-
+  Entscheidung 17.07.) striked dagegen wie jeder andere Ritt - meist genau
+  DESHALB manuell, weil er schon erkennbar schlecht läuft.
 
 Nur Paper-Modus; Fees konservativ als Taker.
 """
@@ -970,7 +972,10 @@ class SprintBook:
         TP/Bust-Pfad (noch offene Positionen) schließt es hier alles auf einmal.
 
         Strikes bleiben ritt-scharf: Verlust -> Strike, Gewinn heilt einen (min 0).
-        Ausnahme 'manual'/'risk_off' - nicht die Entscheidung/Schuld des Leaders."""
+        Ausnahme 'risk_off'/'markt_zu' - erzwungene/externe Schließung, nicht die
+        Entscheidung/Schuld des Leaders. 'manual' war früher auch exempt, striked
+        seit 17.07. (Nutzer-Entscheidung) aber wie jeder andere Ritt - siehe
+        _STRIKE_EXEMPT."""
         self.paper.flatten(prices)
         leader = self.ride_leader
         pnl = self.paper.equity(prices) - self.cfg.equity

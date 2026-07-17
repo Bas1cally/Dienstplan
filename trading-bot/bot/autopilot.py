@@ -152,6 +152,8 @@ class Autopilot:
         self._lock = threading.Lock()
         self._last_analysis = 0.0
         self._last_status_push = 0.0   # siehe _maybe_push_status
+        self._status_push_running = False   # verhindert Parallel-Pushes im Hintergrund-Thread
+        self._status_push_thread: threading.Thread | None = None
         # Tick-Loop-Gesundheit fürs Status-Spiegel (Nutzer 17.07., 'kein blinder
         # Fleck mehr') - bisher nur im Server-Log sichtbar, wenn ein Tick
         # crasht; jetzt auch im Snapshot, ohne dass jemand den Log lesen muss.
@@ -460,11 +462,16 @@ class Autopilot:
         prices = self.copier.last_prices if self.copier else {}
         if arg.lower().strip() == "close":
             n = self.sprint.close(prices)
+            # Nutzer-Fund (17.07., Wave-2-Audit): "kein Strike" stimmte seit dem
+            # Entfernen von "manual" aus _STRIKE_EXEMPT nicht mehr - ein manueller
+            # Close im Minus striked den Leader jetzt wie jeder andere Verlust-Ritt.
             return (f"⏹ Quest-Zyklus manuell beendet ({n} Position(en)) - sofort "
-                    "verbucht, kein Strike. Nächster Zyklus wartet auf frisches Signal."
+                    "verbucht (Verlust striked den Leader wie jeder andere Ritt, "
+                    "Gewinn heilt). Nächster Zyklus wartet auf frisches Signal."
                     if n else "Quest-Bot hält gerade nichts.")
         if arg.lower().strip() == "reset":
-            n = self.sprint.close(prices)   # offene Position(en) zuerst sauber raus, kein Strike
+            # verbucht wie /quest close (s.o.) - Verlust striked, Gewinn heilt
+            n = self.sprint.close(prices)   # offene Position(en) zuerst sauber raus
             self.sprint.reset_bilanz()
             return ("🧹 <b>Bilanz zurückgesetzt</b>: Zyklus 1, Schatztruhe 0,00 $"
                     + (f" ({n} offene Position(en) davor geschlossen)" if n else "")
@@ -1542,6 +1549,12 @@ class Autopilot:
                 )
             self.leaders = new_leaders
             Path(self.cfg.copytrade.leaders_file).write_text(json.dumps(new_leaders, indent=2))
+            # copier.weights wird nur vom Rebalance-/Order-Pfad im Hauptbuch gelesen
+            # (copier.py compute_targets) - bei feed_only=true (config.yaml, dauerhaft
+            # an: "es gibt nur noch den Quest-Bot") wird dieser Pfad nie erreicht,
+            # tick() kehrt vorher zurück. Bewusst NICHT entfernt (Wave-2-Audit-Fund
+            # 17.07.): reine Zuweisung, kostet nichts, und greift sofort wieder
+            # korrekt, falls feed_only je zurückgestellt wird.
             if self.copier:
                 self.copier.weights = {l["address"]: float(l["weight"]) for l in new_leaders}
             if self.feed:
@@ -1686,18 +1699,39 @@ class Autopilot:
         Schnappschuss übers Repo, damit der aktuelle Bot-Zustand direkt per
         Lesezugriff verfügbar ist statt manuell aus Telegram kopiert werden zu
         müssen. Kein Token gesetzt oder push fehlgeschlagen -> niemals fatal,
-        einfach beim nächsten Intervall erneut versuchen (siehe status_push.py)."""
+        einfach beim nächsten Intervall erneut versuchen (siehe status_push.py).
+
+        Netzwerk-Teil (push_snapshot, mehrere GitHub-API-Calls) läuft im
+        HINTERGRUND (Wave-2-Audit-Fund 17.07.): synchron blockierte das eine
+        langsame GitHub-Antwort bis zu ~30s den einzigen Tick-Thread - genau
+        das Muster, das _maybe_reanalyze schon lange als Hintergrund-Job löst
+        (Kommentar dort: 'blockierte vorher den ganzen Loop'). build_snapshot()
+        selbst bleibt synchron (nur Attribut-Reads + ein schneller git-Aufruf) -
+        der Schnappschuss soll den Zustand GENAU JETZT zeigen, nicht den vom
+        Ende eines womöglich sekundenlangen Netzwerk-Calls."""
         sp = self.cfg.status_push
         if not sp.enabled:
             return
         if time.time() - self._last_status_push < sp.interval_minutes * 60:
             return
+        if self._status_push_running:
+            return   # vorheriger Push (Netzwerk) läuft noch - kein Parallel-Push
         self._last_status_push = time.time()
         from .status_push import build_snapshot, push_snapshot
 
-        ok = push_snapshot(build_snapshot(self), repo=sp.repo, branch=sp.branch, path=sp.path)
-        if not ok:
-            log.debug("Status-Push nicht geschrieben (kein Token oder Fehler, siehe Log)")
+        snapshot = build_snapshot(self)
+        self._status_push_running = True
+
+        def run() -> None:
+            try:
+                ok = push_snapshot(snapshot, repo=sp.repo, branch=sp.branch, path=sp.path)
+                if not ok:
+                    log.debug("Status-Push nicht geschrieben (kein Token oder Fehler, siehe Log)")
+            finally:
+                self._status_push_running = False
+
+        self._status_push_thread = threading.Thread(target=run, daemon=True, name="status-push")
+        self._status_push_thread.start()
 
     def _maybe_market_gong(self, now=None) -> None:
         """Worldclock (Nutzer): zum US-Börsen-GONG den Aktien-Basket auf/zu.
