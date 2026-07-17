@@ -1075,6 +1075,45 @@ def test_notifier_journal_and_stats():
         assert any(k == "sprint_exit" for k, _ in recorded)
 
 
+def test_sprint_entry_journal_shows_leverage_and_hl_lookup():
+    """Live-Fund (17.07., PENGU): ohne diese Felder ist aus dem Journal/Status-
+    Spiegel nicht unterscheidbar, ob 'voller Hebel gefahren' heißt 'HL erlaubt
+    hier wirklich mehr' oder 'der HL-Lookup lieferte None'."""
+    recorded = []
+
+    class J:
+        def record(self, kind, **d):
+            recorded.append((kind, d))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        b = SprintBook(SprintConfig(exclude_coins=[], leverage=10), FEE, journal=J(),
+                       runtime_dir=Path(tmp),
+                       max_leverage_fn=lambda coin: {"BTC": 3}.get(coin))
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        entry = next(d for k, d in recorded if k == "sprint_entry")
+        assert entry["leverage"] == 3.0, "gekappt auf HL-Limit, im Journal sichtbar"
+        assert entry["hl_max_leverage"] == 3
+
+
+def test_sprint_entry_journal_shows_none_when_hl_lookup_unknown():
+    recorded = []
+
+    class J:
+        def record(self, kind, **d):
+            recorded.append((kind, d))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        b = SprintBook(SprintConfig(exclude_coins=[], leverage=10), FEE, journal=J(),
+                       runtime_dir=Path(tmp), max_leverage_fn=lambda coin: None)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        entry = next(d for k, d in recorded if k == "sprint_entry")
+        assert entry["leverage"] == 10.0
+        assert entry["hl_max_leverage"] is None, \
+            "kein Datenpunkt muss sichtbar None bleiben, nicht stillschweigend wie 'passt'"
+
+
 # ---------- Bestätigungsfenster gegen Flip-Flopper (QOL-Runde) ----------
 
 def _confirm_book(tmp, t, delay=10.0):

@@ -107,6 +107,7 @@ class SprintBook:
         # None = kein Live-Datenpunkt (Tests, kein Client verdrahtet) -
         # dann bleibt NUR der konfigurierte Wert maßgeblich, kein Kappen.
         self._max_leverage_fn = max_leverage_fn
+        self._last_hl_max_leverage: float | None = None  # s. _leverage_for
         self.paper = PaperBroker(cfg.equity, fee_rate, path=runtime / "sprint_book.json")
         self.fee_rate = fee_rate
         self.state_path = runtime / "sprint_cycles.json"
@@ -818,12 +819,18 @@ class SprintBook:
         die Exchange für diesen Coin gar nicht anbietet - Paper-Zahlen, die
         beim Live-Gang so nicht übernehmbar wären)."""
         lev = self.cfg.leverage_overrides.get(coin, self.cfg.leverage)
-        if self._max_leverage_fn is not None:
-            real_max = self._max_leverage_fn(coin)
-            if real_max is not None and real_max < lev:
-                log.info("Sprint: Hebel für %s von x%.0f auf HL-Limit x%d gekappt",
-                         coin, lev, real_max)
-                return float(real_max)
+        # Für Diagnose (Journal/Status-Spiegel): IMMER festhalten, was der
+        # HL-Lookup ergab - nicht nur beim Kappen. Sonst ist aus dem Log/
+        # Journal nicht unterscheidbar, ob 'kein Kappen' heißt 'HL erlaubt
+        # hier wirklich mehr' oder 'der Lookup ist fehlgeschlagen/None' -
+        # genau die Frage, die beim ersten PENGU-Fund offen blieb.
+        self._last_hl_max_leverage = (self._max_leverage_fn(coin)
+                                      if self._max_leverage_fn is not None else None)
+        real_max = self._last_hl_max_leverage
+        if real_max is not None and real_max < lev:
+            log.info("Sprint: Hebel für %s von x%.0f auf HL-Limit x%d gekappt",
+                     coin, lev, real_max)
+            return float(real_max)
         return lev
 
     def _enter(self, coin: str, snap, prices: dict[str, float],
@@ -872,9 +879,15 @@ class SprintBook:
         log.info("Sprint: %s %s $%.0f (frisches Signal von %s, Zyklus %d)",
                  side, coin, abs(notional), snap.address[:10], cycle)
         if self.journal:
+            # hl_max_leverage im Journal sichtbar (Live-Fund PENGU): ohne das
+            # ist aus dem Journal/Status-Spiegel nicht unterscheidbar, ob
+            # 'voller konfigurierter Hebel gefahren' heißt 'HL erlaubt hier
+            # wirklich mehr' oder 'der HL-Lookup lieferte None' (kein Client
+            # verdrahtet, Coin unbekannt, Metadaten nicht ladbar).
             self.journal.record("sprint_entry", coin=coin, side=side,
                                 notional=round(abs(notional), 0),
-                                leader=snap.address, cycle=cycle)
+                                leader=snap.address, cycle=cycle,
+                                leverage=lev, hl_max_leverage=self._last_hl_max_leverage)
         if self.notifier:
             self.notifier.send(f"🟢 <b>Quest-Einstieg</b>: {side} {coin} "
                                f"${abs(notional):,.0f}\nLeader <code>{snap.address[:10]}…</code> "
