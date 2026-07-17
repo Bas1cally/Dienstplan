@@ -1,6 +1,6 @@
 {
   "autopilot": {
-    "updated": "2026-07-17T16:11:10.990178+00:00",
+    "updated": "2026-07-17T16:16:26.204614+00:00",
     "state": "running",
     "mode": "dry_run",
     "network": "testnet",
@@ -13,21 +13,30 @@
     "polymarket": [],
     "labs": null,
     "sprint": {
-      "equity": 1000.0,
+      "equity": 1008.32,
       "cycle": 1,
-      "cycle_pnl": 0.0,
-      "positions": [],
+      "cycle_pnl": 8.32,
+      "positions": [
+        {
+          "coin": "BTC",
+          "size": -0.31494823038463055,
+          "entry": 63502.5,
+          "unrealized_pnl": 17.32
+        }
+      ],
       "target": 1100,
-      "progress_pct": 0.0,
-      "state": "1 Signal(e) werden best\u00e4tigt",
-      "held": [],
+      "progress_pct": 8.3,
+      "state": "h\u00e4lt",
+      "held": [
+        "BTC SHORT"
+      ],
       "parallel": false,
       "banked": 0.0,
       "won": 0,
       "busted": 0,
-      "trades": 0,
-      "avg_trades_per_cycle": 0.0,
-      "leader": "",
+      "trades": 1,
+      "avg_trades_per_cycle": 1.0,
+      "leader": "0xcaaacd1e5f394da3e5006edc7c05fd7bfdc5764b",
       "leader_is_star": false,
       "strikes": {
         "0xfd688aed": 2,
@@ -56,14 +65,7 @@
         "0xc9c78160": 5
       },
       "stars": [],
-      "pending": [
-        {
-          "coin": "BTC",
-          "leader": "0xcaaacd1e",
-          "wait_s": 0.0,
-          "hat_preis": true
-        }
-      ],
+      "pending": [],
       "baseline_status": "warm \u00fcbernommen (67s alt beim Start)",
       "scan": {
         "fresh_seen": 2,
@@ -78,8 +80,8 @@
             "grund": "unbestaetigt_negativ"
           }
         ],
-        "last_fresh_min": 0.0,
-        "last_entry_min": null
+        "last_fresh_min": 5.3,
+        "last_entry_min": 3.9
       }
     },
     "lighter": null,
@@ -100,11 +102,11 @@
         "profit_factor": 2.21,
         "max_drawdown_pct": 24.97,
         "closed_trades": 710,
-        "roi_since_copy_pct": -38.81
+        "roi_since_copy_pct": -40.32
       }
     ],
     "account": null,
-    "next_analysis_in_h": 5.9
+    "next_analysis_in_h": 5.8
   },
   "wallet": null,
   "deploy": {
@@ -112,34 +114,34 @@
     "committed_at": "2026-07-17T15:59:39Z"
   },
   "started_at": "2026-07-17T16:01:04.044958+00:00",
-  "uptime_s": 687.0,
+  "uptime_s": 1001.0,
   "risk_level": "NORMAL",
   "analysis_note": "90 Kandidaten (CMM 177 + HL 39) \u2192 0 Haupt(\u226535) / 30 Sprint-tauglich (Gate-K.O. 24, Richtung unter 10: 0, Schl\u00e4fer: 29)\nAussortiert: 7 zu aktiv, 83 LARP (netto unprofitabel\u00d762, nur 0 Round-Trips\u00d75), 0 Fehler | Top-Scores: -",
   "tick_health": {
-    "last_tick_ago_s": 80.0,
+    "last_tick_ago_s": 79.0,
     "error_count": 0,
     "last_error": null
   },
   "feed": {
-    "snapshot_age_s": 3.0,
+    "snapshot_age_s": 0.0,
     "fresh": 21,
     "total": 21,
     "stale": 0
   },
   "quest": {
-    "equity": 991.0,
+    "equity": 1006.43,
     "cycle": 1,
-    "cycle_pnl": -9.0,
+    "cycle_pnl": 6.43,
     "positions": [
       {
         "coin": "BTC",
         "size": -0.31494823038463055,
         "entry": 63502.5,
-        "unrealized_pnl": -0.0
+        "unrealized_pnl": 15.43
       }
     ],
     "target": 1100,
-    "progress_pct": -9.0,
+    "progress_pct": 6.4,
     "state": "h\u00e4lt",
     "held": [
       "BTC SHORT"
@@ -194,8 +196,8 @@
           "grund": "unbestaetigt_negativ"
         }
       ],
-      "last_fresh_min": 1.3,
-      "last_entry_min": 0.0
+      "last_fresh_min": 6.6,
+      "last_entry_min": 5.2
     },
     "analysis_funnel": {
       "candidates": 90,
