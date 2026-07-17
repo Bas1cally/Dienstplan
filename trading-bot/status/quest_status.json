@@ -1,6 +1,6 @@
 {
   "autopilot": {
-    "updated": "2026-07-17T18:01:56.199839+00:00",
+    "updated": "2026-07-17T18:07:04.502104+00:00",
     "state": "running",
     "mode": "dry_run",
     "network": "testnet",
@@ -61,9 +61,9 @@
       "pending": [],
       "baseline_status": "warm \u00fcbernommen (24s alt beim Start)",
       "scan": {
-        "fresh_seen": 1,
+        "fresh_seen": 3,
         "rejected": {
-          "unbestaetigt_negativ": 1
+          "unbestaetigt_negativ": 3
         },
         "last_rejected": [
           {
@@ -71,9 +71,21 @@
             "coin": "LIT",
             "leader": "0x8d7d49eb",
             "grund": "unbestaetigt_negativ"
+          },
+          {
+            "t": 1784311404,
+            "coin": "MET",
+            "leader": "0x8d7d49eb",
+            "grund": "unbestaetigt_negativ"
+          },
+          {
+            "t": 1784311624,
+            "coin": "ARB",
+            "leader": "0x8d7d49eb",
+            "grund": "unbestaetigt_negativ"
           }
         ],
-        "last_fresh_min": 11.8,
+        "last_fresh_min": 0.7,
         "last_entry_min": null
       }
     },
@@ -95,11 +107,11 @@
         "profit_factor": 2.21,
         "max_drawdown_pct": 24.97,
         "closed_trades": 710,
-        "roi_since_copy_pct": -32.12
+        "roi_since_copy_pct": -32.89
       }
     ],
     "account": null,
-    "next_analysis_in_h": 5.8
+    "next_analysis_in_h": 5.7
   },
   "wallet": null,
   "deploy": {
@@ -107,7 +119,7 @@
     "committed_at": "2026-07-17T17:45:54Z"
   },
   "started_at": "2026-07-17T17:46:42.554610+00:00",
-  "uptime_s": 957.0,
+  "uptime_s": 1266.0,
   "risk_level": "NORMAL",
   "analysis_note": "41 Kandidaten (CMM 0 + HL 40) \u2192 0 Haupt(\u226535) / 7 Sprint-tauglich (Gate-K.O. 9, Richtung unter 10: 0, Schl\u00e4fer: 23)\nAussortiert: 2 zu aktiv, 39 LARP (netto unprofitabel\u00d725, \u00fcberhebelt\u00d72), 0 Fehler | Top-Scores: -",
   "tick_health": {
@@ -170,9 +182,9 @@
     "pending": [],
     "baseline_status": "warm \u00fcbernommen (24s alt beim Start)",
     "scan": {
-      "fresh_seen": 1,
+      "fresh_seen": 3,
       "rejected": {
-        "unbestaetigt_negativ": 1
+        "unbestaetigt_negativ": 3
       },
       "last_rejected": [
         {
@@ -180,9 +192,21 @@
           "coin": "LIT",
           "leader": "0x8d7d49eb",
           "grund": "unbestaetigt_negativ"
+        },
+        {
+          "t": 1784311404,
+          "coin": "MET",
+          "leader": "0x8d7d49eb",
+          "grund": "unbestaetigt_negativ"
+        },
+        {
+          "t": 1784311624,
+          "coin": "ARB",
+          "leader": "0x8d7d49eb",
+          "grund": "unbestaetigt_negativ"
         }
       ],
-      "last_fresh_min": 12.5,
+      "last_fresh_min": 1.5,
       "last_entry_min": null
     },
     "analysis_funnel": {
@@ -726,8 +750,6 @@
     }
   ],
   "log_tail": [
-    "2026-07-17 17:26:09,653 INFO   LARP-Filter K.O. f\u00fcr 0x12203316: nur 2 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 48% des Gewinns (> 40%); Scalper: mediane Haltedauer 0min (< 30min) - Copy-Lag frisst den Edge",
-    "2026-07-17 17:26:11,164 INFO Analysiert 0xe1b8ebfc: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
     "2026-07-17 17:26:11,164 INFO   LARP-Filter K.O. f\u00fcr 0xe1b8ebfc: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
     "2026-07-17 17:26:14,701 INFO Analysiert 0xc9c78160: score=97.3 sprint=87.8 wr=100% roi=68.1% pf=inf trips=31 dd=0.1% hold=918min",
     "2026-07-17 17:26:14,701 INFO   LARP-Filter K.O. f\u00fcr 0xc9c78160: nur 8 aktive Tage (< 10); Swing-Trader: mediane Haltedauer 15.3h (> 12h) - passt nicht zum Day-Trading-Profil",
@@ -875,6 +897,8 @@
     "2026-07-17 17:49:17,268 INFO   LARP-Filter K.O. f\u00fcr 0xa7f03c82: netto unprofitabel (nach Fees); nur 1 Round-Trips (< 30); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 33% der Wochen profitabel (< 60%); Swing-Trader: mediane Haltedauer 89.2h (> 12h) - passt nicht zum Day-Trading-Profil",
     "2026-07-17 17:49:17,269 INFO Analyse-Trichter: 41 Kandidaten (CMM 0 + HL 40) \u2192 0 Haupt(\u226535) / 7 Sprint-tauglich (Gate-K.O. 9, Richtung unter 10: 0, Schl\u00e4fer: 23) | Aussortiert: 2 zu aktiv, 39 LARP (netto unprofitabel\u00d725, \u00fcberhebelt\u00d72), 0 Fehler | Top-Scores: -",
     "2026-07-17 17:49:17,269 WARNING Analyse fand keine geeigneten Leader - behalte bisherige",
-    "2026-07-17 17:50:07,797 INFO Sprint: frisches Signal LIT von 0x8d7d49eb VERWORFEN (unbestaetigt_negativ)"
+    "2026-07-17 17:50:07,797 INFO Sprint: frisches Signal LIT von 0x8d7d49eb VERWORFEN (unbestaetigt_negativ)",
+    "2026-07-17 18:03:24,359 INFO Sprint: frisches Signal MET von 0x8d7d49eb VERWORFEN (unbestaetigt_negativ)",
+    "2026-07-17 18:07:04,488 INFO Sprint: frisches Signal ARB von 0x8d7d49eb VERWORFEN (unbestaetigt_negativ)"
   ]
 }
