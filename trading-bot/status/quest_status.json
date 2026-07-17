@@ -1,6 +1,6 @@
 {
   "autopilot": {
-    "updated": "2026-07-17T17:35:25.519610+00:00",
+    "updated": "2026-07-17T17:40:34.443918+00:00",
     "state": "running",
     "mode": "dry_run",
     "network": "testnet",
@@ -13,30 +13,21 @@
     "polymarket": [],
     "labs": null,
     "sprint": {
-      "equity": 995.5,
-      "cycle": 1,
-      "cycle_pnl": -4.5,
-      "positions": [
-        {
-          "coin": "PUMP",
-          "size": -5917159.763313609,
-          "entry": 0.0017,
-          "unrealized_pnl": -0.0
-        }
-      ],
+      "equity": 1000.0,
+      "cycle": 2,
+      "cycle_pnl": 0.0,
+      "positions": [],
       "target": 1100,
-      "progress_pct": -4.5,
-      "state": "h\u00e4lt",
-      "held": [
-        "PUMP SHORT"
-      ],
+      "progress_pct": 0.0,
+      "state": "wartet auf frisches Signal",
+      "held": [],
       "parallel": false,
-      "banked": 0.0,
+      "banked": -20.84,
       "won": 0,
-      "busted": 0,
-      "trades": 1,
+      "busted": 1,
+      "trades": 0,
       "avg_trades_per_cycle": 1.0,
-      "leader": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
+      "leader": "",
       "leader_is_star": false,
       "strikes": {
         "0xfd688aed": 2,
@@ -51,7 +42,8 @@
         "0x362ad620": 1,
         "0x920fa683": 1,
         "0xd246c4a0": 1,
-        "0xcaaacd1e": 1
+        "0xcaaacd1e": 1,
+        "0x8d7d49eb": 1
       },
       "banned": [
         "0xd68dfb48",
@@ -81,8 +73,8 @@
             "grund": "korb_begrenzt"
           }
         ],
-        "last_fresh_min": 0.0,
-        "last_entry_min": 1.5
+        "last_fresh_min": 5.1,
+        "last_entry_min": 6.6
       }
     },
     "lighter": null,
@@ -103,11 +95,11 @@
         "profit_factor": 2.21,
         "max_drawdown_pct": 24.97,
         "closed_trades": 710,
-        "roi_since_copy_pct": -30.2
+        "roi_since_copy_pct": -31.24
       }
     ],
     "account": null,
-    "next_analysis_in_h": 5.9
+    "next_analysis_in_h": 5.8
   },
   "wallet": null,
   "deploy": {
@@ -115,11 +107,11 @@
     "committed_at": "2026-07-17T17:23:05Z"
   },
   "started_at": "2026-07-17T17:24:09.568097+00:00",
-  "uptime_s": 720.0,
+  "uptime_s": 1030.0,
   "risk_level": "NORMAL",
   "analysis_note": "41 Kandidaten (CMM 0 + HL 40) \u2192 0 Haupt(\u226535) / 7 Sprint-tauglich (Gate-K.O. 9, Richtung unter 10: 0, Schl\u00e4fer: 23)\nAussortiert: 2 zu aktiv, 39 LARP (netto unprofitabel\u00d725, \u00fcberhebelt\u00d72), 0 Fehler | Top-Scores: -",
   "tick_health": {
-    "last_tick_ago_s": 44.0,
+    "last_tick_ago_s": 45.0,
     "error_count": 0,
     "last_error": null
   },
@@ -130,30 +122,21 @@
     "stale": 0
   },
   "quest": {
-    "equity": 995.5,
-    "cycle": 1,
-    "cycle_pnl": -4.5,
-    "positions": [
-      {
-        "coin": "PUMP",
-        "size": -5917159.763313609,
-        "entry": 0.0017,
-        "unrealized_pnl": -0.0
-      }
-    ],
+    "equity": 1000.0,
+    "cycle": 2,
+    "cycle_pnl": 0.0,
+    "positions": [],
     "target": 1100,
-    "progress_pct": -4.5,
-    "state": "h\u00e4lt",
-    "held": [
-      "PUMP SHORT"
-    ],
+    "progress_pct": 0.0,
+    "state": "wartet auf frisches Signal",
+    "held": [],
     "parallel": false,
-    "banked": 0.0,
+    "banked": -20.84,
     "won": 0,
-    "busted": 0,
-    "trades": 1,
+    "busted": 1,
+    "trades": 0,
     "avg_trades_per_cycle": 1.0,
-    "leader": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
+    "leader": "",
     "leader_is_star": false,
     "strikes": {
       "0xfd688aed": 2,
@@ -168,7 +151,8 @@
       "0x362ad620": 1,
       "0x920fa683": 1,
       "0xd246c4a0": 1,
-      "0xcaaacd1e": 1
+      "0xcaaacd1e": 1,
+      "0x8d7d49eb": 1
     },
     "banned": [
       "0xd68dfb48",
@@ -198,8 +182,8 @@
           "grund": "korb_begrenzt"
         }
       ],
-      "last_fresh_min": 0.7,
-      "last_entry_min": 2.2
+      "last_fresh_min": 5.9,
+      "last_entry_min": 7.4
     },
     "analysis_funnel": {
       "candidates": 41,
@@ -274,6 +258,30 @@
     ]
   },
   "journal_tail": [
+    {
+      "t": 1784309990,
+      "kind": "sprint_cycle_end",
+      "cycle": 1,
+      "pnl": -20.84,
+      "reason": "leader_exit",
+      "banked": -20.84,
+      "leader": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
+      "coin": "PUMP"
+    },
+    {
+      "t": 1784309989,
+      "kind": "sprint_strike",
+      "leader": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
+      "strikes": 1,
+      "ride_pnl": -20.84
+    },
+    {
+      "t": 1784309989,
+      "kind": "sprint_exit",
+      "coin": "PUMP",
+      "reason": "leader_exit",
+      "cycle_pnl": -20.84
+    },
     {
       "t": 1784309637,
       "kind": "sprint_entry",
@@ -715,50 +723,9 @@
         "1h-Trend (auf) gegen Short",
         "Preis auf falscher Seite der EMA20"
       ]
-    },
-    {
-      "t": 1784121557,
-      "kind": "veto",
-      "coin": "ETH",
-      "side": "SHORT",
-      "target": -2376.4,
-      "price": 1942.25,
-      "reasons": [
-        "15m-Trend (auf) gegen Short",
-        "1h-Trend (auf) gegen Short",
-        "Preis auf falscher Seite der EMA20"
-      ]
-    },
-    {
-      "t": 1784120718,
-      "kind": "veto",
-      "coin": "ETH",
-      "side": "SHORT",
-      "target": -2376.4,
-      "price": 1940.95,
-      "reasons": [
-        "15m-Trend (auf) gegen Short",
-        "1h-Trend (auf) gegen Short",
-        "Preis auf falscher Seite der EMA20"
-      ]
-    },
-    {
-      "t": 1784120519,
-      "kind": "veto",
-      "coin": "ETH",
-      "side": "SHORT",
-      "target": -2376.4,
-      "price": 1929.45,
-      "reasons": [
-        "Validator nicht verf\u00fcgbar - konservativ abgelehnt"
-      ]
     }
   ],
   "log_tail": [
-    "2026-07-17 16:06:23,341 INFO   LARP-Filter K.O. f\u00fcr 0xb215c5a6: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 16:06:25,280 INFO Analysiert 0x0e0bf22e: score=0.0 sprint=85.0 wr=0% roi=-0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 16:06:25,280 INFO   LARP-Filter K.O. f\u00fcr 0x0e0bf22e: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 1 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 16:06:27,669 INFO Analysiert 0xa7f03c82: score=0.0 sprint=77.5 wr=42% roi=-5.5% pf=0.34 trips=1 dd=8.0% hold=5354min",
     "2026-07-17 16:06:27,669 INFO   LARP-Filter K.O. f\u00fcr 0xa7f03c82: netto unprofitabel (nach Fees); nur 1 Round-Trips (< 30); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 33% der Wochen profitabel (< 60%); Swing-Trader: mediane Haltedauer 89.2h (> 12h) - passt nicht zum Day-Trading-Profil",
     "2026-07-17 16:06:31,527 INFO Analysiert 0x4b1c09fa: score=0.0 sprint=0.0 wr=14% roi=-1.6% pf=0.10 trips=0 dd=1.6% hold=0min",
     "2026-07-17 16:06:31,528 INFO   LARP-Filter K.O. f\u00fcr 0x4b1c09fa: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 8 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
@@ -904,6 +871,10 @@
     "2026-07-17 17:26:53,710 INFO Analyse-Trichter: 41 Kandidaten (CMM 0 + HL 40) \u2192 0 Haupt(\u226535) / 7 Sprint-tauglich (Gate-K.O. 9, Richtung unter 10: 0, Schl\u00e4fer: 23) | Aussortiert: 2 zu aktiv, 39 LARP (netto unprofitabel\u00d725, \u00fcberhebelt\u00d72), 0 Fehler | Top-Scores: -",
     "2026-07-17 17:26:53,711 WARNING Analyse fand keine geeigneten Leader - behalte bisherige",
     "2026-07-17 17:33:57,931 INFO Sprint: SHORT PUMP $10000 (frisches Signal von 0x8d7d49eb, Zyklus 1)",
-    "2026-07-17 17:35:25,506 INFO Sprint: frisches Signal LIT von 0x8d7d49eb VERWORFEN (korb_begrenzt)"
+    "2026-07-17 17:35:25,506 INFO Sprint: frisches Signal LIT von 0x8d7d49eb VERWORFEN (korb_begrenzt)",
+    "2026-07-17 17:39:49,812 INFO Sprint: Exit PUMP (Leader raus), Zyklus-PnL -20.84",
+    "2026-07-17 17:39:49,925 WARNING Sprint: Verlust-Ritt -20.84 -> Strike 1 f\u00fcr 0x8d7d49eb",
+    "2026-07-17 17:39:50,004 WARNING Sprint-Zyklus 1 (PUMP) verloren (Leader raus): PnL -20.84 (banked gesamt -20.84)",
+    "2026-07-17 17:39:50,083 INFO Paper-Konto zur\u00fcckgesetzt (Start-Equity 1000.00)"
   ]
 }
