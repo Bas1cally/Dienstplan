@@ -15,6 +15,24 @@ ist da; Chat-Verlauf ist es nicht.
 > 1000$-Basis parallel laufen (Trader-Bewertung je Ritt, nichts blockiert).
 > Krypto-only bleibt in beiden Modi (Aktien-Perps stören die Messlatte).
 >
+> **UPDATE 17.07. — ZURÜCK IN DEN MESS-MODUS (zweite Datenflut).**
+> `sprint.parallel_rides: true`, `max_rides: 8 -> 20` (config.yaml). Nach den
+> heutigen Änderungen (Gambler-/Drawdown-Filter fürs Sprint-Gate, eigene
+> lockere `sprint_min_active_days`, gesenkte Größen-Böden gegen den Big-Dog-
+> Bias/für Shrimps mit hoher Trefferquote, Hebel-Kappung auf HLs echtes
+> Pro-Coin-Limit, manuelle Verlust-Closes striken jetzt) soll erstmal wieder
+> BREIT gemessen werden - viele Wallets gleichzeitig sammeln Strikes/
+> Confidence unter den NEUEN Regeln, statt seriell einen nach dem anderen
+> durch den einzigen Einzel-Ritt-Slot zu schleusen. `max_rides_per_leader:
+> 1` bleibt unverändert (verhindert weiter, dass ein korrelierter Mehrfach-
+> Basket EINES Leaders wie mehrere unabhängige Messpunkte aussieht - keine
+> Kapazitätsbremse, sondern Methodik-Schutz). Die Mode-Switch-Sicherung
+> (unten, 15.07.) greift nur beim Umschalten AUF Einzel-Ritt mit noch
+> offenen Mess-Ritten - beim Umschalten IN den Mess-Modus war das Buch flach
+> (keine offene Position), kein Sonderfall nötig. **ENDZIEL bleibt weiter
+> `parallel_rides: false`** (POOL -> EIN GUTER RITT -> +10% -> RAUS), aber
+> erst nach dieser zweiten Mess-Runde wieder scharf schalten.
+>
 > **UPDATE 15.07. (QOL-Runde) — ENDZIEL umgesetzt: zurück auf Einzel-Ritt.**
 > `sprint.parallel_rides: false` + `confirm_delay_s: 10` + `crypto_only: true`
 > (config.yaml). „POOL -> EIN GUTER RITT -> +10% -> RAUS, eine Position" läuft

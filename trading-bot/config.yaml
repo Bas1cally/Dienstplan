@@ -205,12 +205,23 @@ sprint:
                             # alle 7 und verschmierte die 10x-Kapazität. Jetzt
                             # gewinnt das stärkste Signal (|exposure| des
                             # Leaders), der Rest wird sichtbar verworfen.
-  parallel_rides: false     # ENDZIEL (nach der Mess-Woche, QOL-Runde 07/2026):
-                            # POOL -> EIN GUTER RITT -> +10% -> RAUS, 1 Position.
-                            # true = Mess-Modus (jedes Signal eigener Ritt auf
-                            # 1000$-Basis, parallel) - für spätere Messungen
-                            # weiter verfügbar, aber nicht mehr der Normalbetrieb.
-  max_rides: 8              # Deckel für gleichzeitige Mess-Ritte (nur parallel_rides)
+  parallel_rides: true      # NUTZER 17.07. - ZURÜCK IN DEN MESS-MODUS: nach den
+                            # heutigen Änderungen (Gambler-Filter, gesenkte
+                            # Größen-Böden/Shrimps, Hebel-Kappung, manuelle
+                            # Closes striken jetzt) soll erstmal wieder BREIT
+                            # gemessen werden - viele Wallets gleichzeitig
+                            # sammeln Strikes/Confidence unter den NEUEN Regeln,
+                            # statt seriell einen nach dem anderen durch den
+                            # einzigen Ritt-Slot zu schleusen. ENDZIEL bleibt
+                            # false (POOL -> EIN GUTER RITT -> +10% -> RAUS),
+                            # aber erst nach dieser zweiten Datenflut wieder.
+  max_rides: 20             # 8 -> 20 (17.07.): "Datenflut" heißt so viel vom
+                            # 20er-Pool wie möglich gleichzeitig messen, nicht
+                            # künstlich auf 8 drosseln, während Kapazität da wäre.
+                            # max_rides_per_leader bleibt bei 1 (unverändert) -
+                            # das ist keine Kapazitätsbremse, sondern verhindert,
+                            # dass EIN Leaders korrelierter Mehrfach-Basket wie
+                            # mehrere unabhängige Messpunkte aussieht.
   confirm_delay_s: 10       # Flip-Flopper-Schutz: frisches Signal erst nach 10s
                             # durchgehend positiver Leader-PnL reiten, nicht
                             # blind instant (Live-Befund: Leader schießt nach
