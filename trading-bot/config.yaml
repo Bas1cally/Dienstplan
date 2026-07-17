@@ -310,9 +310,11 @@ coinmarketman:
 # öffentlicher Endpunkt, rührt den bestehenden manuellen git-pull-Deploy-Flow
 # NICHT an (eigener API-Call, keine lokalen git-Befehle in der Arbeitskopie).
 status_push:
-  enabled: false            # AN erst, wenn STATUS_PUSH_TOKEN in der .env steht
-                            # (fine-grained PAT, NUR 'Contents: Read and write'
-                            # auf dieses eine Repo - siehe .env.example).
+  enabled: true              # Gate ist ohnehin der Token: ohne STATUS_PUSH_TOKEN
+                            # (per /setstatuspush <token> setzbar, kein SSH
+                            # nötig) bleibt push_snapshot() ein No-Op (siehe
+                            # bot/status_push.py) - dieses Flag ist der zweite,
+                            # explizite Schalter (Muster wie coinmarketman.enabled).
   repo: bas1cally/dienstplan
   branch: status-feed       # dedizierter Branch, kein Rauschen im Code-Verlauf
   path: trading-bot/status/quest_status.json

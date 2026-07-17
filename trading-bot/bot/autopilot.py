@@ -223,6 +223,8 @@ class Autopilot:
             "/lighter": self._cmd_lighter,
             "/cmm": self._cmd_cmm,
             "/setcmm": self._cmd_setcmm,
+            "/setstatuspush": self._cmd_set_status_push,
+            "/statuspush": self._cmd_status_push,
             "/analyze": self._cmd_analyze,
             "/help": self._cmd_help,
         })
@@ -243,6 +245,8 @@ class Autopilot:
                 "/lighter &lt;ref&gt; – Lighter-Konto prüfen (Verifikation)\n"
                 "/setcmm &lt;token&gt; – HyperTracker-API-Token setzen\n"
                 "/cmm – HyperTracker-Leaderboard live proben\n"
+                "/setstatuspush &lt;token&gt; – GitHub-PAT für den Status-Spiegel setzen\n"
+                "/statuspush – Status-Spiegel sofort schreiben (Test)\n"
                 "/analyze – Leader-Analyse sofort anstoßen\n"
                 "/fullreport [offline] – kompletter Quest-Report zum Copy-Paste\n"
                 "/stop /start /resume – Autopilot/Halt steuern\n"
@@ -761,6 +765,44 @@ class Autopilot:
 
         threading.Thread(target=run, daemon=True, name="cmm-probe").start()
         return f"🔎 CMM-Probe läuft ({period}) … Ergebnis kommt gleich als Nachricht."
+
+    def _cmd_set_status_push(self, arg: str = "") -> str:
+        """Setzt den GitHub-PAT (STATUS_PUSH_TOKEN) für den Status-Spiegel in
+        die .env UND live in den Prozess - vom Handy, ohne SSH (Nutzer 17.07.,
+        Muster wie /setcmm). NUR ein fine-grained Token mit 'Contents: Read
+        and write' auf GENAU dieses Repo, NICHT für Wallet-Keys."""
+        tok = arg.strip()
+        if not tok:
+            return ("Nutzung: <code>/setstatuspush &lt;token&gt;</code> (fine-grained "
+                    "GitHub-PAT, nur 'Contents: Read and write' auf dieses Repo)")
+        if not (tok.startswith("github_pat_") or tok.startswith("ghp_")) or len(tok) < 20:
+            return ("Das sieht nicht nach einem GitHub-PAT aus (erwartet "
+                    "'github_pat_…' oder 'ghp_…').")
+        from .status_push import TOKEN_ENV
+
+        set_env_var(TOKEN_ENV, tok)
+        os.environ[TOKEN_ENV] = tok   # sofort live, kein Neustart nötig
+        return (f"✅ Token gespeichert (…{tok[-6:]}) und live geladen.\n"
+                f"status_push.enabled muss zusätzlich in config.yaml an sein "
+                f"(ist es per Default nach diesem Update). Jetzt "
+                f"<code>/statuspush</code> zum Test.")
+
+    def _cmd_status_push(self) -> str:
+        """Schreibt den Status-Spiegel SOFORT (ignoriert die Intervall-Bremse) -
+        Test-Knopf fürs Handy: sofort sehen, ob Token/Branch/Pfad stimmen,
+        statt bis zu 5 Minuten auf den nächsten Tick zu warten."""
+        if not self.cfg.status_push.enabled:
+            return "status_push.enabled ist aus (config.yaml) - erst an, dann erneut senden."
+        from .status_push import TOKEN_ENV, build_snapshot, push_snapshot
+
+        if not os.environ.get(TOKEN_ENV, "").strip():
+            return ("Kein Token gesetzt. Erst <code>/setstatuspush &lt;token&gt;</code> "
+                    "senden.")
+        sp = self.cfg.status_push
+        ok = push_snapshot(build_snapshot(self), repo=sp.repo, branch=sp.branch, path=sp.path)
+        self._last_status_push = time.time()
+        return (f"✅ Status-Spiegel geschrieben: {sp.repo}@{sp.branch}/{sp.path}"
+                if ok else "⚠️ Push fehlgeschlagen - siehe Server-Log (Token/Branch/Rechte prüfen).")
 
     def _cmd_analyze(self) -> str:
         """Leader-Analyse sofort anstoßen statt auf den 6h-Takt zu warten. Läuft

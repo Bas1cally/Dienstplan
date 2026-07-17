@@ -156,6 +156,56 @@ def test_maybe_push_status_fires_again_after_interval():
     assert len(calls) == 2
 
 
+def test_cmd_set_status_push_rejects_invalid_token():
+    """Nutzer (17.07.): /setstatuspush vom Handy, Muster wie /setcmm - hier NUR
+    die Ablehnungspfade testen, damit nie versehentlich in die echte .env
+    geschrieben wird (wie test_cmd_setcmm_rejects_non_jwt es für CMM hält)."""
+    ap = _autopilot()
+    assert "Nutzung" in ap._cmd_set_status_push("")
+    assert "PAT" in ap._cmd_set_status_push("not-a-token")
+    assert "PAT" in ap._cmd_set_status_push("ghp_zukurz")
+
+
+def test_cmd_status_push_reports_disabled():
+    ap = _autopilot()
+    ap.cfg.status_push.enabled = False
+    assert "aus" in ap._cmd_status_push()
+
+
+def test_cmd_status_push_reports_missing_token():
+    import bot.status_push as sp_mod
+
+    ap = _autopilot()
+    ap.cfg.status_push.enabled = True
+    orig = sp_mod.os.environ.pop(sp_mod.TOKEN_ENV, None)
+    try:
+        assert "Token" in ap._cmd_status_push()
+    finally:
+        if orig is not None:
+            sp_mod.os.environ[sp_mod.TOKEN_ENV] = orig
+
+
+def test_cmd_status_push_forces_immediate_push_bypassing_interval():
+    """Test-Knopf fürs Handy: NICHT auf die 5min-Bremse warten müssen."""
+    import bot.status_push as sp_mod
+
+    ap = _autopilot()
+    ap.cfg.status_push.enabled = True
+    orig_env = sp_mod.os.environ.get(sp_mod.TOKEN_ENV)
+    sp_mod.os.environ[sp_mod.TOKEN_ENV] = "ghp_test"
+    orig_push = sp_mod.push_snapshot
+    sp_mod.push_snapshot = lambda *a, **k: True
+    try:
+        out = ap._cmd_status_push()
+    finally:
+        sp_mod.push_snapshot = orig_push
+        if orig_env is None:
+            sp_mod.os.environ.pop(sp_mod.TOKEN_ENV, None)
+        else:
+            sp_mod.os.environ[sp_mod.TOKEN_ENV] = orig_env
+    assert "✅" in out and "status-feed" in out
+
+
 def test_market_gong_first_call_syncs_crypto_only_no_action():
     """Erststart synchronisiert crypto_only mit dem Marktzustand, feuert aber
     KEINEN Gong (kein /analyze, keine Nachricht)."""
