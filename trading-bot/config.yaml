@@ -82,9 +82,14 @@ copytrade:
     min_account_value: 10000   # Mindest-Kontogröße der Kandidaten
     min_volume: 500000         # Mindest-Monatsvolumen (statistische Aussagekraft)
     top_percent: 2.0           # Top-2% (nach Monats-ROI) gehen in die Tiefenanalyse
-    top_n: 70                  # harter Deckel für die Tiefenanalyse (API-Calls je
-                               # Wallet; 70 statt 50: mehr Interleave-Plätze für die
-                               # aktiven Wochen-Board-Kandidaten, ~+40s je Analyse)
+    top_n: 90                  # harter Deckel für die Tiefenanalyse (API-Calls je
+                               # Wallet; 70->90 (17.07.): drittes CMM-Fenster
+                               # (pnlDay) bringt mehr Rohkandidaten - ohne mehr
+                               # Interleave-Plätze würden die neuen Day-Trader nur
+                               # den bisherigen Wochen-/Monats-Kandidaten die
+                               # Plätze streitig machen statt echten Zuwachs zu
+                               # bringen. ~+20 Wallets * ~1.5s Throttle = ~+30s
+                               # je Analyse (HL-eigenes Rate-Limit, nicht CMM-Budget)
     min_score: 35              # Mindest-Score, um als Leader infrage zu kommen
     larp:                      # harte K.O.-Gates gegen Blender (bot/copytrade/larp.py)
       min_round_trips: 30            # weniger Trades = Zufall nicht ausschließbar
@@ -275,16 +280,17 @@ coinmarketman:
   max_turnover: 120         # Monatsvolumen/Equity-Deckel (Day-Trader ~5-100x)
   max_exposure: 6           # |offenes Notional / Equity| (Hebel-Deckel)
   max_equity: 5000000       # darüber fast nur Fonds/MMs (Slippage-Realität)
-  periods: [pnlWeek, pnlMonth]  # Discovery über ZWEI Fenster: das Wochen-Board
-                            # fördert die AKTIVEN Richtungs-Trader zutage (wer diese
-                            # Woche vorn ist, hat diese Woche gehandelt) - das
-                            # Monats-Board allein ist von Positions-Sitzern dominiert
-                            # (Live-Befund: voller Handelstag, 0 frische Signale).
-                            # pnlWeek zuerst = Aktive vorn im Kandidaten-Interleave.
-  pages: 3                  # Board-Seiten JE FENSTER je Scan (je 1 Request):
-                            # 2 Fenster x 3 Seiten = 600 Kandidaten roh, 6 Requests
-                            # je Analyse. Budget: 6 x ~5 Analysen/Tag = ~30 von
+  periods: [pnlDay, pnlWeek, pnlMonth]  # Nutzer (17.07.): "wir brauchen mehr
+                            # daytrader" - pnlDay NEU dazu und ZUERST (Interleave-
+                            # Priorität, siehe _discover_candidates): reine
+                            # Tages-Rangliste, wer HEUTE vorn ist, hat heute
+                            # gehandelt - trifft "Day-Trader" direkter als das
+                            # Wochen-Board. pnlWeek/pnlMonth bleiben als Auffang
+                            # für Trader mit ruhigerem Tagesrhythmus.
+                            # 3 Fenster x 3 Seiten = 900 Kandidaten roh, 9 Requests
+                            # je Analyse. Budget: 9 x ~5 Analysen/Tag = ~45 von
                             # 100/Tag - weiter Puffer für /cmm-Proben.
+  pages: 3                  # Board-Seiten JE FENSTER je Scan (je 1 Request)
 
 # === Strategie-Labor: eigene Signale parallel im Paper-Schatten messen ===
 # Der Copy-Bot folgt fremden Tradern (kein originäres Alpha). Hier laufen EIGENE

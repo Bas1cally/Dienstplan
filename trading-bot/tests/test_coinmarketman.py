@@ -202,7 +202,11 @@ def _with_fake_board(rows, fn, pages=None):
             idx = len(calls) - 1
             page_rows = pages[idx] if idx < len(pages) else []
         else:
-            page_rows = rows if len(calls) == 1 else []
+            # Jedes Fenster (rankBy) fragt bei offset=0 neu an - "dieselben rows
+            # für jede Seite" gilt PRO FENSTER, nicht nur für den allerersten
+            # Call der ganzen Testfunktion (sonst verhungern Fenster 2+, sobald
+            # >1 period konfiguriert ist - Regressionsfund 17.07. bei 3 Fenstern).
+            page_rows = rows if (params or {}).get("offset") == 0 else []
         return _FakeResp(payload={"totalCount": str(len(page_rows)), "data": page_rows})
 
     orig_get, orig_env = cmm.requests.get, dict(cmm.os.environ)
