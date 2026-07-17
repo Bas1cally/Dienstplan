@@ -27,6 +27,14 @@ class LarpConfig:
     max_drawdown: float = 0.25           # 25% relativ zum Konto = überhebelt
     min_median_holding_minutes: float = 30.0   # Scalper aussortieren
     max_median_holding_minutes: float = 0.0    # >0: Day-Trading-Profil - Swing-Trader raus
+    # Gambler-Filter fürs SPRINT-Gate (Nutzer-Fund 17.07.: eine Wallet mit 61%
+    # historischem Drawdown kam mit 90% Trefferquote/53 Trips locker durch
+    # Pfad A - Trefferquote/Aktivität sagen nichts über Risikomanagement aus,
+    # ein Leader kann die Richtung oft treffen UND trotzdem irgendwann sein
+    # Konto sprengen). Bewusst LOCKERER als das Hauptbuch-max_drawdown (0.25):
+    # "wir wollen mehr Wallets, aber keine Gambler" - dieser Wert ist der
+    # Kompromiss, kein Duplikat des strengen Hauptbuch-Gates.
+    sprint_max_drawdown: float = 0.50
 
 
 @dataclass
@@ -105,9 +113,23 @@ def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict
        Gesamt-PnL des Fensters inkl. unrealisiert positiv.
 
     GESTRICHEN bleiben die Profit-Größen-Gates des Hauptbuchs (Lucky-Punch,
-    Wochen-Konsistenz, Drawdown, Swing-Cap): für +10%-und-raus irrelevant.
-    Strikes/Bans räumen schwache Leader ohnehin nach 2 Verlust-Ritten ab."""
+    Wochen-Konsistenz, Swing-Cap): für +10%-und-raus irrelevant. Strikes/Bans
+    räumen schwache Leader ohnehin nach 2 Verlust-Ritten ab.
+
+    AUSNAHME: Drawdown (Nutzer-Fund 17.07., 'das ist ganz klar ein Gambler').
+    Trefferquote/Aktivität beweisen nur, dass ein Leader oft die Richtung
+    trifft - nicht, dass er sein Risiko im Griff hat. Ein historisch
+    übertreibender Leader bleibt ein Risiko, egal wie gut Pfad A/B aussehen -
+    deshalb ein harter K.O. VOR beiden Pfaden, unabhängig vom Qualifikations-
+    weg. Bewusst lockerer als das Hauptbuch (sprint_max_drawdown statt
+    max_drawdown) - 'mehr Wallets, aber keine Gambler', kein Zurück zur
+    Hauptbuch-Strenge."""
     c = cfg or LarpConfig()
+
+    if m.max_drawdown > c.sprint_max_drawdown:
+        return LarpVerdict(passed=False, reasons=[
+            f"Gambler: {m.max_drawdown:.0%} Drawdown (> {c.sprint_max_drawdown:.0%}) "
+            f"- kein stabiler Richtungs-Erkenner"])
 
     # --- Pfad A: aktiver Trader (lockere Anti-Müll-Gates, Strikes urteilen) ---
     a: list[str] = []

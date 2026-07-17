@@ -127,18 +127,37 @@ def test_larp_rejects_overleveraged():
 # ---------- Sprint-Gate: Richtung zählt, Profit-Größe nicht ----------
 
 def test_sprint_gate_passes_main_larp_kos():
-    """Lucky-Puncher + Überhebelter: fürs HAUPTBUCH K.O., fürs Sprint-Buch ok -
-    Sprint nimmt +10% und ist raus, der Profit des Leaders selbst ist egal."""
+    """Lucky-Puncher + moderat Überhebelter: fürs HAUPTBUCH K.O., fürs Sprint-
+    Buch ok - Sprint nimmt +10% und ist raus, der Profit des Leaders selbst
+    ist egal. ABER (Nutzer-Fund 17.07., Gambler-Filter): Drawdown ist NICHT
+    mehr unbegrenzt egal - 40% liegt hier noch unter der lockeren Sprint-
+    Schwelle (50%), siehe test_sprint_gate_rejects_gambler_extreme_drawdown."""
     from bot.copytrade.larp import check_sprint
 
     fills = steady_fills(weeks=5, trades_per_week=6, win=10.0, loss=-5.0)
     fills.append(fill(36 * DAY, side="B", sz=5.0, start=0))
     fills.append(fill(36 * DAY + 60 * MIN, side="A", sz=5000, closed=5000, start=5))
     m = analyze_fills("0xluck", fills, account_value=10000, days=40)
-    m.max_drawdown = 0.40   # zusätzlich "überhebelt" - für Sprint ebenfalls egal
+    m.max_drawdown = 0.40   # moderat überhebelt - unter der Sprint-Gambler-Schwelle
     assert not LarpFilter().check(m).passed, "Hauptbuch lehnt ab"
     v = check_sprint(m)
     assert v.passed, f"Sprint-Gate muss durchlassen: {v.reasons}"
+
+
+def test_sprint_gate_rejects_gambler_extreme_drawdown():
+    """Nutzer-Fund (17.07., Live-Vorfall): eine Wallet mit 90% Trefferquote und
+    53 Trips kam mit 61% historischem Drawdown locker durch Pfad A - '90%
+    Trefferquote, 53 Trips, aber das ist ganz klar ein Gambler'. Harter K.O.
+    VOR beiden Qualifikationspfaden, unabhängig davon wie gut Trefferquote/
+    Aktivität sonst aussehen - stabile Richtungs-Erkennung reicht nicht,
+    wenn das Konto selbst schon mal fast geplatzt ist."""
+    from bot.copytrade.larp import check_sprint
+
+    m = analyze_fills("0xgambler", steady_fills(), account_value=10000, days=35)
+    assert check_sprint(m).passed, "Vorbedingung: ohne Drawdown-Übertreibung durchlässig"
+    m.max_drawdown = 0.61
+    v = check_sprint(m)
+    assert not v.passed and any("Gambler" in r for r in v.reasons)
 
 
 def test_sprint_gate_rejects_systematic_loser_allows_coinflip():

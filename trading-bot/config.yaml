@@ -96,9 +96,16 @@ copytrade:
       min_active_days: 10
       max_single_trade_share: 0.40   # Lucky-Punch-Erkennung
       min_profitable_week_share: 0.60
-      max_drawdown: 0.25             # überhebelte Konten aussortieren
+      max_drawdown: 0.25             # überhebelte Konten aussortieren (Hauptbuch)
       min_median_holding_minutes: 30 # Scalper: Copy-Lag frisst deren Edge
       max_median_holding_minutes: 720 # Day-Trading: Swing-Trader (>12h Hold) raus
+      sprint_max_drawdown: 0.50      # QUEST-Gambler-Filter (Nutzer 17.07.: Wallet mit
+                                      # 61% Drawdown kam mit 90% Trefferquote locker
+                                      # durch Pfad A, öffnete dann eine $20k-BTC-Position,
+                                      # die massiv ins Minus lief - "das ist ganz klar
+                                      # ein Gambler"). Lockerer als das Hauptbuch (0.25):
+                                      # mehr Wallets sind weiter erwünscht, aber keine
+                                      # historisch übertreibenden Konten mehr.
 
 # === Marktüberwachung: News + Preis-Schocks ===
 # Schaltet beide Bots in CAUTION (nichts Neues) oder RISK_OFF (alles schließen).

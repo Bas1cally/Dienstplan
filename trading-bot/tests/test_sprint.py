@@ -207,17 +207,33 @@ def test_winning_ride_heals_strike():
         assert b.strikes.get("0xok") == 0, "profitabler Ritt heilt einen Strike"
 
 
-def test_manual_close_no_strike():
+def test_manual_close_negative_now_strikes():
+    """Nutzer-Entscheidung (17.07.): ein Ritt, den man vorzeitig per /quest
+    close abbricht, ist meist genau DESHALB manuell, weil er schon erkennbar
+    schlecht läuft ('das ist ganz klar ein Gambler') - soll wie jeder andere
+    Verlust-Ritt einen Strike geben, nicht mehr exempt sein."""
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)
-        n = b.close({"BTC": 99.0, "ETH": 100.0})   # im Minus, aber manuell
+        n = b.close({"BTC": 99.0, "ETH": 100.0})   # im Minus, manuell
         assert n == 1 and b.paper.sizes() == {}
-        assert b.strikes == {}, "manueller Ausstieg strikt niemanden"
+        assert b.strikes.get("0xbest") == 1, "manueller Verlust-Ausstieg striked jetzt"
         # v3: Zyklus = Ritt - manueller Close verbucht SOFORT (Nutzer-Anforderung:
         # "ich hab den btc Trade geschlossen heißt auf der Bank liegen X$").
         assert b.busted == 1 and b.won == 0, "Verlust wird trotzdem sofort verbucht"
         assert b.banked < 0
         assert abs(b.paper.equity({}) - 1000.0) < 1e-6, "Konto sofort auf 1000 zurück"
+
+
+def test_manual_close_profitable_still_heals_no_strike():
+    """Symmetrisch zu oben: ein GEWINN-Manual-Close bleibt wie jeder andere
+    Gewinn-Ritt strike-heilend, striked also weiterhin nicht."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)
+        b.strikes["0xbest"] = 1
+        n = b.close({"BTC": 101.5, "ETH": 100.0})   # im Plus, manuell
+        assert n == 1
+        assert b.strikes.get("0xbest") == 0, "profitabler manueller Exit heilt weiter"
+        assert b.won == 1 and b.busted == 0
 
 
 def test_strikes_survive_restart():
@@ -533,7 +549,11 @@ def test_parallel_manual_close_settles_each_ride():
         n = b.close(P)
         assert n == 2 and b.paper.sizes() == {}
         assert b.won + b.busted == 2, "jeder Ritt = eigener Zyklus"
-        assert b.strikes == {}, "manuell = strike-frei"
+        # Nutzer-Entscheidung 17.07.: manuelle Closes striken jetzt bei Verlust
+        # wie jeder andere Ritt - hier ist der Preis unverändert (P->P), aber
+        # die Roundtrip-Fee macht das Netto-PnL leicht negativ -> beide striked.
+        assert b.strikes == {"0xbest": 1, "0xsecond": 1}, \
+            "manueller Verlust-Ausstieg (auch nur durch Fees) striked jetzt"
 
 
 def test_crypto_only_rejects_stock_coins():

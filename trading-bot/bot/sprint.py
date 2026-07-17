@@ -51,9 +51,17 @@ _REASON_TXT = {
     "zeit_negativ": "zu lange im Minus (Zeit-Cut)",
     "markt_zu": "Börsen-Schluss (Gewinn gesichert)",
 }
-# Kein Strike: nicht die Entscheidung/Schuld des Leaders. 'markt_zu' = unsere
-# Börsen-Öffnungszeiten-Regel (Gewinn sichern), nicht sein Fehler.
-_STRIKE_EXEMPT = {"manual", "risk_off", "markt_zu"}
+# Kein Strike: nicht die Entscheidung/Schuld des Leaders - erzwungene/externe
+# Schließung, sein eigenes Verhalten war dabei irrelevant. 'markt_zu' = unsere
+# Börsen-Öffnungszeiten-Regel (Gewinn sichern), 'risk_off' = Markt-weiter
+# Schock, beides unabhängig vom Leader. 'manual' (Nutzer greift per /quest
+# close ein) war früher auch exempt - Nutzer-Entscheidung 17.07.: ein Ritt,
+# den man vorzeitig abbricht, ist meist genau DESHALB ein manueller Eingriff,
+# weil er schon erkennbar schlecht läuft ("das ist ganz klar ein Gambler") -
+# das soll wie jeder andere Verlust-Ritt einen Strike geben (pnl<0 in
+# _book_cycle heilt/striked wie gehabt, ein GEWINN-Manual-Close striked
+# also weiterhin nicht).
+_STRIKE_EXEMPT = {"risk_off", "markt_zu"}
 
 # Confidence-Points/Star (BACKLOG.md, Nutzer-Entscheidung 15.07.): NUR das
 # eigene, durchgehaltene +10%-Ziel (tp) und eine Star-Preemption (der Bot
