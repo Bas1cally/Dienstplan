@@ -1,6 +1,6 @@
 {
   "autopilot": {
-    "updated": "2026-07-17T16:58:23.844335+00:00",
+    "updated": "2026-07-17T17:03:41.871047+00:00",
     "state": "running",
     "mode": "dry_run",
     "network": "testnet",
@@ -13,19 +13,19 @@
     "polymarket": [],
     "labs": null,
     "sprint": {
-      "equity": 962.97,
+      "equity": 945.02,
       "cycle": 1,
-      "cycle_pnl": -37.03,
+      "cycle_pnl": -54.98,
       "positions": [
         {
           "coin": "BTC",
           "size": -0.31494823038463055,
           "entry": 63502.5,
-          "unrealized_pnl": -28.03
+          "unrealized_pnl": -45.98
         }
       ],
       "target": 1100,
-      "progress_pct": -37.0,
+      "progress_pct": -55.0,
       "state": "h\u00e4lt",
       "held": [
         "BTC SHORT"
@@ -80,8 +80,8 @@
             "grund": "unbestaetigt_negativ"
           }
         ],
-        "last_fresh_min": 47.2,
-        "last_entry_min": 45.9
+        "last_fresh_min": 52.5,
+        "last_entry_min": 51.2
       }
     },
     "lighter": null,
@@ -102,7 +102,7 @@
         "profit_factor": 2.21,
         "max_drawdown_pct": 24.97,
         "closed_trades": 710,
-        "roi_since_copy_pct": -37.77
+        "roi_since_copy_pct": -36.49
       }
     ],
     "account": null,
@@ -114,7 +114,7 @@
     "committed_at": "2026-07-17T15:59:39Z"
   },
   "started_at": "2026-07-17T16:01:04.044958+00:00",
-  "uptime_s": 3519.0,
+  "uptime_s": 3837.0,
   "risk_level": "NORMAL",
   "analysis_note": "90 Kandidaten (CMM 177 + HL 39) \u2192 0 Haupt(\u226535) / 30 Sprint-tauglich (Gate-K.O. 24, Richtung unter 10: 0, Schl\u00e4fer: 29)\nAussortiert: 7 zu aktiv, 83 LARP (netto unprofitabel\u00d762, nur 0 Round-Trips\u00d75), 0 Fehler | Top-Scores: -",
   "tick_health": {
@@ -129,19 +129,19 @@
     "stale": 0
   },
   "quest": {
-    "equity": 961.39,
+    "equity": 942.5,
     "cycle": 1,
-    "cycle_pnl": -38.61,
+    "cycle_pnl": -57.5,
     "positions": [
       {
         "coin": "BTC",
         "size": -0.31494823038463055,
         "entry": 63502.5,
-        "unrealized_pnl": -29.61
+        "unrealized_pnl": -48.5
       }
     ],
     "target": 1100,
-    "progress_pct": -38.6,
+    "progress_pct": -57.5,
     "state": "h\u00e4lt",
     "held": [
       "BTC SHORT"
@@ -196,8 +196,8 @@
           "grund": "unbestaetigt_negativ"
         }
       ],
-      "last_fresh_min": 48.5,
-      "last_entry_min": 47.2
+      "last_fresh_min": 53.8,
+      "last_entry_min": 52.5
     },
     "analysis_funnel": {
       "candidates": 90,
