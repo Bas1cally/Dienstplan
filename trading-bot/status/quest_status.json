@@ -1,3 +1,628 @@
 {
-  "_hinweis": "Noch kein echter Snapshot. Wird automatisch überschrieben, sobald STATUS_PUSH_TOKEN in der .env auf dem Server gesetzt und status_push.enabled: true ist (config.yaml). Siehe bot/status_push.py."
+  "autopilot": {
+    "updated": "2026-07-17T15:29:18.858016+00:00",
+    "state": "running"
+  },
+  "wallet": null,
+  "quest": {
+    "equity": 1000.0,
+    "cycle": 1,
+    "cycle_pnl": 0.0,
+    "positions": [],
+    "target": 1100,
+    "progress_pct": 0.0,
+    "state": "wartet auf frisches Signal",
+    "held": [],
+    "parallel": false,
+    "banked": 0.0,
+    "won": 0,
+    "busted": 0,
+    "trades": 0,
+    "avg_trades_per_cycle": 0.0,
+    "leader": "",
+    "leader_is_star": false,
+    "strikes": {
+      "0xfd688aed": 2,
+      "0xda744273": 1,
+      "0x8cc9fb94": 3,
+      "0x7d0c5969": 2,
+      "0x10b4c1fb": 2,
+      "0x5f94a519": 1,
+      "0xcf7c4feb": 2,
+      "0x60d97552": 1,
+      "0xd68dfb48": 2,
+      "0x362ad620": 1,
+      "0x920fa683": 1,
+      "0xd246c4a0": 1
+    },
+    "banned": [
+      "0x7d0c5969",
+      "0x8cc9fb94",
+      "0xd68dfb48",
+      "0x10b4c1fb",
+      "0xfd688aed",
+      "0xcf7c4feb"
+    ],
+    "confidence": {
+      "0x051c2e6d": 5,
+      "0xc9c78160": 5
+    },
+    "stars": [],
+    "pending": [],
+    "baseline_status": "warm \u00fcbernommen (34s alt beim Start)",
+    "scan": {
+      "fresh_seen": 0,
+      "rejected": {},
+      "last_rejected": [],
+      "last_fresh_min": null,
+      "last_entry_min": null
+    },
+    "analysis_funnel": {},
+    "pool_funnel": {},
+    "pool": [
+      {
+        "address": "0xcaaacd1e5f394da3e5006edc7c05fd7bfdc5764b",
+        "score": 88.1
+      },
+      {
+        "address": "0xf524d20408d9f426c74903924941efd1aae5e59d",
+        "score": 86.5
+      },
+      {
+        "address": "0xbe19541903f64af97bcf8436f4d15bf3a56b8bd1",
+        "score": 86.2
+      },
+      {
+        "address": "0x5559da6ec434c5723d0ce9c4da7f29e3f8a3d43b",
+        "score": 85.0
+      },
+      {
+        "address": "0x0e0bf22e3595687a8756e1e9862a20944d0be57e",
+        "score": 85.0
+      },
+      {
+        "address": "0x11eee2e0a613af4f636e23ff295e2dac6a191d1d",
+        "score": 84.8
+      },
+      {
+        "address": "0x0351606ce9152cdf270d90133b3187ac5d1cf9db",
+        "score": 77.5
+      },
+      {
+        "address": "0xc36af149b64a41aab6c26ea6b71c37082d9e105b",
+        "score": 77.5
+      },
+      {
+        "address": "0x8c830d21e41ad688dbf1727ae4425573849daf41",
+        "score": 77.5
+      },
+      {
+        "address": "0x964f9b5b2b0450ca7847956609bbb220047db3a7",
+        "score": 77.5
+      },
+      {
+        "address": "0x44871d62caaeb8b91777be8aae0e23ee68b4c92d",
+        "score": 77.5
+      },
+      {
+        "address": "0x89720b1831fd8457ea9026f5ffb476ed6d35e6bd",
+        "score": 77.5
+      },
+      {
+        "address": "0x279dbeaae93533a5c4607712b027b04aff62d625",
+        "score": 77.5
+      },
+      {
+        "address": "0xcd0673721a489b1cea0e2580fa304bcb6cca3186",
+        "score": 77.5
+      },
+      {
+        "address": "0xd4c7294dbb84a8bd5ee51d9fa33acf12300a1513",
+        "score": 77.5
+      },
+      {
+        "address": "0x6b237a7296bd297132660da3cbe6d85bc485af54",
+        "score": 77.5
+      },
+      {
+        "address": "0xe1f0148b74d7334435820dc3e383f4ca7969d541",
+        "score": 77.5
+      },
+      {
+        "address": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
+        "score": 76.7
+      },
+      {
+        "address": "0x939f95036d2e7b6d7419ec072bf9d967352204d2",
+        "score": 47.8
+      },
+      {
+        "address": "0xe3814a14b83c128b53da5e8b6101a2b43c494373",
+        "score": 46.6
+      }
+    ]
+  },
+  "journal_tail": [
+    {
+      "t": 1784301364,
+      "kind": "sprint_cycle_end",
+      "cycle": 4,
+      "pnl": -206.75,
+      "reason": "manual",
+      "banked": 120.29,
+      "leader": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
+      "coin": "PENGU"
+    },
+    {
+      "t": 1784301364,
+      "kind": "sprint_exit",
+      "coin": "PENGU",
+      "reason": "manual",
+      "cycle_pnl": -206.75
+    },
+    {
+      "t": 1784298736,
+      "kind": "sprint_entry",
+      "coin": "PENGU",
+      "side": "LONG",
+      "notional": 10000.0,
+      "leader": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
+      "cycle": 4
+    },
+    {
+      "t": 1784262006,
+      "kind": "sprint_cycle_end",
+      "cycle": 3,
+      "pnl": -5.21,
+      "reason": "zeit_negativ",
+      "banked": 327.04,
+      "leader": "0xd68dfb480e643f0c1a78b24d04de7cce7dfbbdfc",
+      "coin": "ETH"
+    },
+    {
+      "t": 1784261996,
+      "kind": "sprint_ban",
+      "leader": "0xd68dfb480e643f0c1a78b24d04de7cce7dfbbdfc"
+    },
+    {
+      "t": 1784261996,
+      "kind": "sprint_strike",
+      "leader": "0xd68dfb480e643f0c1a78b24d04de7cce7dfbbdfc",
+      "strikes": 2,
+      "ride_pnl": -5.21
+    },
+    {
+      "t": 1784261996,
+      "kind": "sprint_exit",
+      "coin": "ETH",
+      "reason": "zeit_negativ",
+      "cycle_pnl": -5.21
+    },
+    {
+      "t": 1784254326,
+      "kind": "sprint_entry",
+      "coin": "ETH",
+      "side": "LONG",
+      "notional": 10000.0,
+      "leader": "0xd68dfb480e643f0c1a78b24d04de7cce7dfbbdfc",
+      "cycle": 3
+    },
+    {
+      "t": 1784232429,
+      "kind": "sprint_tp",
+      "cycle": 2,
+      "pnl": 111.33,
+      "reason": "tp",
+      "banked": 332.25,
+      "leader": "0xc9c78160120cd6ecf3dea892e9ae5af4115bf5f8",
+      "coin": "PUMP"
+    },
+    {
+      "t": 1784231780,
+      "kind": "sprint_entry",
+      "coin": "PUMP",
+      "side": "SHORT",
+      "notional": 10000.0,
+      "leader": "0xc9c78160120cd6ecf3dea892e9ae5af4115bf5f8",
+      "cycle": 2
+    },
+    {
+      "t": 1784227226,
+      "kind": "sprint_tp",
+      "cycle": 1,
+      "pnl": 220.92,
+      "reason": "tp",
+      "banked": 220.92,
+      "leader": "0x051c2e6d49cf82ebc47f08f9b85800f94fc9693c",
+      "coin": "CASHCAT"
+    },
+    {
+      "t": 1784226989,
+      "kind": "sprint_entry",
+      "coin": "CASHCAT",
+      "side": "LONG",
+      "notional": 10000.0,
+      "leader": "0x051c2e6d49cf82ebc47f08f9b85800f94fc9693c",
+      "cycle": 1
+    },
+    {
+      "t": 1784217862,
+      "kind": "sprint_cycle_end",
+      "cycle": 2,
+      "pnl": 45.12,
+      "reason": "manual",
+      "banked": 24.51,
+      "leader": "0xda744273f80b22412417f7cfe0503f3d721f987d",
+      "coin": "xyz:MU"
+    },
+    {
+      "t": 1784217862,
+      "kind": "sprint_exit",
+      "coin": "xyz:MU",
+      "reason": "manual",
+      "cycle_pnl": 45.12
+    },
+    {
+      "t": 1784209186,
+      "kind": "sprint_entry",
+      "coin": "xyz:MU",
+      "side": "SHORT",
+      "notional": 1621.0,
+      "leader": "0xda744273f80b22412417f7cfe0503f3d721f987d",
+      "cycle": 2
+    },
+    {
+      "t": 1784198164,
+      "kind": "sprint_cycle_end",
+      "cycle": 1,
+      "pnl": -20.61,
+      "reason": "zeit_negativ",
+      "banked": -20.61,
+      "leader": "0xd246c4a039508379cd70ce624cdb7c8b1c991f37",
+      "coin": "ETH"
+    },
+    {
+      "t": 1784198164,
+      "kind": "sprint_strike",
+      "leader": "0xd246c4a039508379cd70ce624cdb7c8b1c991f37",
+      "strikes": 1,
+      "ride_pnl": -20.61
+    },
+    {
+      "t": 1784198164,
+      "kind": "sprint_exit",
+      "coin": "ETH",
+      "reason": "zeit_negativ",
+      "cycle_pnl": -20.61
+    },
+    {
+      "t": 1784190924,
+      "kind": "sprint_entry",
+      "coin": "ETH",
+      "side": "LONG",
+      "notional": 10000.0,
+      "leader": "0xd246c4a039508379cd70ce624cdb7c8b1c991f37",
+      "cycle": 1
+    },
+    {
+      "t": 1784181246,
+      "kind": "sprint_cycle_end",
+      "cycle": 1,
+      "pnl": -12.68,
+      "reason": "manual",
+      "banked": -12.68,
+      "leader": "0xda744273f80b22412417f7cfe0503f3d721f987d"
+    },
+    {
+      "t": 1784181246,
+      "kind": "sprint_exit",
+      "coin": "xyz:MU",
+      "reason": "manual",
+      "cycle_pnl": -12.68
+    },
+    {
+      "t": 1784176843,
+      "kind": "sprint_entry",
+      "coin": "xyz:MU",
+      "side": "SHORT",
+      "notional": 1627.0,
+      "leader": "0xda744273f80b22412417f7cfe0503f3d721f987d",
+      "cycle": 1
+    },
+    {
+      "t": 1784172806,
+      "kind": "sprint_cycle_end",
+      "cycle": 2,
+      "pnl": -9.0,
+      "reason": "manual",
+      "banked": -239.73,
+      "leader": "0xd487e26c62ed8c28ce3cc70b5791e501c2934982",
+      "coin": "xyz:SKHX"
+    },
+    {
+      "t": 1784172806,
+      "kind": "sprint_exit",
+      "coin": "xyz:SKHX",
+      "reason": "manual",
+      "cycle_pnl": -9.0
+    },
+    {
+      "t": 1784172779,
+      "kind": "sprint_entry",
+      "coin": "xyz:SKHX",
+      "side": "SHORT",
+      "notional": 10000.0,
+      "leader": "0xd487e26c62ed8c28ce3cc70b5791e501c2934982",
+      "cycle": 2
+    },
+    {
+      "t": 1784169933,
+      "kind": "sprint_cycle_end",
+      "cycle": 1,
+      "pnl": -230.73,
+      "reason": "leader_rotated",
+      "banked": -230.73,
+      "leader": "0x920fa68300c8aa95c4563e0daf79a0b0e51f0cfe",
+      "coin": "ZEC"
+    },
+    {
+      "t": 1784169923,
+      "kind": "sprint_strike",
+      "leader": "0x920fa68300c8aa95c4563e0daf79a0b0e51f0cfe",
+      "strikes": 1,
+      "ride_pnl": -230.73
+    },
+    {
+      "t": 1784169923,
+      "kind": "sprint_exit",
+      "coin": "ZEC",
+      "reason": "leader_rotated",
+      "cycle_pnl": -230.73
+    },
+    {
+      "t": 1784153626,
+      "kind": "sprint_entry",
+      "coin": "ZEC",
+      "side": "LONG",
+      "notional": 10000.0,
+      "leader": "0x920fa68300c8aa95c4563e0daf79a0b0e51f0cfe",
+      "cycle": 1
+    },
+    {
+      "t": 1784144999,
+      "kind": "sprint_cycle_end",
+      "cycle": 1,
+      "pnl": -66.07,
+      "reason": "manual",
+      "banked": -66.07,
+      "leader": "0xa870c44f7e6e2e15d104185d3bbe5a54f9e2b52d"
+    },
+    {
+      "t": 1784144989,
+      "kind": "sprint_exit",
+      "coin": "ADA",
+      "reason": "manual",
+      "cycle_pnl": -66.07
+    },
+    {
+      "t": 1784134032,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1910.75,
+      "reasons": [
+        "15m-Trend (auf) gegen Short",
+        "1h-Trend (auf) gegen Short",
+        "Momentum passt"
+      ]
+    },
+    {
+      "t": 1784129413,
+      "kind": "sprint_entry",
+      "coin": "ADA",
+      "side": "LONG",
+      "notional": 4393.0,
+      "leader": "0xa870c44f7e6e2e15d104185d3bbe5a54f9e2b52d",
+      "cycle": 1
+    },
+    {
+      "t": 1784128945,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1930.65,
+      "reasons": [
+        "15m-Trend (auf) gegen Short",
+        "1h-Trend (auf) gegen Short",
+        "Preis auf falscher Seite der EMA20"
+      ]
+    },
+    {
+      "t": 1784128792,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1932.15,
+      "reasons": [
+        "Validator nicht verf\u00fcgbar - konservativ abgelehnt"
+      ]
+    },
+    {
+      "t": 1784128648,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1929.25,
+      "reasons": [
+        "15m-Trend (auf) gegen Short",
+        "1h-Trend (auf) gegen Short",
+        "Preis auf falscher Seite der EMA20"
+      ]
+    },
+    {
+      "t": 1784125783,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1928.45,
+      "reasons": [
+        "15m-Trend (auf) gegen Short",
+        "1h-Trend (auf) gegen Short",
+        "Preis auf falscher Seite der EMA20"
+      ]
+    },
+    {
+      "t": 1784125149,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1930.45,
+      "reasons": [
+        "15m-Trend (auf) gegen Short",
+        "1h-Trend (auf) gegen Short",
+        "Preis auf falscher Seite der EMA20"
+      ]
+    },
+    {
+      "t": 1784124055,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1927.05,
+      "reasons": [
+        "15m-Trend (auf) gegen Short",
+        "1h-Trend (auf) gegen Short",
+        "Preis auf falscher Seite der EMA20"
+      ]
+    },
+    {
+      "t": 1784123914,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1923.35,
+      "reasons": [
+        "Validator nicht verf\u00fcgbar - konservativ abgelehnt"
+      ]
+    },
+    {
+      "t": 1784123593,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1920.55,
+      "reasons": [
+        "15m-Trend (auf) gegen Short",
+        "1h-Trend (auf) gegen Short",
+        "Preis auf falscher Seite der EMA20"
+      ]
+    },
+    {
+      "t": 1784122055,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1934.25,
+      "reasons": [
+        "15m-Trend (auf) gegen Short",
+        "1h-Trend (auf) gegen Short",
+        "Preis auf falscher Seite der EMA20"
+      ]
+    },
+    {
+      "t": 1784121557,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1942.25,
+      "reasons": [
+        "15m-Trend (auf) gegen Short",
+        "1h-Trend (auf) gegen Short",
+        "Preis auf falscher Seite der EMA20"
+      ]
+    },
+    {
+      "t": 1784120718,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1940.95,
+      "reasons": [
+        "15m-Trend (auf) gegen Short",
+        "1h-Trend (auf) gegen Short",
+        "Preis auf falscher Seite der EMA20"
+      ]
+    },
+    {
+      "t": 1784120519,
+      "kind": "veto",
+      "coin": "ETH",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 1929.45,
+      "reasons": [
+        "Validator nicht verf\u00fcgbar - konservativ abgelehnt"
+      ]
+    },
+    {
+      "t": 1784120519,
+      "kind": "veto",
+      "coin": "BTC",
+      "side": "SHORT",
+      "target": -2376.4,
+      "price": 65154.5,
+      "reasons": [
+        "Validator nicht verf\u00fcgbar - konservativ abgelehnt"
+      ]
+    },
+    {
+      "t": 1784120359,
+      "kind": "sprint_cycle_end",
+      "cycle": 4,
+      "pnl": 85.96,
+      "reason": "mode_switch",
+      "banked": -200.57,
+      "leader": "0xda2467b48ae28cd040ae49feb7846c856df63a49",
+      "coin": "xyz:GOLD"
+    },
+    {
+      "t": 1784120359,
+      "kind": "sprint_cycle_end",
+      "cycle": 3,
+      "pnl": -14.8,
+      "reason": "mode_switch",
+      "banked": -286.53,
+      "leader": "0x362ad6209a5e904a5569f69884375809c5781d9f",
+      "coin": "xyz:SPCX"
+    },
+    {
+      "t": 1784120359,
+      "kind": "sprint_strike",
+      "leader": "0x362ad6209a5e904a5569f69884375809c5781d9f",
+      "strikes": 1,
+      "ride_pnl": -14.8
+    },
+    {
+      "t": 1784120358,
+      "kind": "sprint_cycle_end",
+      "cycle": 2,
+      "pnl": -4.47,
+      "reason": "mode_switch",
+      "banked": -271.73,
+      "leader": "0xcf7c4feb434751146a48b895e96caeb15838f92c",
+      "coin": "xyz:XYZ100"
+    }
+  ]
 }
