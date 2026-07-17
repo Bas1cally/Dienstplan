@@ -225,6 +225,12 @@ sprint:
                             # hinten rotiert - frische Kandidaten bekommen Vorrang
                             # (Nutzer: 'scannen scannen Daten'). Stars ausgenommen.
                             # 0 = aus. Sinnvoll ~ autopilot.reanalyze_hours (6h).
+  regime_min_crypto_share: 0.34  # QUEST (Nutzer-Befund: 50 Signale in Folge alle
+                            # 'kein_krypto', 0 Krypto-Einstiege): mind. 1/3 der
+                            # distinkten Handels-Coins müssen Krypto sein, sonst
+                            # fliegt die Wallet bei geschlossener Börse aus dem
+                            # Pool - vorher reichte 1x Krypto in 21 Tagen, um
+                            # komplett durchzurutschen. 0 = altes Verhalten.
   exclude_coins: [BTC]      # BTC = Beta statt Leader-Alpha; bei fixem +10%-Ziel
                             # (10x ~1% Move) stoppt ein BTC-Scalper oft mehrfach
                             # aus, bevor das Ziel steht - teure Ein-/Ausstiegs-Fees

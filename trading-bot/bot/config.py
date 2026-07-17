@@ -442,6 +442,20 @@ class SprintConfig:
     # Stars (bewiesene Verdiener) sind ausgenommen. 0 = aus. Sinnvoll ~ reanalyze
     # _hours (Rebuild-Kadenz) - kürzer bringt nichts, da erst beim Rebuild rotiert.
     rotate_idle_hours: float = 6.0
+    # Regime-Filter-Schärfe (Nutzer-Befund: 50 frische Signale in Folge, ALLE
+    # 'kein_krypto' verworfen, NULL Krypto-Einstiege - "das ist nicht normal").
+    # Ursache: der Regime-Filter verlangte bisher 100% reine Aktien-Historie
+    # (all(':' in c for c in m.coins)) - eine Wallet, die auch nur EINMAL in den
+    # letzten analysis.days Krypto getradet hat, rutschte komplett durch, egal
+    # wie dominant ihre Aktien-Aktivität ist. Jetzt ein ANTEIL: mindestens
+    # regime_min_crypto_share der distinkten gehandelten Coins müssen Krypto
+    # sein, sonst gilt die Wallet bei geschlossener Börse als 'überwiegend
+    # Aktien' und fliegt raus. Grobe Näherung (distinkte Coins, nicht Fill-
+    # gewichtet - TraderMetrics zählt keine Häufigkeit je Coin), aber strikt
+    # besser als die alte Alles-oder-nichts-Regel. 0 = altes Verhalten (nur
+    # Wallets mit NULL Krypto-Historie fliegen raus), 1.0 = nur Wallets mit
+    # AUSSCHLIESSLICH Krypto-Historie bleiben (sehr streng).
+    regime_min_crypto_share: float = 0.34
     # BTC ist praktisch "der Markt" (Beta statt Leader-Alpha) und volatilitätsarm -
     # bis das feste +10%-Ziel (bei 10x ~1% Kursbewegung) erreicht ist, stoppt ein
     # scalpender Leader oft mehrfach aus - jeder Ritt kostet echte Ein-/Ausstiegs-

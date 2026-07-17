@@ -173,26 +173,38 @@ def test_is_sleeper_flat_and_stale_is_excluded():
     assert ap._is_sleeper(m(0, 999)) is False, "Filter aus -> nie Schläfer"
 
 
-def test_is_pure_stock_trader():
+def test_is_stock_dominated():
+    """Live-Fund: die alte Alles-oder-nichts-Regel (nur 100% reine Aktien-
+    Historie fliegt raus) ließ 'fast nur Aktien, einmal Krypto probiert'-
+    Wallets komplett durch - 50 Signale in Folge alle verworfen, 0 Krypto-
+    Einstiege. Jetzt ein Anteil-Schwellwert."""
     ap = _autopilot()
+    ap.cfg.sprint.regime_min_crypto_share = 0.34
 
     def m(coins):
         x = TraderMetrics(address="0xa", account_value=50_000, days=21)
         x.coins = coins
         return x
 
-    assert ap._is_pure_stock_trader(m(["xyz:TSLA", "xyz:NVDA"])) is True
-    assert ap._is_pure_stock_trader(m(["ETH", "xyz:TSLA"])) is False, "gemischt = nicht rein"
-    assert ap._is_pure_stock_trader(m(["ETH", "SOL"])) is False, "Krypto = nicht Aktien"
-    assert ap._is_pure_stock_trader(m([])) is False, "unbekannt -> sicher nicht aussortieren"
+    assert ap._is_stock_dominated(m(["xyz:TSLA", "xyz:NVDA"])) is True, "100% Aktien"
+    assert ap._is_stock_dominated(m(["ETH", "xyz:TSLA", "xyz:NVDA"])) is True, \
+        "33% Krypto < 34%-Schwelle -> immer noch überwiegend Aktien (der Live-Fund)"
+    assert ap._is_stock_dominated(m(["ETH", "SOL", "xyz:TSLA"])) is False, "67% Krypto, klar drüber"
+    assert ap._is_stock_dominated(m(["ETH", "SOL"])) is False, "100% Krypto"
+    assert ap._is_stock_dominated(m([])) is False, "unbekannt -> sicher nicht aussortieren"
+
+    ap.cfg.sprint.regime_min_crypto_share = 0.0
+    assert ap._is_stock_dominated(m(["ETH", "xyz:TSLA", "xyz:NVDA"])) is False, \
+        "Schwelle 0 = altes Verhalten (nur 0% Krypto fliegt raus)"
 
 
-def test_regime_pool_drops_pure_stock_when_market_closed():
-    """Nutzer: außerhalb der Börsenzeiten läuft der Pool leer, weil reine
+def test_regime_pool_drops_stock_dominated_when_market_closed():
+    """Nutzer: außerhalb der Börsenzeiten läuft der Pool leer, weil überwiegend
     Aktien-Trader nur gesperrte Signale liefern. Bei crypto_only (Börse zu)
     fliegen sie raus, Krypto-/Misch-Trader füllen die Slots."""
     ap = _autopilot()
     ap.cfg.sprint.pool_size = 5
+    ap.cfg.sprint.regime_min_crypto_share = 0.34
     ap.leaders = []
 
     def m(addr, score, coins):
@@ -201,18 +213,21 @@ def test_regime_pool_drops_pure_stock_when_market_closed():
         x.coins = coins
         return x
 
-    ranked = [m("0xstock", 90, ["xyz:TSLA"]),        # reiner Aktien-Trader, Top-Score
+    ranked = [m("0xstock", 90, ["xyz:TSLA"]),               # 100% Aktien, Top-Score
+              m("0xmostlystock", 80, ["ETH", "xyz:TSLA", "xyz:NVDA"]),  # 33% Krypto - der Live-Fund
               m("0xcrypto", 50, ["ETH"]),
-              m("0xmixed", 40, ["BTC", "xyz:NVDA"])]
+              m("0xmixed", 40, ["BTC", "xyz:NVDA"])]         # 50% Krypto - bleibt drin
 
     ap.cfg.sprint.crypto_only = True                  # Börse zu
     pool = [p["address"] for p in ap._build_sprint_pool(ranked)]
     assert "0xstock" not in pool, "reiner Aktien-Trader raus, wenn Börse zu"
+    assert "0xmostlystock" not in pool, "überwiegend Aktien-Trader jetzt AUCH raus (der Fix)"
     assert "0xcrypto" in pool and "0xmixed" in pool
 
     ap.cfg.sprint.crypto_only = False                 # Börse offen
     pool = [p["address"] for p in ap._build_sprint_pool(ranked)]
-    assert "0xstock" in pool, "zu Börsenzeiten ist der Aktien-Trader wieder dabei"
+    assert "0xstock" in pool and "0xmostlystock" in pool, \
+        "zu Börsenzeiten sind die Aktien-Trader wieder dabei"
 
 
 # ---------- /quest funnel: Trichter-Diagnose (Nutzer: 'proper Analyse-Tools') ----------

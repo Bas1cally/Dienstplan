@@ -627,7 +627,7 @@ class Autopilot:
             lines.append(f"6. Gesperrt (LARP enttarnt): {pf['banned_out']} raus")
             regime = f"7. Regime-Filter ({'Börse zu' if pf['crypto_only'] else 'Börse offen'}): " \
                      f"{pf['regime_out']} raus"
-            lines.append(regime + (" (reine Aktien-Trader)" if pf["regime_out"] else ""))
+            lines.append(regime + (" (überwiegend Aktien-Trader)" if pf["regime_out"] else ""))
             lines.append(f"   → {pf['cands_after_filters']} Kandidaten für {pf['pool_size_target']} Pool-Slots")
             if pf["truncated_by_size"]:
                 lines.append(f"8. Zu viele Kandidaten: {pf['truncated_by_size']} nicht reingepasst "
@@ -1121,13 +1121,20 @@ class Autopilot:
         Sprint aus ist oder das Buch noch nicht existiert."""
         return self.sprint.banned if self.sprint else set()
 
-    def _is_pure_stock_trader(self, m) -> bool:
-        """Reiner Aktien-Perp-Trader: handelt AUSSCHLIESSLICH Builder-DEX-Coins
-        (':' - Aktien/Gold/Öl), kein Krypto. Solche Wallets liefern außerhalb der
-        US-Börsenzeiten nur gesperrte Signale und sind dann totes Pool-Gewicht.
-        Unbekannte Coin-Liste -> nicht als reiner Aktien-Trader werten (sicher)."""
+    def _is_stock_dominated(self, m) -> bool:
+        """Überwiegend Aktien-Perp-Trader: der Anteil distinkter Krypto-Coins an
+        der gesamten Handels-Historie liegt unter regime_min_crypto_share. Live-
+        Fund: die alte Alles-oder-nichts-Regel (nur 100%-reine Aktien-Wallets
+        raus) ließ 'fast nur Aktien, einmal Krypto probiert'-Wallets komplett
+        durch - 50 frische Signale in Folge, alle verworfen, NULL Krypto-
+        Einstiege. Solche Wallets liefern außerhalb der US-Börsenzeiten fast nur
+        gesperrte Signale und sind dann totes Pool-Gewicht. Unbekannte Coin-
+        Liste -> nicht ausschließen (sicherer Default)."""
         coins = getattr(m, "coins", None) or []
-        return bool(coins) and all(":" in c for c in coins)
+        if not coins:
+            return False
+        crypto_share = sum(1 for c in coins if ":" not in c) / len(coins)
+        return crypto_share < self.cfg.sprint.regime_min_crypto_share
 
     def _is_sleeper(self, m) -> bool:
         """Schläfer-Wallet fürs Quest-Gate: hält KEINE offene Position UND hat
@@ -1157,14 +1164,16 @@ class Autopilot:
             if self.sprint else set()
         n = max(self.cfg.sprint.pool_size, len(self.leaders))
         # Regime-abhängiger Pool (Nutzer): ist der Aktien-Basket gerade zu
-        # (crypto_only, außerhalb der US-Börsenzeiten - ~17.5h/Tag), fliegen REINE
-        # Aktien-Trader raus. Sonst füllt sich der Pool mit Wallets, die die ganzen
-        # geschlossenen Stunden nur gesperrte Aktien-Signale liefern und der Bot
-        # läuft leer. Zum Eröffnungs-Gong (crypto_only=false) kommen sie zurück.
+        # (crypto_only, außerhalb der US-Börsenzeiten - ~17.5h/Tag), fliegen
+        # ÜBERWIEGEND-Aktien-Trader raus (nicht mehr nur 100%-reine - siehe
+        # _is_stock_dominated). Sonst füllt sich der Pool mit Wallets, die die
+        # ganzen geschlossenen Stunden nur gesperrte Aktien-Signale liefern und
+        # der Bot läuft leer. Zum Eröffnungs-Gong (crypto_only=false) kommen sie
+        # zurück.
         crypto_only = self.cfg.sprint.crypto_only
         banned_out = sum(1 for m in sprint_ok if m.address.lower() in banned)
         cands = [m for m in sprint_ok if m.address.lower() not in banned
-                 and not (crypto_only and self._is_pure_stock_trader(m))]
+                 and not (crypto_only and self._is_stock_dominated(m))]
         regime_out = len(sprint_ok) - banned_out - len(cands)
         # Sortierschlüssel: aktive/neue Wallets (nicht idle) zuerst, Stumme ans
         # Ende; innerhalb jeder Gruppe nach Richtungs-Score. [:n] schneidet die
