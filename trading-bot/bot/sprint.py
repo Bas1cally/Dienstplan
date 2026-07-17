@@ -802,6 +802,12 @@ class SprintBook:
             return "kein_krypto"
         return None
 
+    def _leverage_for(self, coin: str) -> float:
+        """Hebel für DIESEN Coin: Override falls in leverage_overrides gelistet
+        (Nutzer 17.07.: BTC/ETH liquider, vertragen mehr Hebel), sonst Basis-
+        `leverage`."""
+        return self.cfg.leverage_overrides.get(coin, self.cfg.leverage)
+
     def _enter(self, coin: str, snap, prices: dict[str, float],
                parallel: bool = False) -> None:
         ko = self._ineligible_reason(coin)
@@ -818,16 +824,17 @@ class SprintBook:
         # (Long/Short) und fahren die VOLLE leverage-Größe. Bei +10%-und-raus
         # zählt die Richtung, nicht wie viel Kapital der Leader selbst riskiert.
         direction = 1.0 if snap.exposure(coin) >= 0 else -1.0
+        lev = self._leverage_for(coin)
         if parallel:
             # Mess-Modus: JEDER Ritt startet auf frischer equity-Basis (1000$),
             # unabhängig vom Sammelbuch - 1 Signal = 1 Ritt = 1k (Nutzer)
-            notional = direction * self.cfg.leverage * self.cfg.equity
+            notional = direction * lev * self.cfg.equity
         else:
             equity = self.paper.equity(prices)
-            target = direction * self.cfg.leverage * equity
-            # Gross-Cap: Gesamtbuch bleibt unter leverage x Equity
+            target = direction * lev * equity
+            # Gross-Cap: Gesamtbuch bleibt unter (Coin-)leverage x Equity
             gross = sum(abs(s) * prices.get(c, 0.0) for c, s in self.paper.sizes().items())
-            headroom = max(0.0, self.cfg.leverage * equity - gross)
+            headroom = max(0.0, lev * equity - gross)
             notional = max(-headroom, min(headroom, target))
         if abs(notional) < self.cfg.min_notional:
             self._reject(coin, snap.address, "unter_min_notional")

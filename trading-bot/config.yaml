@@ -157,16 +157,23 @@ scalp:
   max_holding_minutes: 30   # Zeit-Stop - ein Scalp wird nie eine Dauerposition
   max_notional_frac: 0.15   # max. 15% Equity Notional
 
-# === Sprint-Buch: 1000$ x10 auf den BESTEN Leader, Ziel +100$ je Zyklus ===
+# === Sprint-Buch: 1000$ x10 (BTC x20, ETH x15) auf den BESTEN Leader ===
 # Eigenes Paper-Konto: spiegelt die Positionen des jeweils besten Leaders der
-# laufenden Rotation mit 10x Exposure. Bei +100$ (10%) Take-Profit -> Gewinn
-# gebucht ("banked"), Konto auf 1000 zurückgesetzt, nächster Zyklus. Fällt die
-# Equity unter bust_frac, gilt der Zyklus als liquidiert (10x-Realität) und
-# startet ebenfalls neu. RISK_OFF stellt auch dieses Buch glatt.
+# laufenden Rotation mit vollem, coin-abhängigem Hebel (leverage_overrides
+# unten). Bei +100$ (10%) Take-Profit -> Gewinn gebucht ("banked"), Konto auf
+# 1000 zurückgesetzt, nächster Zyklus. Fällt die Equity unter bust_frac, gilt
+# der Zyklus als liquidiert (Hebel-Realität) und startet ebenfalls neu.
+# RISK_OFF stellt auch dieses Buch glatt.
 sprint:
   enabled: true
   equity: 1000
-  leverage: 10
+  leverage: 10               # Basis-Hebel für alle Coins ohne eigenen Eintrag
+                             # unten in leverage_overrides.
+  leverage_overrides:        # Nutzer (17.07.): BTC/ETH liquider/weniger
+                             # sprunghaft als der Rest - vertragen mehr Hebel,
+                             # ohne am festen +10%-Ziel öfter vorbeizuscalpen.
+    BTC: 20
+    ETH: 15
   target_profit: 100
   max_positions: 1          # EIN Ritt = EINE Position. Live-Vorfall: Leader
                             # eröffnete einen 7-Coin-Aktien-Korb, der Bot fraß
@@ -184,17 +191,18 @@ sprint:
                             # blind instant (Live-Befund: Leader schießt nach
                             # Einstieg sofort ins Minus und flippt Sekunden
                             # später zurück). 0 = aus (altes Sofort-Verhalten).
-  crypto_only: false        # Anfangs-/Fallback-Wert: wird bei stock_market_hours
-                            # (unten, an) zur Laufzeit automatisch umgeschaltet -
-                            # zum Börsen-Gong auf/zu. Nur relevant, wenn
-                            # stock_market_hours=false (dann gilt dieser Wert
-                            # durchgehend).
-  stock_market_hours: true  # WORLDCLOCK (Nutzer): Aktien-Perps nur während der
-                            # echten US-Börsen-Sitzung (9:30-16:00 ET, Mo-Fr,
-                            # kein Feiertag) handeln - außerhalb ist der Kurs
-                            # stale/spekulativ. Eröffnungs-Gong: Aktien-Basket an
-                            # + /analyze. Schluss-Gong: Basket aus + /analyze +
-                            # profitable Aktien sichern (Verlust fängt die 2h-Regel).
+  crypto_only: false        # AKTIEN-REGIME ENTFERNT (Nutzer 17.07.): "24/7 alles
+                            # erlaubt" - Krypto UND Aktien-Perps jederzeit
+                            # zulässig, kein Umschalten mehr zum Börsen-Gong
+                            # (siehe stock_market_hours: false unten). Dieser
+                            # statische Wert gilt jetzt durchgehend.
+  stock_market_hours: false # AUS (Nutzer 17.07.): kein automatisches Auf/Zu von
+                            # crypto_only mehr zum US-Börsen-Gong - Aktien-Perps
+                            # laufen jetzt außerhalb der Sitzung genauso mit
+                            # (akzeptiertes Risiko: Kurs kann dann stale sein).
+                            # _maybe_market_gong() wird dadurch komplett zum
+                            # No-Op, Mechanismus bleibt im Code für eine
+                            # mögliche spätere Reaktivierung.
   pool_size: 20             # Sprint scannt einen breiteren Leader-Pool als das
                             # Hauptbuch (max_leaders: 6). Sprint hält immer nur EINE
                             # Position -> mehr Quellen = weniger Leerlauf, ohne die
@@ -230,16 +238,18 @@ sprint:
                             # hinten rotiert - frische Kandidaten bekommen Vorrang
                             # (Nutzer: 'scannen scannen Daten'). Stars ausgenommen.
                             # 0 = aus. Sinnvoll ~ autopilot.reanalyze_hours (6h).
-  regime_min_crypto_share: 0.34  # QUEST (Nutzer-Befund: 50 Signale in Folge alle
-                            # 'kein_krypto', 0 Krypto-Einstiege): mind. 1/3 der
-                            # distinkten Handels-Coins müssen Krypto sein, sonst
-                            # fliegt die Wallet bei geschlossener Börse aus dem
-                            # Pool - vorher reichte 1x Krypto in 21 Tagen, um
-                            # komplett durchzurutschen. 0 = altes Verhalten.
-  exclude_coins: [BTC]      # BTC = Beta statt Leader-Alpha; bei fixem +10%-Ziel
-                            # (10x ~1% Move) stoppt ein BTC-Scalper oft mehrfach
-                            # aus, bevor das Ziel steht - teure Ein-/Ausstiegs-Fees
-                            # ohne besonderen Edge. Leer lassen, um BTC zuzulassen.
+  regime_min_crypto_share: 0    # AUS (Nutzer 17.07., Aktien-Regime entfernt): mit
+                            # crypto_only durchgehend false greift dieser Filter
+                            # ohnehin nie (nur relevant wenn crypto_only=true) -
+                            # 0 = altes/deaktiviertes Verhalten, hier zur
+                            # Klarheit explizit gesetzt statt nur implizit tot.
+  exclude_coins: []          # BTC-SPERRE AUFGEHOBEN (Nutzer 17.07.): war raus
+                            # wegen Beta-statt-Alpha + Fee-Falle am fixen
+                            # +10%-Ziel. Jetzt Testlauf mit BTC x20 Hebel (s.o.);
+                            # die max_ride_hours-Zeit+negativ-Cut (2h) verhindert,
+                            # dass ein zäher BTC-Ritt für immer hängen bleibt.
+                            # Nach ~1 Woche Daten (/quest assets, /report) neu
+                            # entscheiden, ob BTC wieder raus muss.
 
 # === Lighter (zkLighter): fremde Trader auto-entdecken + auf HL messen ===
 # Probe hat bestätigt: Lighter gibt fremde Positionen öffentlich her. Der Bot

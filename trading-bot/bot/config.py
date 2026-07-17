@@ -341,7 +341,14 @@ class SprintConfig:
     """
     enabled: bool = True
     equity: float = 1000.0          # frisches Kapital je Zyklus
-    leverage: float = 10.0          # Exposure-Multiplikator auf den besten Leader
+    leverage: float = 10.0          # Basis-Hebel für alle Coins ohne eigenen Eintrag
+                                    # in leverage_overrides (s.u.)
+    # Nutzer (17.07.): fixer Hebel unterscheidet sich je Coin - BTC/ETH sind
+    # liquider/weniger sprunghaft als der Rest, vertragen mehr Hebel ohne
+    # unverhältnismäßig öfter am festen +10%-Ziel vorbeizuscalpen. Coin -> Hebel,
+    # alles ohne Eintrag läuft auf dem Basis-`leverage` oben. Leer = kein Coin
+    # hat einen Override (reines Basis-Verhalten wie vor dieser Änderung).
+    leverage_overrides: dict = None  # type: ignore[assignment]
     target_profit: float = 100.0    # Take-Profit je Zyklus (+10%)
     # EIN Ritt = EINE Position (Nutzer-Vorgabe). Live-Vorfall: ein Leader hat
     # einen 7-Coin-Aktien-Korb auf einmal eröffnet und der Bot hat ALLE 7
@@ -465,6 +472,8 @@ class SprintConfig:
     def __post_init__(self):
         if self.exclude_coins is None:
             self.exclude_coins = ["BTC"]
+        if self.leverage_overrides is None:
+            self.leverage_overrides = {}
 
 
 @dataclass
@@ -640,6 +649,10 @@ def _validate(cfg: Config) -> None:
     sp = cfg.sprint
     if not 1 <= sp.leverage <= 25:
         raise ValueError("sprint.leverage muss zwischen 1 und 25 liegen")
+    for coin, lev in sp.leverage_overrides.items():
+        if not 1 <= lev <= 25:
+            raise ValueError(f"sprint.leverage_overrides[{coin}] muss zwischen "
+                             "1 und 25 liegen")
     if sp.target_profit <= 0 or sp.equity <= 0:
         raise ValueError("sprint.equity und sprint.target_profit müssen positiv sein")
     if not 0 < sp.bust_frac < 0.5:

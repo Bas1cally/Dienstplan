@@ -78,6 +78,28 @@ def test_flat_leverage_follows_leader_short_direction():
         assert abs(b.paper.sizes()["ETH"]) * 100.0 > 9_900, "volle 10x"
 
 
+def test_leverage_override_scales_notional_for_that_coin():
+    """Nutzer (17.07.): BTC/ETH liquider, vertragen mehr Hebel als der Rest -
+    coin-abhängiger Override statt fixem Basis-Hebel für alle Coins."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, leverage=10, leverage_overrides={"BTC": 20})
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        notional = abs(b.paper.sizes()["BTC"]) * 100.0
+        assert 19_800 < notional <= 20_000, \
+            f"BTC-Override x20 (20.000$) statt Basis x10, war {notional:.0f}"
+
+
+def test_leverage_without_override_uses_base():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, leverage=10, leverage_overrides={"BTC": 20})
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, ETH=50)], P)   # ETH hat hier KEINEN Override
+        notional = abs(b.paper.sizes()["ETH"]) * 100.0
+        assert 9_900 < notional <= 10_000, \
+            f"ETH ohne Override bleibt bei Basis x10, war {notional:.0f}"
+
+
 def test_fresh_signal_enters_then_holds():
     """Frisches Signal (0 -> Position) -> Einstieg 10x; Wobbeln danach -> null Trades."""
     with tempfile.TemporaryDirectory() as tmp:

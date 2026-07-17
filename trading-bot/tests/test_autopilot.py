@@ -88,6 +88,22 @@ def _utc(y, mo, d, h, mi):
     return datetime(y, mo, d, h, mi, tzinfo=timezone.utc)
 
 
+def test_leverage_desc_shows_base_only_without_overrides():
+    ap = _autopilot()
+    ap.cfg.sprint.leverage = 10
+    ap.cfg.sprint.leverage_overrides = {}
+    assert ap._leverage_desc() == "x10"
+
+
+def test_leverage_desc_lists_overrides_sorted():
+    """Nutzer (17.07.): BTC x20/ETH x15 statt Basis x10 - Log/Telegram-Meldungen
+    sollen das sichtbar machen statt weiter pauschal 'x10' zu behaupten."""
+    ap = _autopilot()
+    ap.cfg.sprint.leverage = 10
+    ap.cfg.sprint.leverage_overrides = {"ETH": 15, "BTC": 20}
+    assert ap._leverage_desc() == "x10 (BTC x20, ETH x15)"
+
+
 def test_market_gong_first_call_syncs_crypto_only_no_action():
     """Erststart synchronisiert crypto_only mit dem Marktzustand, feuert aber
     KEINEN Gong (kein /analyze, keine Nachricht)."""

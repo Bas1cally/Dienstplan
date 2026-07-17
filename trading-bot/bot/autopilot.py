@@ -230,7 +230,7 @@ class Autopilot:
 
     def _cmd_help(self) -> str:
         return ("<b>Befehle</b>\n/status – Zustand & Schatztruhe\n"
-                "/quest – Quest-Bot (1000$ x10, Ziel +100$/Zyklus)\n"
+                "/quest – Quest-Bot (1000$, Hebel je Coin, Ziel +100$/Zyklus)\n"
                 "/quest pool – Quest-Pool mit Richtungs-Scores\n"
                 "/quest assets – Krypto vs. Aktien-Perps PnL-Vergleich\n"
                 "/quest funnel – Trichter-Diagnose (warum ist der Pool so klein/idle?)\n"
@@ -399,7 +399,7 @@ class Autopilot:
         if self.sprint:
             srows = self.sprint.paper.position_rows(prices)
             if srows:
-                out.append("<b>Quest-Bot (x10)</b>")
+                out.append("<b>Quest-Bot</b>")
                 for r in srows:
                     side = "LONG" if r["size"] > 0 else "SHORT"
                     out.append(f"{side} {r['coin']}: {abs(r['size']):.4f} @ {r['entry']:.4f} "
@@ -877,7 +877,7 @@ class Autopilot:
             f"🚀 <b>Quest-Bot gestartet</b>\n"
             f"Modus: {'DRY-RUN' if self.cfg.dry_run else 'LIVE'} auf "
             f"{'Testnet' if self.cfg.is_testnet else 'Mainnet'}\n"
-            + (f"Pool: {len(self.sprint_leaders)} Leader | 1000$ x{self.cfg.sprint.leverage:.0f}, "
+            + (f"Pool: {len(self.sprint_leaders)} Leader | 1000$ {self._leverage_desc()}, "
                f"Ziel +{self.cfg.sprint.target_profit:.0f}$/Zyklus"
                if self.cfg.sprint.enabled else "Quest-Bot aus (sprint.enabled prüfen)")
         )
@@ -1057,8 +1057,8 @@ class Autopilot:
 
             self.sprint = SprintBook(self.cfg.sprint, self.cfg.backtest.fee_rate,
                                      notifier=self.notifier, journal=self.journal)
-            log.info("Sprint-Buch aktiv: %.0f$ x%.0f auf den besten Leader, Ziel +%.0f$/Zyklus",
-                     self.cfg.sprint.equity, self.cfg.sprint.leverage,
+            log.info("Sprint-Buch aktiv: %.0f$ %s auf den besten Leader, Ziel +%.0f$/Zyklus",
+                     self.cfg.sprint.equity, self._leverage_desc(),
                      self.cfg.sprint.target_profit)
             # Gebannte Leader aus dem beim Start geladenen Pool werfen (das Buch
             # mit seinen Bans existiert erst jetzt, nach _load_sprint_pool).
@@ -1120,6 +1120,16 @@ class Autopilot:
         """Adressen, die Sprint als LARP enttarnt hat (lowercase). Leer, wenn
         Sprint aus ist oder das Buch noch nicht existiert."""
         return self.sprint.banned if self.sprint else set()
+
+    def _leverage_desc(self) -> str:
+        """Lesbare Hebel-Zusammenfassung fürs Log/Telegram: Basis + Coin-
+        Overrides (z.B. 'x10 (BTC x20, ETH x15)'), oder nur 'x10' ohne Overrides."""
+        sp = self.cfg.sprint
+        base = f"x{sp.leverage:.0f}"
+        if not sp.leverage_overrides:
+            return base
+        over = ", ".join(f"{c} x{v:.0f}" for c, v in sorted(sp.leverage_overrides.items()))
+        return f"{base} ({over})"
 
     def _is_stock_dominated(self, m) -> bool:
         """Überwiegend Aktien-Perp-Trader: der Anteil distinkter Krypto-Coins an
