@@ -1,94 +1,7 @@
 {
   "autopilot": {
-    "updated": "2026-07-17T15:34:58.880491+00:00",
-    "state": "running",
-    "mode": "dry_run",
-    "network": "testnet",
-    "risk_level": "NORMAL",
-    "realtime": true,
-    "ws_fills": 0,
-    "anomalies": [],
-    "orderbook": [],
-    "twap": [],
-    "polymarket": [],
-    "labs": null,
-    "sprint": {
-      "equity": 1000.0,
-      "cycle": 1,
-      "cycle_pnl": 0.0,
-      "positions": [],
-      "target": 1100,
-      "progress_pct": 0.0,
-      "state": "wartet auf frisches Signal",
-      "held": [],
-      "parallel": false,
-      "banked": 0.0,
-      "won": 0,
-      "busted": 0,
-      "trades": 0,
-      "avg_trades_per_cycle": 0.0,
-      "leader": "",
-      "leader_is_star": false,
-      "strikes": {
-        "0xfd688aed": 2,
-        "0xda744273": 1,
-        "0x8cc9fb94": 3,
-        "0x7d0c5969": 2,
-        "0x10b4c1fb": 2,
-        "0x5f94a519": 1,
-        "0xcf7c4feb": 2,
-        "0x60d97552": 1,
-        "0xd68dfb48": 2,
-        "0x362ad620": 1,
-        "0x920fa683": 1,
-        "0xd246c4a0": 1
-      },
-      "banned": [
-        "0x7d0c5969",
-        "0x8cc9fb94",
-        "0xd68dfb48",
-        "0x10b4c1fb",
-        "0xfd688aed",
-        "0xcf7c4feb"
-      ],
-      "confidence": {
-        "0x051c2e6d": 5,
-        "0xc9c78160": 5
-      },
-      "stars": [],
-      "pending": [],
-      "baseline_status": "warm \u00fcbernommen (34s alt beim Start)",
-      "scan": {
-        "fresh_seen": 0,
-        "rejected": {},
-        "last_rejected": [],
-        "last_fresh_min": null,
-        "last_entry_min": null
-      }
-    },
-    "lighter": null,
-    "equity": null,
-    "positions": [],
-    "paper": {
-      "trades": 428,
-      "realized_pnl": -494.39,
-      "fees_paid": 128.59
-    },
-    "shadows": null,
-    "leaders": [
-      {
-        "address": "0xd68dfb480e643f0c1a78b24d04de7cce7dfbbdfc",
-        "weight": 1.0,
-        "score": 66.4,
-        "roi_pct": 72.13,
-        "profit_factor": 2.21,
-        "max_drawdown_pct": 24.97,
-        "closed_trades": 710,
-        "roi_since_copy_pct": -44.91
-      }
-    ],
-    "account": null,
-    "next_analysis_in_h": 5.8
+    "updated": "2026-07-17T15:36:41.186342+00:00",
+    "state": "running"
   },
   "wallet": null,
   "quest": {
@@ -123,12 +36,12 @@
       "0xd246c4a0": 1
     },
     "banned": [
-      "0x7d0c5969",
-      "0x8cc9fb94",
-      "0xd68dfb48",
       "0x10b4c1fb",
+      "0x8cc9fb94",
       "0xfd688aed",
-      "0xcf7c4feb"
+      "0x7d0c5969",
+      "0xcf7c4feb",
+      "0xd68dfb48"
     ],
     "confidence": {
       "0x051c2e6d": 5,
@@ -136,7 +49,7 @@
     },
     "stars": [],
     "pending": [],
-    "baseline_status": "warm \u00fcbernommen (34s alt beim Start)",
+    "baseline_status": "warm \u00fcbernommen (25s alt beim Start)",
     "scan": {
       "fresh_seen": 0,
       "rejected": {},
@@ -144,50 +57,8 @@
       "last_fresh_min": null,
       "last_entry_min": null
     },
-    "analysis_funnel": {
-      "candidates": 90,
-      "source": "CMM 175 + HL 39",
-      "main_ranked": 0,
-      "min_score": 35,
-      "sprint_gate_ko": 24,
-      "sprint_score_ko": 0,
-      "sprint_idle_ko": 29,
-      "sprint_ok": 29,
-      "pool_min_score": 10,
-      "truncated": 8,
-      "larp_ko": 82,
-      "larp_reasons": {
-        "\u00fcberhebelt": 2,
-        "netto unprofitabel": 60,
-        "nur 1 Round-Trips": 2,
-        "nur 8 Round-Trips": 1,
-        "nur 19 Round-Trips": 1,
-        "nur 12 Round-Trips": 1,
-        "nur 0 Round-Trips": 5,
-        "nur 10 Round-Trips": 1,
-        "nur 3 Round-Trips": 1,
-        "nur 2 Round-Trips": 2,
-        "nur 2 aktive Tage": 2,
-        "nur 8 aktive Tage": 1,
-        "nur 6 Round-Trips": 1,
-        "nur 13 Round-Trips": 1,
-        "nur 22 Round-Trips": 1
-      },
-      "errors": 0
-    },
-    "pool_funnel": {
-      "sprint_ok_in": 29,
-      "banned_out": 2,
-      "regime_out": 0,
-      "crypto_only": false,
-      "cands_after_filters": 27,
-      "idle_total": 53,
-      "idle_in_pool": 0,
-      "truncated_by_size": 7,
-      "pool_size_target": 20,
-      "forced_main": 0,
-      "final_pool": 20
-    },
+    "analysis_funnel": {},
+    "pool_funnel": {},
     "pool": [
       {
         "address": "0xcaaacd1e5f394da3e5006edc7c05fd7bfdc5764b",
