@@ -1,0 +1,3 @@
+{
+  "_hinweis": "Noch kein echter Snapshot. Wird automatisch überschrieben, sobald STATUS_PUSH_TOKEN in der .env auf dem Server gesetzt und status_push.enabled: true ist (config.yaml). Siehe bot/status_push.py."
+}
