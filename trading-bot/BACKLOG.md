@@ -116,6 +116,59 @@ ist da; Chat-Verlauf ist es nicht.
 > erweitern, der `sprint_cycles.json`s `won/busted/banked` zeigt statt der
 > Einzel-Ritt-Equity-Annahme — niedrige Priorität, erst wenn `parallel_rides`
 > wieder für eine Messung aktiviert wird.
+>
+> **UPDATE 18.07. — Wave-3-Audit-Funde (Nutzer: "Agenten ohne Fix laufen
+> lassen, wir behalten es für Wave 3"). Deep-Dive-Workflow, 2 Finder-Lenses +
+> 1 adversarialer Verifier je Fund, 8/8 bestätigt. NOCH NICHT GEFIXT,
+> absichtlich für die nächste Bau-Runde vorgemerkt:**
+>
+> 1. **[Hoch, betrifft den AKTUELLEN Modus]** `bot/sprint.py` `tick()`
+>    (~Zeile 187-197): bei `parallel_rides: true` (aktiv seit 17.07.)
+>    verzweigt sofort in `_tick_parallel()` und `return`t davor - das
+>    Bestätigungsfenster (`confirm_delay_s`, `_process_pending`) UND die
+>    Star-Preemption (`_scan_star_preemption`) werden NIE erreicht.
+>    `_tick_parallel()` reitet frische Signale weiter sofort (0s), obwohl
+>    config.yaml `confirm_delay_s: 10` explizit mit dem Kommentar
+>    "Flip-Flopper-Schutz" scharf gestellt hat. Der Schutz existiert nur im
+>    Einzel-Ritt-Zweig, der im Mess-Modus nie läuft.
+> 2. **[Mittel]** `bot/autopilot.py` `_build_sprint_pool` (~Zeile 1369):
+>    `forced_main` hängt JEDEN aktuellen Haupt-Leader unbedingt an den Pool
+>    an - auch wenn `cap_path_b_admission` ihn zuvor als überzähligen
+>    Pfad-B-Sitzer explizit ausgeschlossen hat. Ein Haupt-Leader, der die
+>    Haupt-LARP-Kriterien (kein Trefferquote-Check!) erfüllt, aber Sprint-
+>    Pfad A verfehlt, rutscht so am Deckel vorbei zurück in den Pool.
+> 3. **[Mittel]** `bot/sources/lighter.py` `sprint_snapshots()` (~Zeile 308):
+>    kein Staleness-Schutz. Schlägt der periodische `rank()`-Scan wiederholt
+>    fehl, bleibt `_leaders` beliebig lange auf dem letzten guten Stand -
+>    ohne Zeitstempel-Check. Ein `lighter:`-Ritt sieht die (real längst
+>    geschlossene) Leader-Position ewig als offen, `leader_exit` feuert nie.
+>    Für HL gibt's mit `_maybe_warn_stale_feed` ein Pendant, für Lighter
+>    fehlt es komplett. (Aktuell entschärft durch `sprint_promote: false`.)
+> 4. **[Niedrig]** `bot/sources/coinmarketman.py` `_active_token_idx`
+>    (~Zeile 55): rotiert bei 429 permanent weiter, wird nie zeitbasiert
+>    zurückgesetzt - CMMs Limit ist aber ein TAGES-Kontingent, kein
+>    Prozess-Lifetime-Fenster. Der Bot läuft als Dauer-systemd-Service ohne
+>    geplante Neustarts; über Wochen wandert der Zeiger unwiederbringlich
+>    durch alle 5 Token-Slots, obwohl auf früheren Slots täglich frisches
+>    Kontingent liegen bliebe.
+> 5. **[Mittel]** `bot/config.py` `SprintConfig.rebalance_threshold`
+>    (Zeile 409, auch `config.yaml sprint.rebalance_threshold: 0.02`): totes
+>    Config-Feld, copy-paste aus `CopytradeConfig` - `bot/sprint.py` liest es
+>    nirgends (Sprint kennt keine proportionale Rebalancierung, nur volle
+>    Enter/Exit-Positionen über `min_notional`).
+> 6. **[Mittel, reine Doku]** `bot/copytrade/larp.py` `check_sprint()`-
+>    Docstring (~Zeile 119): nennt veraltete Schwellen - "Trefferquote
+>    >=52%" statt tatsächlich `SPRINT_MIN_WIN_RATE=0.45`, "Buch >=60% im
+>    Plus" statt `SPRINT_MIN_GREEN_SHARE=0.55`, "halbierte" statt tatsächlich
+>    geviertelte (mit Boden 8) Round-Trip-Hürde für Pfad A.
+> 7. **[Niedrig, reine Doku]** `bot/copytrade/larp.py` `LarpVerdict.path`-
+>    Kommentar (~Zeile 51): beschreibt nur die alte, wirkungslose
+>    Nachrang-Sortierung in `_build_sprint_pool`, nicht den seit `ac0a4fa`
+>    tatsächlich scharfen `cap_path_b_admission`-Deckel.
+> 8. **[Niedrig, reine Doku]** Dieses Dokument selbst, Zeilen 10-11 + ~230:
+>    behauptet weiterhin "Lighter-Promotion ... noch nicht gebaut" - ist
+>    seit `cdbb8af`/`e5dfc3f` (17.07.) live, nur per `sprint_promote: false`
+>    (config.yaml) abgeschaltet. Wird beim Wave-3-Fix mitkorrigiert.
 
 ---
 
