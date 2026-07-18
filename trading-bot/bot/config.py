@@ -395,6 +395,17 @@ class SprintConfig:
     # (Live-Befund: Pool schrumpfte auf 6, tagelange Signal-Dürre).
     # Hauptbuch bleibt strikt bei analysis.min_score.
     pool_min_score: float = 10.0
+    # Deckel für Pfad-B-Wallets (check_sprint: 'Positions-Trader mit grünem
+    # offenen Buch') im Pool - fest als Anteil von pool_size, NICHT relativ
+    # zur Pfad-A-Anzahl. Live-Befund (18.07., zweiter Fund): die reine
+    # Nachrang-Sortierung in _build_sprint_pool griff nie, weil sprint_ok
+    # (18) fast immer UNTER pool_size (20) lag - ohne Überangebot wird beim
+    # [:n]-Schnitt nie etwas abgeschnitten, also kamen alle Pfad-B-Sitzer
+    # trotzdem rein (0 frische Signale in ~2h). Ein fester Anteils-Deckel an
+    # der ADMISSION selbst greift auch bei Kandidaten-Unterangebot - Pfad B
+    # bleibt gültig (Nutzer will 'mehr Wallets'), aber kann den Pool nicht
+    # mehr mit strukturell signal-unfähigen Positions-Sitzern volllaufen.
+    path_b_max_share: float = 0.35
     rebalance_threshold: float = 0.02
     min_notional: float = 10.0
     # Teil-Exit-Folge: hat der Leader >= partial_exit_frac seiner Einstiegsgröße

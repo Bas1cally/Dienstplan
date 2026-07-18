@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from bot.autopilot import rotate_leaders
+from bot.autopilot import rotate_leaders, cap_path_b_admission
 from bot.copytrade.analyzer import TraderMetrics
 
 
@@ -721,6 +721,31 @@ def test_build_sprint_pool_does_not_force_in_banned_main_leader():
         ap.sprint.banned.add("0xz")
         pool = ap._build_sprint_pool([metrics("0xa", 60), metrics("0xz", 36)])
     assert "0xz" not in [p["address"] for p in pool]
+
+
+def test_cap_path_b_admission_caps_even_when_total_below_pool_size():
+    """Live-Befund 18.07. (zweiter Fund): sprint_ok lag praktisch immer UNTER
+    pool_size, deshalb griff die reine Nachrang-Sortierung im Pool-Ranking
+    nie (kein Überangebot -> [:n] schneidet nichts ab). Der Deckel muss daher
+    an der Admission selbst greifen, auch wenn insgesamt WENIGER Kandidaten
+    da sind als pool_size Slots frei wären."""
+    path_a = [metrics("0xa1", 50)]  # nur 1 Pfad-A-Wallet
+    path_b = [metrics(f"0xb{i}", 90 - i) for i in range(10)]  # 10 Pfad-B-Sitzer
+    # pool_size=20, max_share=0.35 -> b_cap = round(20*0.35) = 7, GREIFT trotzdem,
+    # obwohl 1+10=11 < 20 (also ohne Deckel gäbe es gar keine Größenbeschränkung)
+    admitted, ko = cap_path_b_admission(path_a, path_b, pool_size=20, max_share=0.35)
+    assert ko == 3, "10 Pfad-B - 7 Deckel = 3 gedeckelt"
+    admitted_addrs = {m.address for m in admitted}
+    assert admitted_addrs == {"0xa1", "0xb0", "0xb1", "0xb2", "0xb3", "0xb4", "0xb5", "0xb6"}, \
+        "Pfad-A komplett drin, von Pfad B nur die 7 bestbewerteten"
+
+
+def test_cap_path_b_admission_keeps_all_path_b_when_under_cap():
+    path_a = [metrics("0xa1", 50)]
+    path_b = [metrics("0xb1", 80)]
+    admitted, ko = cap_path_b_admission(path_a, path_b, pool_size=20, max_share=0.35)
+    assert ko == 0
+    assert {m.address for m in admitted} == {"0xa1", "0xb1"}
 
 
 def test_build_sprint_pool_prefers_path_a_over_higher_scored_path_b():

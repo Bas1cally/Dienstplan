@@ -99,6 +99,32 @@ def chunk_for_telegram(text: str, limit: int = 3800) -> list[str]:
 
 
 
+def cap_path_b_admission(
+    path_a: list[TraderMetrics],
+    path_b: list[TraderMetrics],
+    pool_size: int,
+    max_share: float,
+) -> tuple[list[TraderMetrics], int]:
+    """Deckelt, wie viele Pfad-B-Wallets ('Positions-Trader mit grünem
+    offenen Buch') in den Sprint-Pool aufgenommen werden - fest als Anteil
+    von pool_size, NICHT relativ zur Pfad-A-Anzahl.
+
+    Live-Befund (18.07., zweiter Fund derselben Diagnose): die reine
+    Nachrang-Sortierung in _build_sprint_pool griff faktisch nie, weil
+    sprint_ok fast immer UNTER pool_size lag - ohne Überangebot schneidet
+    [:n] nichts ab. Dieser Deckel greift dagegen an der ADMISSION selbst,
+    unabhängig vom Kandidaten-Angebot. Pfad B bleibt gültig (Nutzer will
+    'mehr Wallets'), kann den Pool aber nicht mehr mit strukturell
+    signal-unfähigen Positions-Sitzern volllaufen.
+
+    Gibt (zugelassene Wallets, Anzahl gedeckelter Pfad-B-Wallets) zurück.
+    """
+    b_cap = max(0, round(pool_size * max_share))
+    path_b_sorted = sorted(path_b, key=lambda m: m.sprint_score, reverse=True)
+    ko = max(0, len(path_b_sorted) - b_cap)
+    return path_a + path_b_sorted[:b_cap], ko
+
+
 def rotate_leaders(
     current: list[dict],
     ranked: list[TraderMetrics],
@@ -673,21 +699,23 @@ class Autopilot:
                             if af.get("larp_reasons") else ""))
             lines.append(f"4. Richtung <{af['pool_min_score']:g}: {af['sprint_score_ko']} raus")
             lines.append(f"5. Schläfer (kein Trade, keine Position): {af['sprint_idle_ko']} raus")
+            lines.append(f"6. Sitzer-Deckel (Pfad B über {self.cfg.sprint.path_b_max_share:.0%} "
+                         f"Poolanteil): {af.get('sprint_path_b_ko', 0)} raus")
             lines.append(f"   → {af['sprint_ok']} Sprint-tauglich nach der Analyse")
             if af.get("errors"):
                 lines.append(f"   ⚠️ {af['errors']} Wallets nicht abrufbar (übersprungen)")
         if pf:
             lines.append("")
-            lines.append(f"6. Gesperrt (LARP enttarnt): {pf['banned_out']} raus")
-            regime = f"7. Regime-Filter ({'Börse zu' if pf['crypto_only'] else 'Börse offen'}): " \
+            lines.append(f"7. Gesperrt (LARP enttarnt): {pf['banned_out']} raus")
+            regime = f"8. Regime-Filter ({'Börse zu' if pf['crypto_only'] else 'Börse offen'}): " \
                      f"{pf['regime_out']} raus"
             lines.append(regime + (" (überwiegend Aktien-Trader)" if pf["regime_out"] else ""))
             lines.append(f"   → {pf['cands_after_filters']} Kandidaten für {pf['pool_size_target']} Pool-Slots")
             if pf["truncated_by_size"]:
-                lines.append(f"8. Zu viele Kandidaten: {pf['truncated_by_size']} nicht reingepasst "
+                lines.append(f"9. Zu viele Kandidaten: {pf['truncated_by_size']} nicht reingepasst "
                              f"(niedrigster Score/idle zuerst raus)")
             elif pf["idle_total"]:
-                lines.append(f"8. Pool NICHT voll ({pf['final_pool'] - pf['forced_main']}/"
+                lines.append(f"9. Pool NICHT voll ({pf['final_pool'] - pf['forced_main']}/"
                              f"{pf['pool_size_target']}) - Idle-Rotation kann nicht abschneiden, "
                              f"es gibt niemand zum Nachrücken ({pf['idle_in_pool']} von "
                              f"{pf['idle_total']} idle Wallets sitzen trotzdem noch drin)")
@@ -1521,12 +1549,13 @@ class Autopilot:
         # Wallets (auch Haupt-LARP-K.O.s wie Swing-Trader oder Lucky-Puncher) -
         # Sprint zählt Richtungs-Treffer, nicht Profit-Größe (Nutzer-Vorgabe).
         sprint_ok = []
-        sprint_gate_ko = sprint_score_ko = sprint_idle_ko = 0
+        sprint_gate_ko = sprint_score_ko = sprint_idle_ko = sprint_path_b_ko = 0
         if self.cfg.sprint.enabled:
             from .copytrade.larp import check_sprint
 
             larp_cfg = LarpConfig(**(an.larp or {}))
             pool_min = self.cfg.sprint.pool_min_score
+            path_a, path_b = [], []
             for m in report.get("metrics", []):
                 # Schläfer-Filter zuerst (Nutzer: 'die keine positions sleeper
                 # sind und kein Signal ist doch sus'): wer weder eine offene
@@ -1543,7 +1572,9 @@ class Autopilot:
                     sprint_score_ko += 1
                 else:
                     m.sprint_qualify_path = verdict.path
-                    sprint_ok.append(m)
+                    (path_a if verdict.path == "A" else path_b).append(m)
+            sprint_ok, sprint_path_b_ko = cap_path_b_admission(
+                path_a, path_b, self.cfg.sprint.pool_size, self.cfg.sprint.path_b_max_share)
             sprint_ok.sort(key=lambda m: m.sprint_score, reverse=True)
 
         # Rohzahlen für /quest funnel - separat von der formatierten Notiz unten,
@@ -1552,8 +1583,8 @@ class Autopilot:
             "candidates": len(addresses), "source": src_note,
             "main_ranked": len(main_ranked), "min_score": an.min_score,
             "sprint_gate_ko": sprint_gate_ko, "sprint_score_ko": sprint_score_ko,
-            "sprint_idle_ko": sprint_idle_ko, "sprint_ok": len(sprint_ok),
-            "pool_min_score": self.cfg.sprint.pool_min_score,
+            "sprint_idle_ko": sprint_idle_ko, "sprint_path_b_ko": sprint_path_b_ko,
+            "sprint_ok": len(sprint_ok), "pool_min_score": self.cfg.sprint.pool_min_score,
             "truncated": report.get("truncated", 0), "larp_ko": report.get("larp_ko", 0),
             "larp_reasons": dict(report.get("larp_reasons", {})),
             "errors": report.get("errors", 0),
@@ -1569,7 +1600,7 @@ class Autopilot:
             f"(≥{an.min_score:g}) / {len(sprint_ok)} Sprint-tauglich "
             f"(Gate-K.O. {sprint_gate_ko}, Richtung unter "
             f"{self.cfg.sprint.pool_min_score:g}: {sprint_score_ko}, "
-            f"Schläfer: {sprint_idle_ko})\n"
+            f"Schläfer: {sprint_idle_ko}, Sitzer-Deckel: {sprint_path_b_ko})\n"
             f"Aussortiert: {report.get('truncated', 0)} zu aktiv, "
             f"{report.get('larp_ko', 0)} LARP ({larp_top}), "
             f"{report.get('errors', 0)} Fehler | Top-Scores: {top_scores}")

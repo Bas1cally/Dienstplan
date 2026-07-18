@@ -255,6 +255,14 @@ sprint:
                             # >=45% (nur systematische Falsch-Trader raus), >=8
                             # Trades, halber Scalper-Boden, ODER grünes offenes
                             # Buch >=55%. Hauptbuch bleibt strikt bei min_score 35.
+  path_b_max_share: 0.35    # Deckel für Pfad-B-Wallets ('Positions-Trader mit
+                            # grünem offenen Buch') als Anteil von pool_size, fest
+                            # an der Admission, nicht nur an der Pool-Sortierung.
+                            # Live-Befund (18.07.): sprint_ok lag fast immer UNTER
+                            # pool_size (20), die reine Nachrang-Sortierung schnitt
+                            # nie etwas ab -> Pool war zu ~10/18 mit Sitzern voll,
+                            # die strukturell NIE ein frisches 0->Position-Signal
+                            # geben können (0 Signale in ~2h trotz gefixter Sortierung).
   bust_frac: 0.05           # Liquidations-Modell: unter 5% Rest ist der Zyklus geplatzt
   rebalance_threshold: 0.02
   partial_exit_frac: 0.75   # Leader baut >=75% ab -> wir gehen mit raus (Scale-out)
