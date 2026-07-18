@@ -19,14 +19,27 @@ class LeaderPosition:
     position_value: float  # |Notional| in USD
     leverage: float
 
-    def not_losing(self, price: float) -> bool:
+    def not_losing(self, price: float, tol_frac: float = 0.0) -> bool:
         """Für Sprints Bestätigungsfenster (Flip-Flopper-Schutz): ist die
         Position des LEADERS zum aktuellen Preis nicht im Minus? Bewusst
         >= statt > 0 - im Moment der Signal-Entdeckung ist price meist noch
         exakt gleich entry (PnL==0, weder Gewinn noch Verlust). Ein
         genau-0-PnL ist kein Warnsignal, nur eine ECHTE Bewegung ins Minus
-        disqualifiziert den Kandidaten."""
-        return (price - self.entry) * (1.0 if self.size > 0 else -1.0) >= 0
+        disqualifiziert den Kandidaten.
+
+        tol_frac (Live-Fund 18.07.: die ersten 2 frischen Signale nach dem
+        Frequenz-Fix wurden BEIDE als 'unbestaetigt_negativ' verworfen,
+        xyz:BRENTOIL): der Leader füllt Long am ASK, unser Vergleichspreis
+        ist der MID - der liegt konstruktionsbedingt ~einen halben Spread
+        UNTER seinem Entry, die Position sieht also direkt nach JEDER
+        Eröffnung minimal 'im Minus' aus, ohne dass sich der Markt bewegt
+        hat. Ohne Toleranz ist das Fenster bei spread-breiten Assets
+        (Builder-DEX-Perps wie Öl/Aktien) ein Fast-Immer-Verwerfer. Die
+        Toleranz (Anteil vom Entry, z.B. 0.002 = 0.2%) deckt Spread-
+        Rauschen ab; eine ECHTE Bewegung dagegen (der beobachtete
+        Flip-Flopper schoss deutlich ins Minus) disqualifiziert weiter."""
+        loss = (price - self.entry) * (1.0 if self.size > 0 else -1.0)
+        return loss >= -tol_frac * abs(self.entry)
 
 
 @dataclass

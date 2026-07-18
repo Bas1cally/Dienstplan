@@ -432,7 +432,7 @@ class SprintBook:
                     self._pending.pop(coin, None)
                     self._reject(coin, leader, "unbestaetigt_kein_preis")
                 continue
-            if not pos.not_losing(price):
+            if not pos.not_losing(price, self.cfg.confirm_tolerance):
                 self._pending.pop(coin, None)
                 self._reject(coin, leader, "unbestaetigt_negativ")
                 continue

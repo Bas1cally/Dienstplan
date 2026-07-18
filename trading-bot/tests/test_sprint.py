@@ -1244,6 +1244,45 @@ def test_no_price_neither_promotes_nor_rejects_pending():
         assert "BTC" in b.paper.sizes(), "sobald der Preis wieder da ist, geht's normal weiter"
 
 
+def test_pending_survives_spread_noise_with_confirm_tolerance():
+    """Live-Fund 18.07.: die ersten 2 frischen Signale nach dem Frequenz-Fix
+    wurden BEIDE als 'unbestaetigt_negativ' verworfen (xyz:BRENTOIL). Der
+    Leader füllt am Ask, wir vergleichen gegen den Mid - direkt nach jeder
+    Eröffnung steht die Position ~einen halben Spread 'im Minus', ohne echte
+    Marktbewegung. Mit confirm_tolerance übersteht Spread-Rauschen das
+    Fenster; eine ECHTE Bewegung ins Minus verwirft weiterhin sofort."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        cfg = SprintConfig(exclude_coins=[], confirm_delay_s=10.0,
+                           confirm_tolerance=0.002)
+        b = SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # Leader-Entry 100.0
+        assert b.stats(P)["pending"]
+
+        t["now"] += 5   # Mid einen halben Spread unter dem Ask-Entry: -0.1%
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.9, "ETH": 100.0})
+        assert b.stats(P)["pending"], "Spread-Rauschen (-0.1%) verwirft NICHT mehr"
+
+        t["now"] += 6   # Fenster um, Preis weiter im Toleranzband
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.9, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), "trotz Mini-Minus im Spread-Band promotet"
+
+
+def test_pending_real_negative_move_still_rejects_despite_tolerance():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        cfg = SprintConfig(exclude_coins=[], confirm_delay_s=10.0,
+                           confirm_tolerance=0.002)
+        b = SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        t["now"] += 3   # -1% ist ECHTE Bewegung, kein Spread
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.0, "ETH": 100.0})
+        assert b.stats(P)["pending"] == []
+        assert b.stats(P)["scan"]["rejected"].get("unbestaetigt_negativ") == 1
+
+
 def test_pending_candidate_times_out_if_price_never_arrives():
     """Live-Befund: ein Kandidat (TAO) blieb minutenlang 'wird bestätigt',
     weit über dem Fenster hinaus, weil nie ein Preis für den Coin ankam -

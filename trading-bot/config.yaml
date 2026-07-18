@@ -238,6 +238,17 @@ sprint:
                             # blind instant (Live-Befund: Leader schießt nach
                             # Einstieg sofort ins Minus und flippt Sekunden
                             # später zurück). 0 = aus (altes Sofort-Verhalten).
+  confirm_tolerance: 0.002  # Spread-Toleranz dazu (Live-Fund 18.07.: die ersten
+                            # 2 frischen Signale nach dem Frequenz-Fix wurden
+                            # BEIDE als "unbestaetigt_negativ" verworfen, beide
+                            # xyz:BRENTOIL). Der Leader füllt am Ask/Bid, wir
+                            # vergleichen gegen den Mid - direkt nach jeder
+                            # Eröffnung sieht die Position ~einen halben Spread
+                            # "im Minus" aus, ohne echte Marktbewegung. Bis 0.2%
+                            # unter Entry gilt als Spread-Rauschen, erst darunter
+                            # als echtes Flip-Flopper-Warnsignal. Besonders
+                            # relevant für Builder-DEX-Perps (Öl/Aktien, breite
+                            # Spreads).
   crypto_only: false        # AKTIEN-REGIME ENTFERNT (Nutzer 17.07.): "24/7 alles
                             # erlaubt" - Krypto UND Aktien-Perps jederzeit
                             # zulässig, kein Umschalten mehr zum Börsen-Gong

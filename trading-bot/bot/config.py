@@ -429,6 +429,16 @@ class SprintConfig:
     # Sicherer Default 0 (aus) wie bei parallel_rides - config.yaml schaltet
     # den Produktivwert (10s) explizit scharf.
     confirm_delay_s: float = 0.0
+    # Spread-Toleranz fürs Bestätigungsfenster (Live-Fund 18.07.: die ersten
+    # 2 frischen Signale nach dem Frequenz-Fix wurden BEIDE als
+    # 'unbestaetigt_negativ' verworfen). Der Leader füllt am Ask/Bid, unser
+    # Vergleichspreis ist der Mid - direkt nach jeder Eröffnung sieht die
+    # Position dadurch ~einen halben Spread 'im Minus' aus, ohne echte
+    # Marktbewegung. Anteil vom Entry (0.002 = 0.2%), bis zu dem 'im Minus'
+    # noch als Spread-Rauschen gilt statt als Flip-Flopper-Warnsignal.
+    # Default 0 = exakt das alte, strenge Verhalten; config.yaml schaltet
+    # den Produktivwert scharf.
+    confirm_tolerance: float = 0.0
     # LARP-Strikes: Verlust-Ritt -> Strike +1, Gewinn-Ritt -> Strike -1 (min 0).
     # Bei strike_ban Strikes wird der Leader fürs Sprint-Buch gesperrt.
     strike_ban: int = 2
