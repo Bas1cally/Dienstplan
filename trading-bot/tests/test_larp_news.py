@@ -64,6 +64,38 @@ def test_reconstruct_ignores_preexisting_position():
     assert abs(trips[0].net_pnl - 49.0) < 1e-9  # 50 - 2x 0.5 Fee
 
 
+def test_analyze_fills_excludes_spot_trades():
+    """Nutzer-Fund 18.07. ('tracken wir Wallets nicht, die x2 oder Spot
+    handeln?'): userFillsByTime liefert Perp- UND Spot-Fills gemischt, Spot-
+    Paare per HL-Konvention mit '@<Index>' statt einem Ticker. Unser Live-
+    Tracking (user_state) sieht NUR Perps - ein Wallet, dessen Aktivität rein
+    aus Spot-Fills besteht, muss deshalb wie ein KOMPLETT UNAKTIVES Perp-
+    Wallet bewertet werden (0 Trips), nicht wie ein aktiver Trader."""
+    spot_only = [
+        fill(0, coin="@107", side="B", sz=2.0, start=0),
+        fill(60 * MIN, coin="@107", side="A", sz=2.0, closed=500, start=2),
+    ]
+    m = analyze_fills("0xspot", spot_only, account_value=10000, days=30)
+    assert m.round_trips == 0 and m.net_pnl == 0 and m.coins == [], \
+        "reine Spot-Aktivität darf NICHT als Perp-Aktivität durchgehen"
+
+
+def test_analyze_fills_keeps_perp_ignores_mixed_in_spot():
+    """Ein Wallet, das BEIDES handelt: nur der Perp-Anteil zählt für unsere
+    Metriken - der Spot-Anteil ist für Live-Tracking sowieso unsichtbar und
+    würde die Zahlen (Trips/Trefferquote/aktive Tage) sonst künstlich aufblähen."""
+    mixed = [
+        fill(0, coin="BTC", side="B", sz=1.0, start=0),
+        fill(90 * MIN, coin="BTC", side="A", sz=1.0, closed=100, start=1),
+        fill(2 * DAY, coin="@107", side="B", sz=5.0, start=0),
+        fill(2 * DAY + 30 * MIN, coin="@107", side="A", sz=5.0, closed=9_000, start=5),
+    ]
+    m = analyze_fills("0xmixed", mixed, account_value=10000, days=30)
+    assert m.round_trips == 1, "nur der eine Perp-Trip zählt"
+    assert abs(m.net_pnl - 99.0) < 1e-9, "Spot-PnL (9000) fließt NICHT ein"
+    assert m.coins == ["BTC"]
+
+
 # ---------- LARP-Filter ----------
 
 def steady_fills(weeks=5, trades_per_week=10, win=80.0, loss=-40.0):

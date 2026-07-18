@@ -4,6 +4,31 @@ Dieses Dokument hält Feature-Ideen fest, die über Session-Grenzen hinweg
 überleben müssen. Die nächste Session klont das Repo frisch — was hier steht,
 ist da; Chat-Verlauf ist es nicht.
 
+> **UPDATE 18.07. — WICHTIGER FUND: Spot-Fills verfälschten die Analyse
+> (Nutzer-Frage: "tracken wir Wallets nicht, die x2 oder Spot handeln?").**
+> Symptom: seit Vorabend 20 Uhr komplette Signal-Stille, egal wie breit/
+> vielfältig der Pool (16+ Wallets, alle Aktien-Baskets offen, gesenkte
+> Größen-Böden für Shrimps) - mehrere vorherige Fixes (Pfad-A/B-Pool-
+> Ranking, Bestätigungsfenster im Mess-Modus) hatten das NICHT behoben.
+> Root Cause: `userFillsByTime` (HL-API) liefert PERP- UND SPOT-Fills
+> gemischt zurück, Spot-Paare per HL-Konvention mit `@<Index>` statt einem
+> Ticker (z.B. `@107`). `analyze_fills()` (`bot/copytrade/analyzer.py`) hat
+> bisher NICHT unterschieden - ein Wallet, dessen "Aktivität" überwiegend
+> oder komplett aus Spot-Trades bestand, sah in unseren Metriken (Trips/
+> Trefferquote/aktive Tage) wie ein aktiver Trader aus und bestand alle
+> LARP-/Sprint-Gates. Unser LIVE-Tracking (`LeaderTracker.snapshot`, HLs
+> `user_state`) sieht aber AUSSCHLIESSLICH Perp-Positionen - Spot ist dort
+> strukturell unsichtbar. Ergebnis: der Pool konnte mit Wallets vollgestopft
+> sein, die auf dem Papier super aktiv wirkten, aber STRUKTURELL NIE ein
+> Live-Signal geben konnten, egal wie oft die Pool-Zusammensetzung geändert
+> wurde. Fix: `analyze_fills()` filtert `@`-Spot-Fills jetzt komplett raus,
+> BEVOR irgendeine Metrik berechnet wird - Trips/PnL/Trefferquote/aktive
+> Tage spiegeln jetzt nur noch das, was wir auch tatsächlich live erkennen
+> können. Nächster Schritt: nach dem Deploy beobachten, ob sich die
+> Kandidaten-/Pool-Zahlen sichtbar verschieben (weniger "Aktiv"-Wallets, die
+> vorher nur durch Spot-Volumen aktiv aussahen) und ob endlich echte
+> Live-Signale kommen.
+
 > **AKTUELLER FOKUS (Nutzer, 13.07.2026, historische Momentaufnahme - beide
 > hier genannten Punkte sind längst umgesetzt, siehe UPDATEs unten): das
 > Sprint-Buch.** Stand: 3/3 Gewinn-Zyklen unter v3. Die Mess-Woche (bis So

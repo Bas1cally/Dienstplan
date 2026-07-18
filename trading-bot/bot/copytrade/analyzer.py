@@ -130,7 +130,23 @@ def reconstruct_trades(fills: list[dict]) -> list[RoundTrip]:
 
 
 def analyze_fills(address: str, fills: list[dict], account_value: float, days: int) -> TraderMetrics:
-    """Berechnet Metriken aus rohen userFillsByTime-Fills (zeitlich sortiert)."""
+    """Berechnet Metriken aus rohen userFillsByTime-Fills (zeitlich sortiert).
+
+    SPOT-Fills rausgefiltert (Nutzer-Fund 18.07., 'tracken wir Wallets nicht,
+    die x2 oder Spot handeln?'): userFillsByTime liefert PERP- UND SPOT-Fills
+    gemischt zurück, ohne Kennzeichnung im coin-Feld außer der HL-eigenen
+    Konvention 'coin' beginnt mit '@' (Spot-Paare werden index-basiert
+    referenziert, z.B. '@107', weil Ticker-Kollisionen im Spot-Namensraum
+    möglich sind - anders als Perps, die klare, eindeutige Symbole wie 'BTC'
+    haben). UNSER Live-Tracking (LeaderTracker.snapshot, HLs user_state) sieht
+    NUR Perp-Positionen - Spot-Guthaben/-Trades sind dort strukturell
+    unsichtbar. Ohne diesen Filter konnte ein Wallet allein durch SPOT-
+    Aktivität wie ein aktiver Trader aussehen (hohe trips/win_rate/
+    active_days aus Spot-Fills) und alle LARP-/Sprint-Gates bestehen, obwohl
+    seine reale Aktivität für unser Live-Signal-Tracking komplett unsichtbar
+    ist - ein Wallet, das strukturell NIE ein Live-Signal geben kann, aber
+    fälschlich als aktiv gilt."""
+    fills = [f for f in (fills or []) if not str(f.get("coin", "")).startswith("@")]
     m = TraderMetrics(address=address, account_value=account_value, days=days)
     if not fills or account_value <= 0:
         return m
