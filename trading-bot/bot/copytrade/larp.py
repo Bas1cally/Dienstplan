@@ -42,6 +42,19 @@ class LarpConfig:
     # Historie - 3 aktive Tage reichen, um Ein-Tages-Zufall auszuschließen,
     # ohne sonst starke Kandidaten pauschal wegzuschneiden.
     sprint_min_active_days: int = 3
+    # Sprint-eigener Scalper-Boden (Nutzer-Fund 18.07., Frequenz-Analyse: die
+    # Wallets, die das '1 Trade pro Stunde'-Ziel überhaupt liefern KÖNNEN,
+    # sind zwangsläufig Schnell-Trader - genau die fielen bisher am
+    # abgeleiteten 15-Minuten-Boden (Hauptbuch-Hälfte). Live-Beispiele aus
+    # einem einzigen Analyse-Lauf: 53 Trips/75% Trefferquote raus wegen
+    # 1min Haltedauer, und die EINZIGE Wallet, die je Signale feuerte, hatte
+    # 11-14min. Der Pool bestand danach nur noch aus Portfolio-Haltern -
+    # 9/9 'holding', stundenlang null Bewegung). Sprint folgt dem Leader-Exit
+    # ohnehin fast verzögerungsfrei und die Strike-Maschine + zeit_negativ
+    # policen schwache Kopien - der Boden muss nur ECHTE Sekunden-Scalper
+    # (unkopierbar, Fenster kleiner als das Bestätigungsfenster) fernhalten,
+    # nicht jeden aktiven Day-Trader.
+    sprint_min_hold_minutes: float = 5.0
 
 
 @dataclass
@@ -126,8 +139,10 @@ def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict
     A) Aktiv-Pfad (genug geschlossene Trades): Trefferquote >= 45%
        (SPRINT_MIN_WIN_RATE, Philosophie-Wechsel 17.07. - deutlich unter
        Münzwurf-Niveau, siehe Kommentar dort), geviertelte Stichproben-Hürde
-       (mind. 8 statt der Hauptbuch-Schwelle 30), Aktivität, Scalper-Boden
-       (unter ~30min Haltedauer erreicht kein Ritt die nötige ~1%-Bewegung).
+       (mind. 8 statt der Hauptbuch-Schwelle 30), Aktivität, minimaler
+       Scalper-Boden (sprint_min_hold_minutes, nur Sekunden-/Minuten-Scalper
+       raus - Nutzer-Fund 18.07.: der frühere 15min-Boden filterte genau die
+       Schnell-Trader weg, die das Frequenz-Ziel liefern können).
     B) Positions-Pfad (Live-Befund: 25 von 34 LARP-Toten waren 'netto
        unprofitabel', weil Positions-Trader ihren Gewinn UNREALISIERT in
        offenen Positionen halten - Fills-Metriken bestrafen 'Gewinner laufen
@@ -169,13 +184,17 @@ def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict
     min_days = min(c.sprint_min_active_days, max(1, int(m.days * 0.6)))
     if m.active_days < min_days:
         a.append(f"nur {m.active_days} aktive Tage (< {min_days})")
-    # Halber Scalper-Boden des Hauptbuchs: Ritte brauchen Zeit für ~1% Bewegung,
-    # aber der Leader-Exit-Folge sei Dank ist ein Schnell-Trader kein Desaster
-    min_hold = c.min_median_holding_minutes * 0.5
+    # Eigener, sehr niedriger Scalper-Boden (sprint_min_hold_minutes, Nutzer-
+    # Fund 18.07.): der frühere abgeleitete Boden (Hauptbuch-Hälfte = 15min)
+    # sortierte genau die Schnell-Trader aus, die das Frequenz-Ziel liefern
+    # können - übrig blieben Portfolio-Halter, stundenlange Signal-Stille.
+    # Nur noch ECHTE Sekunden-/Minuten-Scalper raus (Fenster kürzer als
+    # Bestätigung+Ritt überhaupt brauchen), den Rest beurteilen die Strikes.
+    min_hold = c.sprint_min_hold_minutes
     if 0 < m.median_holding_minutes < min_hold:
         a.append(
             f"Scalper: mediane Haltedauer {m.median_holding_minutes:.0f}min "
-            f"(< {min_hold:.0f}min) - zu kurz für ~1% Bewegung"
+            f"(< {min_hold:.0f}min) - kürzer als Bestätigung+Ritt brauchen"
         )
     if m.win_rate < SPRINT_MIN_WIN_RATE:
         a.append(

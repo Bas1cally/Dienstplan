@@ -251,6 +251,75 @@ def test_sprint_gate_still_rejects_scalper_and_thin_history():
     assert not v2.passed and any("Round-Trips" in r for r in v2.reasons)
 
 
+def test_sprint_gate_admits_fast_day_trader_frequency_profile():
+    """Nutzer-Fund 18.07. (Frequenz-Analyse): das '1 Trade pro Stunde'-Ziel
+    können nur Schnell-Trader liefern - genau die fielen am alten 15min-Boden
+    (Live: die EINZIGE Wallet, die je Signale feuerte, hatte 11-14min
+    Haltedauer; eine 53-Trips/75%-Wallet flog wegen 1min raus). Ein aktiver
+    Day-Trader mit ~12min-Holds und solider Trefferquote MUSS durchs
+    Sprint-Gate - der Boden hält nur noch Sekunden-Scalper fern."""
+    from bot.copytrade.larp import check_sprint
+
+    fills = []
+    for i in range(40):
+        t = i * 4 * 3600 * 1000                     # alle 4h ein Trade, ~7 Tage
+        pnl = 60.0 if i % 3 else -30.0              # ~67% Trefferquote
+        fills.append(fill(t, side="B", sz=1.0, start=0, fee=0.1))
+        fills.append(fill(t + 12 * MIN, side="A", sz=1.0, closed=pnl, start=1, fee=0.1))
+    m = analyze_fills("0xfast", fills, account_value=10000, days=21)
+    assert 5 <= m.median_holding_minutes < 15, \
+        f"Vorbedingung: im früher verbotenen Fenster, war {m.median_holding_minutes}"
+    v = check_sprint(m)
+    assert v.passed and v.path == "A", \
+        f"Schnell-Trader (Frequenz-Profil) muss durch: {v.reasons}"
+
+
+def test_sprint_gate_two_active_days_enough_with_config():
+    """Live-Beispiel 18.07.: 197 Trips, 88% Trefferquote, Sprint-Score 100 -
+    raus wegen 'nur 2 aktive Tage (< 3)'. config.yaml senkt die Schwelle auf
+    2 (Ein-Tages-Zufall bleibt ausgeschlossen), das Gate muss das respektieren."""
+    from bot.copytrade.analyzer import TraderMetrics
+    from bot.copytrade.larp import LarpConfig, check_sprint
+
+    m = TraderMetrics(address="0xmachine", account_value=50_000, days=21)
+    m.round_trips, m.win_rate = 197, 0.88
+    m.active_days = 2
+    m.median_holding_minutes = 0.0   # sub-minütig gemessen -> 0, kein Boden-Check
+    assert not check_sprint(m).passed, "Vorbedingung: Default (3 Tage) lehnt ab"
+    v = check_sprint(m, LarpConfig(sprint_min_active_days=2))
+    assert v.passed and v.path == "A", f"mit config-Schwelle 2 muss er durch: {v.reasons}"
+
+
+def test_analyzer_call_retries_on_5xx_server_error():
+    """Live-Befund 18.07.: 39 von 90 Kandidaten in EINEM Analyse-Lauf mit
+    '502 Bad Gateway' kommentarlos verworfen - _call wiederholte nur 429.
+    Ein HL-Infra-Schluckauf ist genauso transient wie ein Rate-Limit."""
+    from bot.copytrade.analyzer import TraderAnalyzer
+
+    class _Boom(Exception):
+        status_code = 502
+
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise _Boom("502 Bad Gateway")
+        return {"ok": True}
+
+    a = TraderAnalyzer(info=None, days=21)
+    import bot.copytrade.analyzer as mod
+    orig_sleep = mod.__dict__.get("time")
+    import time as _t
+    real_sleep = _t.sleep
+    _t.sleep = lambda s: None   # Backoff im Test nicht real warten
+    try:
+        assert a._call(flaky) == {"ok": True}
+    finally:
+        _t.sleep = real_sleep
+    assert calls["n"] == 3, "zweimal 502 überstanden, dritter Versuch liefert"
+
+
 def test_sprint_gate_position_path_green_open_book():
     """Positions-Trader (Live-Befund: 25/34 'netto unprofitabel', weil der
     Gewinn unrealisiert läuft): 1 Round-Trip, realisiert negativ - aber offenes

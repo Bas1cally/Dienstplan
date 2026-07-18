@@ -291,10 +291,21 @@ class TraderAnalyzer:
             try:
                 return fn(*args)
             except Exception as e:
-                rate_limited = getattr(e, "status_code", None) == 429 or "429" in str(e)[:120]
-                if not rate_limited or attempt == tries - 1:
+                status = getattr(e, "status_code", None)
+                rate_limited = status == 429 or "429" in str(e)[:120]
+                # 5xx = HL-Infra-Schluckauf, genauso transient wie ein 429
+                # (Live-Befund 18.07.: 39 von 90 Kandidaten in EINEM Analyse-
+                # Lauf mit '502 Bad Gateway' KOMMENTARLOS verworfen, weil nur
+                # 429 wiederholt wurde - der Pool schrumpfte dadurch auf 9
+                # und bestand fast nur noch aus dem, was der Zufall der
+                # Störung übrig ließ).
+                transient = (status in (500, 502, 503, 504)
+                             or "Bad Gateway" in str(e)[:300])
+                if not (rate_limited or transient) or attempt == tries - 1:
                     raise
-                log.warning("Rate-Limit (429) - warte %.0fs und versuche erneut", delay)
+                log.warning("HL %s - warte %.0fs und versuche erneut",
+                            "Rate-Limit (429)" if rate_limited
+                            else f"Server-Fehler ({status or '5xx'})", delay)
                 _time.sleep(delay)
                 delay = min(delay * 2, 60.0)
 

@@ -4,6 +4,21 @@ Dieses Dokument hält Feature-Ideen fest, die über Session-Grenzen hinweg
 überleben müssen. Die nächste Session klont das Repo frisch — was hier steht,
 ist da; Chat-Verlauf ist es nicht.
 
+> **UPDATE 18.07. (später) — ZWEITER STRUKTUR-FUND: die Gates filterten
+> genau die Frequenz-Trader weg, die das '1 Trade pro Stunde'-Ziel liefern
+> könnten.** Beweis aus einem einzigen Analyse-Lauf: 0x12203316 (197 Trips,
+> 88% Trefferquote, Sprint-Score 100) raus wegen "nur 2 aktive Tage (< 3)";
+> 0xcd87ea21 (53 Trips, 75%) raus als "Scalper" am abgeleiteten 15min-Boden;
+> die EINZIGE Wallet, die je Signale feuerte (0x8d7d49eb), hatte 11-14min
+> Haltedauer - exakt dieses Profil. Übrig blieben Portfolio-Halter: watch
+> zeigte 9/9 "holding", 23 Minuten lang keine einzige Positions-Änderung.
+> Fixes: (1) eigener `sprint_min_hold_minutes: 5` statt Hauptbuch-Hälfte
+> (15min) - nur noch Sekunden-Scalper raus, Strikes urteilen den Rest;
+> (2) `sprint_min_active_days: 3 -> 2` (config.yaml); (3) Analyzer-`_call`
+> wiederholt jetzt auch 5xx-Fehler mit Backoff, nicht nur 429 (Live: 39 von
+> 90 Kandidaten in EINEM Lauf kommentarlos an '502 Bad Gateway' verloren,
+> Pool schrumpfte dadurch zufallsverzerrt auf 9).
+>
 > **UPDATE 18.07. — WICHTIGER FUND: Spot-Fills verfälschten die Analyse
 > (Nutzer-Frage: "tracken wir Wallets nicht, die x2 oder Spot handeln?").**
 > Symptom: seit Vorabend 20 Uhr komplette Signal-Stille, egal wie breit/

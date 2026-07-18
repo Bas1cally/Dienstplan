@@ -118,12 +118,23 @@ copytrade:
                                       # ein Gambler"). Lockerer als das Hauptbuch (0.25):
                                       # mehr Wallets sind weiter erwünscht, aber keine
                                       # historisch übertreibenden Konten mehr.
-      sprint_min_active_days: 3      # QUEST (Nutzer 17.07., "3 und 4"): größter
-                                      # Volumen-Killer im Sprint-Funnel war bisher
-                                      # dieselbe 10-Tage-Schwelle wie im Hauptbuch -
-                                      # starke Trefferquote-Kandidaten fielen laufend
-                                      # nur wegen "nur 2-8 aktive Tage" raus. Sprint
-                                      # braucht Richtungs-Beweis, keine lange Historie.
+      sprint_min_active_days: 2      # QUEST (Nutzer 17.07., "3 und 4"; 18.07. von 3
+                                      # auf 2 gesenkt): größter Volumen-Killer im
+                                      # Sprint-Funnel war die Hauptbuch-Schwelle (10),
+                                      # aber auch 3 schnitt noch Frequenz-Maschinen
+                                      # weg (Live: 197 Trips/88% Trefferquote/Sprint-
+                                      # Score 100 raus wegen "nur 2 aktive Tage").
+                                      # 2 Tage schließen Ein-Tages-Zufall weiter aus.
+      sprint_min_hold_minutes: 5     # QUEST-Scalper-Boden (Nutzer-Fund 18.07.): der
+                                      # frühere abgeleitete Boden (Hauptbuch-Hälfte =
+                                      # 15min) sortierte GENAU die Schnell-Trader aus,
+                                      # die das "1 Trade pro Stunde"-Ziel liefern
+                                      # können (Live: 53 Trips/75% raus wegen 1min
+                                      # Hold; die einzige Signal-Wallet überhaupt
+                                      # hatte 11-14min). Der Pool bestand danach nur
+                                      # noch aus Portfolio-Haltern - 9/9 "holding",
+                                      # stundenlange Signal-Stille. Nur noch echte
+                                      # Sekunden-Scalper raus, Strikes urteilen den Rest.
 
 # === Marktüberwachung: News + Preis-Schocks ===
 # Schaltet beide Bots in CAUTION (nichts Neues) oder RISK_OFF (alles schließen).
@@ -253,8 +264,8 @@ sprint:
                             # dagegen kostet die ganze Messung (Live: Pool auf 6
                             # geschrumpft, tagelange Dürre). Gate-Rest: Trefferquote
                             # >=45% (nur systematische Falsch-Trader raus), >=8
-                            # Trades, halber Scalper-Boden, ODER grünes offenes
-                            # Buch >=55%. Hauptbuch bleibt strikt bei min_score 35.
+                            # Trades, Mini-Scalper-Boden (sprint_min_hold_minutes),
+                            # ODER grünes offenes Buch >=55%. Hauptbuch: min_score 35.
   path_b_max_share: 0.35    # Deckel für Pfad-B-Wallets ('Positions-Trader mit
                             # grünem offenen Buch') als Anteil von pool_size, fest
                             # an der Admission, nicht nur an der Pool-Sortierung.
