@@ -1323,10 +1323,18 @@ class Autopilot:
                  and not (crypto_only and self._is_stock_dominated(m))]
         regime_out = len(sprint_ok) - banned_out - len(cands)
         # Sortierschlüssel: aktive/neue Wallets (nicht idle) zuerst, Stumme ans
-        # Ende; innerhalb jeder Gruppe nach Richtungs-Score. [:n] schneidet die
-        # Stummen ab, SOLANGE genug nicht-idle Kandidaten da sind.
+        # Ende; danach Pfad-A (aktiver Trader) vor Pfad-B (Positions-Sitzer) -
+        # Nutzer-Fund 18.07.: 11 von 18 Pool-Wallets hielten seit Wochen nur
+        # eine grüne Position (Pfad B) und können strukturell NIE ein frisches
+        # 0->Position-Signal geben, sie fressen nur Pool-Slots. Kein harter
+        # Ausschluss (Pfad B bleibt gültig, siehe check_sprint-Docstring), nur
+        # nachrangig - self-balancing wie die Idle-Rotation direkt daneben.
+        # Zuletzt nach Richtungs-Score. [:n] schneidet die Nachrangigen ab,
+        # SOLANGE genug bessere Kandidaten da sind.
         top = sorted(cands,
-                     key=lambda m: (m.address.lower() not in idle, m.sprint_score),
+                     key=lambda m: (m.address.lower() not in idle,
+                                     m.sprint_qualify_path != "B",
+                                     m.sprint_score),
                      reverse=True)[:n]
         pool = [{"address": m.address, "score": round(m.sprint_score, 1)} for m in top]
         have = {p["address"] for p in pool}
@@ -1527,11 +1535,14 @@ class Autopilot:
                 # er den Pool blockiert.
                 if self._is_sleeper(m):
                     sprint_idle_ko += 1
-                elif not check_sprint(m, larp_cfg).passed:
+                    continue
+                verdict = check_sprint(m, larp_cfg)
+                if not verdict.passed:
                     sprint_gate_ko += 1
                 elif m.sprint_score < pool_min:
                     sprint_score_ko += 1
                 else:
+                    m.sprint_qualify_path = verdict.path
                     sprint_ok.append(m)
             sprint_ok.sort(key=lambda m: m.sprint_score, reverse=True)
 

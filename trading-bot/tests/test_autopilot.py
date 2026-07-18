@@ -723,6 +723,45 @@ def test_build_sprint_pool_does_not_force_in_banned_main_leader():
     assert "0xz" not in [p["address"] for p in pool]
 
 
+def test_build_sprint_pool_prefers_path_a_over_higher_scored_path_b():
+    """Nutzer-Fund 18.07.: 11 von 18 Pool-Wallets qualifizierten nur über Pfad B
+    (grünes offenes Buch, trips<=1) und können strukturell NIE ein frisches
+    0->Position-Signal geben - sie fressen Pool-Slots ohne je Signale zu
+    liefern. Pfad-A-Wallets (aktive Trader) müssen bei gleicher Slot-Anzahl
+    vorgehen, auch wenn ein Pfad-B-Kandidat einen höheren Score hat."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.sprint.pool_size = 2
+        ap.leaders = []
+        m_a = metrics("0xactive", 50)
+        m_a.sprint_qualify_path = "A"
+        m_b_high = metrics("0xsitter", 90)
+        m_b_high.sprint_qualify_path = "B"
+        m_b_low = metrics("0xsitter2", 40)
+        m_b_low.sprint_qualify_path = "B"
+        pool = ap._build_sprint_pool([m_b_high, m_b_low, m_a])
+    addrs = [p["address"] for p in pool]
+    assert addrs == ["0xactive", "0xsitter"], \
+        "Pfad-A (0xactive) geht trotz niedrigerem Score vor dem besser bewerteten Pfad-B (0xsitter) vor"
+
+
+def test_build_sprint_pool_still_fills_with_path_b_when_no_path_a_left():
+    """Self-balancing wie bei Idle-Rotation: gibt es nicht genug Pfad-A-Wallets,
+    füllen Pfad-B-Kandidaten die restlichen Slots - kein harter Ausschluss."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.sprint.pool_size = 2
+        ap.leaders = []
+        m_b = metrics("0xsitter", 60)
+        m_b.sprint_qualify_path = "B"
+        pool = ap._build_sprint_pool([m_b])
+    assert "0xsitter" in [p["address"] for p in pool]
+
+
 def test_prune_banned_from_pool_evicts_and_forces_fresh_analysis():
     """Beim Start ist der Pool schon geladen, bevor das Sprint-Buch (mit Bans)
     existiert - _prune_banned_from_pool wirft die Gebannten nachträglich raus

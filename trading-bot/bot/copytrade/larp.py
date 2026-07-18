@@ -48,6 +48,12 @@ class LarpConfig:
 class LarpVerdict:
     passed: bool
     reasons: list[str] = field(default_factory=list)
+    # Nur von check_sprint() gesetzt: "A" (aktiver Trader) oder "B"
+    # (Positions-Trader mit grünem Buch) - welcher Pfad qualifiziert hat.
+    # Pool-Ranking nutzt das, um Pfad-B-Wallets (können strukturell nie ein
+    # frisches 0->Position-Signal geben, siehe Nutzer-Fund 18.07.: 11 von 18
+    # Pool-Wallets mit trips<=1) hinter Pfad-A-Wallets einzureihen.
+    path: str = ""
 
 
 class LarpFilter:
@@ -167,7 +173,7 @@ def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict
             f"systematisch falsche Richtung"
         )
     if not a:
-        return LarpVerdict(passed=True)
+        return LarpVerdict(passed=True, path="A")
 
     # --- Pfad B: Positions-Trader mit grünem offenem Buch ---
     b: list[str] = []
@@ -179,7 +185,7 @@ def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict
     if m.net_pnl + m.open_unrealized <= 0:
         b.append("Fenster-PnL inkl. unrealisiert <= 0")
     if not b:
-        return LarpVerdict(passed=True)
+        return LarpVerdict(passed=True, path="B")
 
     return LarpVerdict(passed=False, reasons=[
         "Aktiv: " + "; ".join(a), "Positions: " + "; ".join(b)])

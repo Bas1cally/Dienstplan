@@ -195,7 +195,9 @@ def test_sprint_gate_rejects_systematic_loser_allows_coinflip():
     assert not v.passed and any("Trefferquote" in r for r in v.reasons)
 
     coinflip = trader(win_every=2)  # 50%: rein damit, Strikes urteilen
-    assert check_sprint(coinflip).passed, "Münzwurf darf in den Papier-Pool"
+    v_flip = check_sprint(coinflip)
+    assert v_flip.passed, "Münzwurf darf in den Papier-Pool"
+    assert v_flip.path == "A", "aktiver Trader qualifiziert über Pfad A"
 
 
 def test_sprint_gate_still_rejects_scalper_and_thin_history():
@@ -231,6 +233,7 @@ def test_sprint_gate_position_path_green_open_book():
     m.open_unrealized = 45_000.0                # der Gewinn LÄUFT noch
     v = check_sprint(m)
     assert v.passed, f"grünes offenes Buch muss qualifizieren: {v.reasons}"
+    assert v.path == "B", "Positions-Trader qualifiziert über Pfad B, nicht A"
     m.sprint_score = _sprint_score(m)
     assert m.sprint_score >= 25, "Positions-Pfad muss auch den Score-Boden schaffen"
 

@@ -69,6 +69,8 @@ class TraderMetrics:
     # userFillsByTime liefert max ~2000 Fills: ist das Fenster voll, sehen wir nur
     # einen Ausschnitt - alle Metriken wären verzerrt (betrifft HFT/MM-Konten).
     fills_truncated: bool = False
+    # Von check_sprint() gesetzt: "A"/"B"/"" - siehe LarpVerdict.path.
+    sprint_qualify_path: str = ""
 
 
 @dataclass
