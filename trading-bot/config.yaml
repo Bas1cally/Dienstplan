@@ -264,7 +264,6 @@ sprint:
                             # die strukturell NIE ein frisches 0->Position-Signal
                             # geben können (0 Signale in ~2h trotz gefixter Sortierung).
   bust_frac: 0.05           # Liquidations-Modell: unter 5% Rest ist der Zyklus geplatzt
-  rebalance_threshold: 0.02
   partial_exit_frac: 0.75   # Leader baut >=75% ab -> wir gehen mit raus (Scale-out)
   add_signal_frac: 0.5      # Aufstockung >=50% oder Richtungs-Flip im Bestand zählt
                             # als frisches Signal (nur im FLACH-Scan). Grund: der

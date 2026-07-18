@@ -182,6 +182,7 @@ def test_sprint_snapshots_prefixes_addresses_and_filters_priceable_coins():
             "UNPRICEABLE": LeaderPosition(coin="UNPRICEABLE", size=1.0, entry=1.0,
                                           position_value=1.0, leverage=1),
         })]
+        sh._last_scan_ok = sh.clock()
         leaders, snaps = sh.sprint_snapshots({"BTC": 65_000.0})
 
     assert leaders == [{"address": "lighter:42", "score": 15.0, "weight": 1.0}]
@@ -204,6 +205,7 @@ def test_sprint_snapshots_respects_max_leaders_cap():
                                       position_value=1000.0, leverage=1),
             }) for i in range(5)
         ]
+        sh._last_scan_ok = sh.clock()
         leaders, snaps = sh.sprint_snapshots({"BTC": 65_000.0})
     assert len(leaders) == 2 and len(snaps) == 2
 
@@ -221,6 +223,7 @@ def test_sprint_snapshots_drops_leader_without_any_priceable_position():
             "UNPRICEABLE": LeaderPosition(coin="UNPRICEABLE", size=1.0, entry=1.0,
                                           position_value=1.0, leverage=1),
         })]
+        sh._last_scan_ok = sh.clock()
         leaders, snaps = sh.sprint_snapshots({"BTC": 65_000.0})
     assert leaders == [] and snaps == []
 
@@ -243,6 +246,36 @@ def test_sprint_snapshots_uses_cached_leaders_no_extra_network_call():
         sh = LighterShadow(cfg, 0.00045, source=_BoomSource(cfg), runtime_dir=Path(tmp))
         sh._leaders = [LeaderSnapshot("1", 1000.0, {})]
         sh.sprint_snapshots({"BTC": 1.0})   # darf nicht raisen
+
+
+def test_sprint_snapshots_empty_when_scan_stale():
+    """Wave-3-Audit-Fund (18.07.): tick() aktualisiert _leaders nur bei
+    ERFOLGREICHEM rank() - schlägt der Scan wiederholt fehl, blieb der Cache
+    bisher unbegrenzt lange gültig. Ab dem 3-fachen Scan-Intervall ohne
+    erfolgreichen Scan müssen die (potenziell längst überholten) Snapshots
+    NICHT mehr als frische Sprint-Signale durchgehen."""
+    import tempfile
+
+    from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
+    from bot.sources.lighter import LighterShadow
+
+    cfg = LighterConfig(scan_seconds=300)
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        sh = LighterShadow(cfg, 0.00045, source=LighterSource(cfg),
+                           runtime_dir=Path(tmp), clock=lambda: t["now"])
+        sh._leaders = [LeaderSnapshot("42", 10_000.0, {
+            "BTC": LeaderPosition(coin="BTC", size=1.0, entry=100.0,
+                                  position_value=1000.0, leverage=1),
+        })]
+        sh._last_scan_ok = t["now"]
+        leaders, snaps = sh.sprint_snapshots({"BTC": 65_000.0})
+        assert leaders and snaps, "Vorbedingung: frisch gescannt liefert normal"
+
+        t["now"] += 3 * cfg.scan_seconds + 1   # letzter erfolgreicher Scan zu alt
+        leaders, snaps = sh.sprint_snapshots({"BTC": 65_000.0})
+        assert leaders == [] and snaps == [], \
+            "eingefrorener Cache darf nicht mehr als frisches Signal durchgehen"
 
 
 def test_lighter_shadow_reconciles_and_persists():

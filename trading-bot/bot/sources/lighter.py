@@ -275,6 +275,10 @@ class LighterShadow:
                                 max_leverage=4, max_daily_loss=1.0, slippage=0.005,
                                 max_total_drawdown=0.5)
         self._last_scan = 0.0
+        # Zeitpunkt des letzten ERFOLGREICHEN rank() (anders als _last_scan,
+        # das schon beim VERSUCH gesetzt wird - siehe tick()). Grundlage für
+        # den Staleness-Schutz in sprint_snapshots().
+        self._last_scan_ok = 0.0
         self._leaders: list = []
 
     def tick(self, hl_prices: dict[str, float]) -> None:
@@ -285,6 +289,7 @@ class LighterShadow:
             self._last_scan = self.clock()
             try:
                 self._leaders = self.source.rank()
+                self._last_scan_ok = self.clock()
             except Exception as e:
                 log.warning("Lighter-Ranking fehlgeschlagen: %s", str(e)[:80])
         if not self._leaders:
@@ -325,7 +330,21 @@ class LighterShadow:
         übernehmen wie bei jedem anderen Sprint-Leader die Strikes (2 Verlust-
         Ritte -> Bann) und der Zeit+negativ-Cut - hier ohne den Vorab-Filter
         (LARP/Drawdown-Gate), den es für HL-Kandidaten gibt, weil Lighter dafür
-        keine Fill-Historie hergibt."""
+        keine Fill-Historie hergibt.
+
+        Staleness-Schutz (Wave-3-Audit-Fund 18.07.): tick() setzt self._leaders
+        NUR bei erfolgreichem rank() neu - schlägt der Scan wiederholt fehl
+        (z.B. Lighter-API über Stunden nicht erreichbar), blieb der Cache
+        bisher UNBEGRENZT lange gültig, ohne Zeitstempel-Prüfung. Ein Sprint-
+        Ritt über einen so eingefrorenen Lighter-Leader hätte dessen (real
+        längst geschlossene) Position für immer als offen gesehen - leader_
+        exit hätte nie gefeuert. Ab dem 3-fachen Scan-Intervall ohne
+        erfolgreichen Scan gelten die Snapshots als nicht mehr vertrauenswürdig
+        genug für frische Sprint-Ritte (0 Leader = 0 neue Signale, bestehende
+        Sprint-Ritte über diesen Leader laufen unabhängig weiter - Strikes/
+        Zeit+negativ-Cut policen sie wie gehabt)."""
+        if self.clock() - self._last_scan_ok > 3 * self.cfg.scan_seconds:
+            return [], []
         LIGHTER_SPRINT_SCORE = 15.0
         leaders: list[dict] = []
         snaps: list = []

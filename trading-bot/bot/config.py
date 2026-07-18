@@ -406,7 +406,6 @@ class SprintConfig:
     # bleibt gültig (Nutzer will 'mehr Wallets'), aber kann den Pool nicht
     # mehr mit strukturell signal-unfähigen Positions-Sitzern volllaufen.
     path_b_max_share: float = 0.35
-    rebalance_threshold: float = 0.02
     min_notional: float = 10.0
     # Teil-Exit-Folge: hat der Leader >= partial_exit_frac seiner Einstiegsgröße
     # abgebaut, steigen wir aus (Scalper skalieren gestaffelt raus).

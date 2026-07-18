@@ -50,9 +50,16 @@ class LarpVerdict:
     reasons: list[str] = field(default_factory=list)
     # Nur von check_sprint() gesetzt: "A" (aktiver Trader) oder "B"
     # (Positions-Trader mit grünem Buch) - welcher Pfad qualifiziert hat.
-    # Pool-Ranking nutzt das, um Pfad-B-Wallets (können strukturell nie ein
-    # frisches 0->Position-Signal geben, siehe Nutzer-Fund 18.07.: 11 von 18
-    # Pool-Wallets mit trips<=1) hinter Pfad-A-Wallets einzureihen.
+    # Pfad-B-Wallets können strukturell nie ein frisches 0->Position-Signal
+    # geben (Nutzer-Fund 18.07.: 11 von 18 Pool-Wallets mit trips<=1). Über
+    # TraderMetrics.sprint_qualify_path (Autopilot._reanalyze_body) doppelt
+    # konsumiert: (1) _build_sprint_pool reiht Pfad-B hinter Pfad-A ein
+    # (Nachrang-Sortierung, wirkt nur bei Kandidaten-Überangebot), (2) das
+    # eigentlich scharfe Gate ist autopilot.cap_path_b_admission() - deckelt
+    # Pfad-B als festen Anteil von pool_size direkt bei der Admission in
+    # sprint_ok, unabhängig vom Kandidaten-Angebot (Wave-3-Fund 18.07.: die
+    # reine Sortierung griff faktisch nie, sprint_ok lag fast immer UNTER
+    # pool_size).
     path: str = ""
 
 
@@ -116,14 +123,17 @@ def check_sprint(m: TraderMetrics, cfg: LarpConfig | None = None) -> LarpVerdict
 
     ZWEI Qualifikations-Pfade - Richtung kann man auf zwei Arten beweisen:
 
-    A) Aktiv-Pfad (genug geschlossene Trades): Trefferquote >= 52%, halbierte
-       Stichproben-Hürde, Aktivität, Scalper-Boden (unter ~30min Haltedauer
-       erreicht kein Ritt die nötige ~1%-Bewegung).
+    A) Aktiv-Pfad (genug geschlossene Trades): Trefferquote >= 45%
+       (SPRINT_MIN_WIN_RATE, Philosophie-Wechsel 17.07. - deutlich unter
+       Münzwurf-Niveau, siehe Kommentar dort), geviertelte Stichproben-Hürde
+       (mind. 8 statt der Hauptbuch-Schwelle 30), Aktivität, Scalper-Boden
+       (unter ~30min Haltedauer erreicht kein Ritt die nötige ~1%-Bewegung).
     B) Positions-Pfad (Live-Befund: 25 von 34 LARP-Toten waren 'netto
        unprofitabel', weil Positions-Trader ihren Gewinn UNREALISIERT in
        offenen Positionen halten - Fills-Metriken bestrafen 'Gewinner laufen
-       lassen'): offenes Buch mehrheitlich im Plus (>=60% wertgewichtet) UND
-       Gesamt-PnL des Fensters inkl. unrealisiert positiv.
+       lassen'): offenes Buch mehrheitlich im Plus (>=55% wertgewichtet,
+       SPRINT_MIN_GREEN_SHARE) UND Gesamt-PnL des Fensters inkl. unrealisiert
+       positiv.
 
     GESTRICHEN bleiben die Profit-Größen-Gates des Hauptbuchs (Lucky-Punch,
     Wochen-Konsistenz, Swing-Cap): für +10%-und-raus irrelevant. Strikes/Bans

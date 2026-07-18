@@ -1327,6 +1327,107 @@ def test_flip_reentry_stays_instant_even_with_confirm_delay():
             "derselbe Zyklus läuft weiter (kein Zwischen-Settle beim Flip)"
 
 
+# ---------- Bestätigungsfenster auch im MESS-MODUS (Wave-3-Fund 18.07.) ----------
+# Audit-Befund: tick() kehrte im parallel_rides-Zweig bisher IMMER vor dem
+# einzigen _process_pending()-Aufruf zurück - config.yaml hatte confirm_delay_s
+# trotzdem scharf ("Flip-Flopper-Schutz"), er griff im Mess-Modus aber nie,
+# jedes Signal wurde sofort geritten.
+
+def _confirm_book_parallel(tmp, t, delay=10.0, **overrides):
+    cfg = SprintConfig(exclude_coins=[], confirm_delay_s=delay,
+                       parallel_rides=True, **overrides)
+    return SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+
+
+def test_parallel_fresh_signal_registers_pending_not_instant():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book_parallel(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)                 # Baseline
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)        # frisches Signal
+        assert b.paper.sizes() == {}, "kein Sofort-Ritt mehr, auch im Mess-Modus"
+        assert any(p["coin"] == "BTC" for p in b.stats(P)["pending"])
+
+        t["now"] += 11   # Fenster um
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert "BTC" in b.paper.sizes(), "bestätigt -> jetzt als eigener Mess-Ritt eröffnet"
+        assert b.ride_leaders.get("BTC") == "0xbest"
+
+
+def test_parallel_pending_rejected_immediately_on_negative_tick():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book_parallel(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert b.stats(P)["pending"]
+        t["now"] += 3
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.0, "ETH": 100.0})
+        assert b.stats(P)["pending"] == [], "sofort verworfen, wie im Einzel-Ritt"
+        assert b.paper.sizes() == {}
+
+
+def test_parallel_multiple_confirmed_candidates_each_get_own_ride():
+    """Kernunterschied zum Einzel-Ritt: KEIN 'nur einer gewinnt' - im Mess-
+    Modus ist Platz für mehrere parallele Ritte, jeder bestätigte Kandidat
+    bekommt seinen eigenen Slot."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book_parallel(tmp, t)
+        two = leaders(("0xA", 90), ("0xB", 50))
+        prices = {"BTC": 100.0, "ETH": 100.0}
+        b.tick(two, [snap("0xA", 50_000), snap("0xB", 50_000)], prices)
+        b.tick(two, [snap("0xA", 50_000, BTC=500),
+                     snap("0xB", 50_000, ETH=300)], prices)
+        assert len(b.stats(prices)["pending"]) == 2
+
+        t["now"] += 11
+        b.tick(two, [snap("0xA", 50_000, BTC=500),
+                     snap("0xB", 50_000, ETH=300)], prices)
+        assert set(b.paper.sizes()) == {"BTC", "ETH"}, \
+            "BEIDE bestätigten Kandidaten eröffnen je einen eigenen Mess-Ritt"
+
+
+def test_parallel_flip_reentry_within_running_ride_stays_instant():
+    """Design-Entscheidung bleibt auch im Mess-Modus gültig: eine flip-
+    getriebene Re-Entry INNERHALB eines laufenden Ritts (Schritt 3 in
+    _tick_parallel) bleibt sofort - nur FRISCHE Signale (Schritt 4) laufen
+    über das Bestätigungsfenster."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book_parallel(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # pending
+        t["now"] += 11
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # bestätigt -> Ritt läuft
+        assert "BTC" in b.paper.sizes()
+        t["now"] += 1   # weit unter dem Bestätigungsfenster
+        b.tick(LED, [snap("0xbest", 50_000, BTC=-500)], P)  # Leader flippt
+        assert b.paper.sizes().get("BTC", 0) < 0, \
+            "Flip-Re-Entry bleibt sofort, auch im Mess-Modus mit confirm_delay_s"
+
+
+def test_parallel_pending_promotion_rechecks_capacity():
+    """Kapazitäts-Checks gelten erneut bei der Promotion, nicht nur bei der
+    Registrierung - der Zustand kann sich während der Wartezeit geändert
+    haben (hier: max_rides inzwischen ausgeschöpft)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _confirm_book_parallel(tmp, t, max_rides=1)
+        two = leaders(("0xA", 90), ("0xB", 50))
+        prices = {"BTC": 100.0, "ETH": 100.0}
+        b.tick(two, [snap("0xA", 50_000), snap("0xB", 50_000)], prices)
+        b.tick(two, [snap("0xA", 50_000, BTC=500),
+                     snap("0xB", 50_000, ETH=300)], prices)
+        assert len(b.stats(prices)["pending"]) == 2
+
+        t["now"] += 11
+        b.tick(two, [snap("0xA", 50_000, BTC=500),
+                     snap("0xB", 50_000, ETH=300)], prices)
+        assert len(b.paper.sizes()) == 1, "max_rides=1 lässt nur EINEN der beiden zu"
+        assert b.stats(prices)["scan"]["rejected"].get("max_ritte") == 1
+
+
 # ---------- Confidence-Points/Star-Kern (QOL-Runde) ----------
 
 def test_tp_earns_confidence_leader_exit_win_does_not():
@@ -1797,7 +1898,7 @@ def test_fresh_signal_reaches_entry_under_production_settings_full_pool():
             enabled=True, equity=1000.0, leverage=10.0, target_profit=100.0,
             max_positions=1, parallel_rides=False, max_rides=8,
             max_rides_per_leader=1, crypto_only=False, bust_frac=0.05,
-            pool_size=20, pool_min_score=10.0, rebalance_threshold=0.02,
+            pool_size=20, pool_min_score=10.0,
             min_notional=10.0, partial_exit_frac=0.75, add_signal_frac=0.5,
             confirm_delay_s=10.0, strike_ban=2, exclude_coins=["BTC"],
         )

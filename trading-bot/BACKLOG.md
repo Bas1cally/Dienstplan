@@ -4,11 +4,13 @@ Dieses Dokument hält Feature-Ideen fest, die über Session-Grenzen hinweg
 überleben müssen. Die nächste Session klont das Repo frisch — was hier steht,
 ist da; Chat-Verlauf ist es nicht.
 
-> **AKTUELLER FOKUS (Nutzer, 13.07.2026): das Sprint-Buch.** Stand: 3/3
-> Gewinn-Zyklen unter v3. Die Mess-Woche (bis So 19.07. 16:30) läuft mit
-> CMM-Discovery + 12er-Pool. Danach hat der Sprint-Ausbau Vorrang — zuerst
-> das Confidence-Points/Star-System (Spec unten), dann ggf. Lighter-Promotion
-> in den Sprint-Pool, je nach Lighter-Schatten-Zahlen.
+> **AKTUELLER FOKUS (Nutzer, 13.07.2026, historische Momentaufnahme - beide
+> hier genannten Punkte sind längst umgesetzt, siehe UPDATEs unten): das
+> Sprint-Buch.** Stand: 3/3 Gewinn-Zyklen unter v3. Die Mess-Woche (bis So
+> 19.07. 16:30) läuft mit CMM-Discovery + 12er-Pool. Danach hat der Sprint-
+> Ausbau Vorrang — zuerst das Confidence-Points/Star-System (Spec unten,
+> UMGESETZT 15.07.), dann ggf. Lighter-Promotion in den Sprint-Pool
+> (UMGESETZT 17.07., `sprint_promote` in config.yaml).
 >
 > **UPDATE 15.07. — MESS-MODUS aktiv:** `sprint.parallel_rides: true`
 > (config.yaml) lässt für die Mess-Woche JEDES Signal als eigenen Ritt auf
@@ -169,6 +171,41 @@ ist da; Chat-Verlauf ist es nicht.
 >    behauptet weiterhin "Lighter-Promotion ... noch nicht gebaut" - ist
 >    seit `cdbb8af`/`e5dfc3f` (17.07.) live, nur per `sprint_promote: false`
 >    (config.yaml) abgeschaltet. Wird beim Wave-3-Fix mitkorrigiert.
+>
+> **UPDATE 18.07. — Wave 3 GEBAUT (Nutzer: "Kannst alles fixen sollte genug
+> Limit da sein"). Alle 8 Funde oben behoben:**
+> 1. Bestätigungsfenster (`confirm_delay_s`) läuft jetzt auch im Mess-Modus
+>    (`_process_pending`/`_promote_pending_parallel` in `bot/sprint.py`) -
+>    JEDER bestätigte Kandidat bekommt einen eigenen Ritt-Slot (kein "nur
+>    einer gewinnt" wie im Einzel-Ritt), Flip-Re-Entries INNERHALB eines
+>    laufenden Mess-Ritts bleiben bewusst sofort (Design-Prinzip unverändert).
+>    Star-Preemption gilt weiterhin NUR im Einzel-Ritt (im Mess-Modus gibt es
+>    keinen EINEN Ritt, den man verdrängen müsste).
+> 2. `cap_path_b_admission`/`forced_main` waren beim genaueren Hinsehen KEIN
+>    Leck, sondern zwei unterschiedliche, beide beabsichtigte Garantien
+>    (Deckel für neu entdeckte Kandidaten in `sprint_ok` vs. "Haupt-Leader nie
+>    aus den Augen verlieren", ein Haupt-Leader hat ohnehin die strengeren
+>    Hauptbuch-Kriterien schon bestanden) - beide Docstrings jetzt präzise
+>    gegeneinander abgegrenzt, kein Verhaltensfix nötig.
+> 3. `LighterShadow.sprint_snapshots()` hat jetzt einen Staleness-Schutz
+>    (`_last_scan_ok`, `bot/sources/lighter.py`) - ab dem 3-fachen
+>    Scan-Intervall ohne erfolgreichen Scan liefert die Funktion `[], []`
+>    statt eingefrorene Positionen als frisch auszugeben.
+> 4. CMM-Token-Rotationszeiger (`bot/sources/coinmarketman.py`) setzt sich
+>    jetzt bei jedem UTC-Tageswechsel automatisch zurück (`_maybe_reset_daily`)
+>    - unabhängig vom Prozess-Neustart, passend zu CMMs Tages-Kontingent.
+> 5. `SprintConfig.rebalance_threshold` (totes Copy-Paste-Feld) entfernt, aus
+>    config.yaml + Tests mitentfernt.
+> 6. `check_sprint()`-Docstring korrigiert (45%/55%/geviertelte Hürde statt
+>    veralteter 52%/60%/"halbiert").
+> 7. `LarpVerdict.path`-Kommentar nennt jetzt beide Konsumenten (Nachrang-
+>    Sortierung UND den eigentlich scharfen `cap_path_b_admission`-Deckel).
+> 8. Dieses Dokument: "AKTUELLER FOKUS" als historische Momentaufnahme
+>    markiert, "Offene Frage 5" oben als geklärt aktualisiert.
+>
+> Neue/erweiterte Tests: `test_sprint.py` (+5, Mess-Modus-Bestätigungsfenster),
+> `test_lighter.py` (+1, Staleness), `test_coinmarketman.py` (+1,
+> Tages-Reset). Volle Suite + `simulate.py` grün.
 
 ---
 
@@ -277,11 +314,14 @@ Kandidaten für später, nach Nutzen sortiert:
 4. ~~Sichtbarkeit~~ **ERLEDIGT:** `/sprint` und `/sprint pool` zeigen ⭐ bei
    `confidence >= 100`; Journal-Kind `sprint_star` + Telegram-Push beim
    Erreichen der 100.
-5. **Weiterhin offen — Quellen-Reichweite:** Gilt Confidence nur für HL-
-   Sprint-Ritte, oder auch für später in den Sprint-Pool promotete Lighter-
-   Trader? (Konsequent wäre: jede Quelle kann Sterne verdienen, gleiche
-   Regeln.) Aktuell nur HL-Sprint, da Lighter-Promotion selbst noch nicht
-   gebaut ist.
+5. ~~Quellen-Reichweite~~ **GEKLÄRT (Wave-3-Audit-Fund 18.07., Dokument war
+   hier veraltet):** Lighter-Promotion in den Sprint-Pool ist seit `cdbb8af`/
+   `e5dfc3f` (17.07.) gebaut (`LighterShadow.sprint_snapshots()`,
+   `LighterConfig.sprint_promote`, aktuell per `sprint_promote: false` in
+   config.yaml abgeschaltet, nicht unbebaut). `_book_cycle`/Confidence
+   unterscheiden nicht nach Adress-Präfix - ein `lighter:`-Leader verdient
+   also automatisch unter denselben Regeln Sterne wie ein HL-Leader, sobald
+   `sprint_promote` scharf gestellt wird. Konsequent, kein Sonderfall nötig.
 
 ### Betroffene Dateien (umgesetzt in der QOL-Runde, 15.07.2026)
 - `bot/sprint.py` — Confidence-Vergabe in `_book_cycle` (`_CONFIDENCE_EARNING

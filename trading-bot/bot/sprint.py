@@ -193,6 +193,16 @@ class SprintBook:
             # Endziel (parallel_rides: false) bleibt der Einzel-Ritt unten.
             self._tick_parallel(leaders, snapshots, prices, risk_off)
             if leaders and snapshots:
+                # Bestätigungsfenster (Wave-3-Audit-Fund 18.07.): lief bisher
+                # NUR im Einzel-Ritt-Zweig unten - tick() kehrte im Mess-Modus
+                # immer schon vorher zurück. config.yaml hatte confirm_delay_s
+                # trotzdem scharf ("Flip-Flopper-Schutz"), der im aktiven
+                # Mess-Modus also nie griff, jedes Signal wurde sofort geritten.
+                # Star-Preemption gibt es im Mess-Modus bewusst NICHT (siehe
+                # _promote_pending_parallel) - hier gibt es keinen EINEN Ritt,
+                # den man verdrängen müsste, ein neues Signal nimmt einfach
+                # den nächsten freien Ritt-Slot.
+                self._process_pending(leaders, snapshots, prices)
                 self._refresh_baselines(leaders, snapshots)
             return
         # Sicherung gegen einen Moduswechsel bei noch offenen Mess-Ritten: ohne
@@ -284,9 +294,11 @@ class SprintBook:
             self._tick_riding(leaders, snapshots, prices)
         else:
             self._tick_waiting(leaders, snapshots, prices)
-        # Läuft IMMER (auch während eines Ritts, für die später kommende
-        # Star-Preemption) - registriert selbst nichts, verarbeitet nur
-        # bereits pending Kandidaten (Bestätigungsfenster gegen Flip-Flopper).
+        # Läuft IMMER (auch während eines Ritts, für die Star-Preemption) -
+        # registriert selbst nichts, verarbeitet nur bereits pending
+        # Kandidaten (Bestätigungsfenster gegen Flip-Flopper). Derselbe
+        # Aufruf läuft im Mess-Modus aus dem parallel_rides-Zweig oben,
+        # dort OHNE Star-Preemption (siehe _promote_pending_parallel).
         self._process_pending(leaders, snapshots, prices)
         # Baselines ALLER Rotations-Leader aktuell halten (auch während eines
         # Ritts) und Ausgeschiedene vergessen - sonst gelten deren während des
@@ -435,6 +447,13 @@ class SprintBook:
                                      scores.get(item[1]["leader"].lower(), 0.0)),
                   reverse=True)
 
+        if self.cfg.parallel_rides:
+            # Mess-Modus: KEIN "nur einer gewinnt" wie im Einzel-Ritt - hier
+            # ist Platz für mehrere parallele Ritte, jeder bestätigte
+            # Kandidat bekommt seinen eigenen Slot (falls noch frei).
+            self._promote_pending_parallel(ready, prices)
+            return
+
         if self.paper.sizes():
             # Läuft noch ein Ritt: NUR eine Star-Preemption kann hier greifen
             # (die Exit-Folge in _tick_riding hätte sonst schon geschlossen).
@@ -473,6 +492,31 @@ class SprintBook:
             return
         self._pending.pop(win_coin, None)
         self._enter(win_coin, win_snap, prices)
+
+    def _promote_pending_parallel(self, ready: list, prices: dict[str, float]) -> None:
+        """Mess-Modus-Pendant zur Promotion (Wave-3-Fund 18.07.): anders als im
+        Einzel-Ritt gewinnt hier NICHT nur der eine beste Kandidat - es ist
+        Platz für mehrere parallele Ritte, jeder bestätigte Kandidat bekommt
+        einen eigenen Slot, solange noch einer frei ist. Keine Star-Preemption
+        nötig: es gibt keinen EINEN laufenden Ritt, den man verdrängen müsste -
+        ein neues Signal nimmt einfach den nächsten freien Platz. Alle
+        Kapazitäts-Checks (Leader-Limit/Coin-Kollision/Gesamt-Slots) werden
+        HIER erneut geprüft, nicht nur bei der Registrierung - der Zustand kann
+        sich während der Wartezeit geändert haben (Leader schon anderweitig
+        geritten, Coin belegt, Pool voll)."""
+        for coin, info, snap in ready:
+            self._pending.pop(coin, None)
+            leader = info["leader"]
+            if coin in self.paper.sizes():
+                self._reject(coin, leader, "coin_belegt")
+                continue
+            if self._leader_rides(leader) >= self.cfg.max_rides_per_leader:
+                self._reject(coin, leader, "leader_belegt")
+                continue
+            if len(self.paper.sizes()) >= self.cfg.max_rides:
+                self._reject(coin, leader, "max_ritte")
+                continue
+            self._enter(coin, snap, prices, parallel=True)
 
     def _fresh_coins(self, book: dict[str, float], prev: dict[str, float]) -> list[str]:
         """Frische Richtungs-Signale eines Leaders (nur im FLACH-Scan genutzt):
@@ -578,9 +622,16 @@ class SprintBook:
                 if len(self.paper.sizes()) >= self.cfg.max_rides:
                     self._reject(coin, snap.address, "max_ritte")
                     continue
-                before = len(self.paper.sizes())
-                self._enter(coin, snap, prices, parallel=True)
-                opened = len(self.paper.sizes()) > before
+                if self.cfg.confirm_delay_s <= 0:
+                    before = len(self.paper.sizes())
+                    self._enter(coin, snap, prices, parallel=True)
+                    opened = len(self.paper.sizes()) > before
+                else:
+                    # Bestätigungsfenster (Wave-3-Fund): auch im Mess-Modus
+                    # erst registrieren statt sofort reiten - _process_pending
+                    # (nach _tick_parallel, s. tick()) promotet zum dann
+                    # aktuellen Preis, siehe _promote_pending_parallel.
+                    opened = self._register_pending(coin, snap)
 
     def _leader_rides(self, addr: str) -> int:
         key = addr.lower()

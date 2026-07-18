@@ -114,8 +114,20 @@ def cap_path_b_admission(
     sprint_ok fast immer UNTER pool_size lag - ohne Überangebot schneidet
     [:n] nichts ab. Dieser Deckel greift dagegen an der ADMISSION selbst,
     unabhängig vom Kandidaten-Angebot. Pfad B bleibt gültig (Nutzer will
-    'mehr Wallets'), kann den Pool aber nicht mehr mit strukturell
-    signal-unfähigen Positions-Sitzern volllaufen.
+    'mehr Wallets'), kann den SPRINT-DISKUTIERTEN Pool aber nicht mehr mit
+    strukturell signal-unfähigen Positions-Sitzern volllaufen.
+
+    GILT NICHT für forced_main in _build_sprint_pool (Wave-3-Audit-Fund
+    18.07.): ein Haupt-Buch-Leader wird dort IMMER angehängt, selbst wenn
+    er hier als überzähliger Pfad-B-Kandidat gedeckelt wurde - das ist
+    KEIN Leck, sondern ein älteres, bewusstes Invariant ('Sprint darf
+    Haupt-Leader nie aus den Augen verlieren', siehe dortiger Docstring).
+    Ein Haupt-Leader hat zudem die STRENGEREN Hauptbuch-Kriterien (30+
+    Round-Trips, 10+ aktive Tage, <25% Drawdown, 60%+ profitable Wochen)
+    bereits bestanden - ein grundlegend anderes Risikoprofil als ein
+    frisch entdeckter Pfad-B-Kandidat mit z.B. 0 Trips. Der Deckel hier
+    bezieht sich also nur auf sprint_ok, nicht auf den finalen Pool
+    inklusive Haupt-Leader-Zwangsergänzung.
 
     Gibt (zugelassene Wallets, Anzahl gedeckelter Pfad-B-Wallets) zurück.
     """
@@ -1367,6 +1379,12 @@ class Autopilot:
         pool = [{"address": m.address, "score": round(m.sprint_score, 1)} for m in top]
         have = {p["address"] for p in pool}
         forced_main = 0
+        # Zwangsergänzung IGNORIERT cap_path_b_admission bewusst (Wave-3-Audit-
+        # Fund 18.07., explizit geklärt): ein Haupt-Leader hat bereits die
+        # strengeren Hauptbuch-Kriterien bestanden - ein anderes Risikoprofil
+        # als ein frisch entdeckter, gedeckelter Pfad-B-Kandidat. Der Deckel
+        # gilt für sprint_ok, nicht für diese ältere 'nie aus den Augen
+        # verlieren'-Garantie (siehe cap_path_b_admission-Docstring).
         for l in self.leaders:
             if l["address"] not in have and l["address"].lower() not in banned:
                 pool.append({"address": l["address"], "score": l.get("score", 0)})

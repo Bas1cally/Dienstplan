@@ -27,11 +27,18 @@ TOKEN-ROTATION (Nutzer-Entscheidung 17.07., bewusstes ToS-Risiko akzeptiert):
 bis zu MAX_FALLBACK_TOKENS Tokens (COINMARKETMAN_TOKEN, _2, _3, ...) - ist
 Token N an seinem 100/Tag-Limit (429), wechselt der Client automatisch auf
 Token N+1. NUR bei 429 gewechselt, nie bei 401 (ein kaputter Token wird durch
-Rotation nicht repariert). Der aktive Index ist Prozess-weit (Modul-State) und
-bewusst NICHT persistiert - ein Neustart/Deploy ist ohnehin der natürliche
-Reset-Punkt, und die echten Tages-Budgets laufen serverseitig bei CMM weiter,
-unabhängig davon, was wir hier merken.
+Rotation nicht repariert). Der aktive Index ist Prozess-weit (Modul-State).
+
+TAGES-RESET (Wave-3-Audit-Fund 18.07.): der Rotations-Zeiger wurde bisher NIE
+zurückgesetzt, mit der Begründung 'ein Neustart/Deploy ist ohnehin der
+natürliche Reset-Punkt'. Der Bot läuft als Dauer-systemd-Service aber OHNE
+geplante Neustarts - ein einzelnes 429 auf Token 1 (z.B. durch eine
+Diagnose-Session) verbannte ihn damit für Wochen, obwohl CMMs Limit ein
+TAGES-Kontingent ist, das serverseitig täglich neu vergeben wird. Der Zeiger
+springt deshalb bei jedem UTC-Tageswechsel zurück auf Slot 1 - unabhängig
+vom Prozess-Neustart, an dem sich nichts geändert hat.
 """
+import datetime
 import json
 import logging
 import os
@@ -53,6 +60,31 @@ RANK_FIELDS = ("pnlDay", "pnlWeek", "pnlMonth", "pnlAllTime")
 # probieren, bis das nächste 429 kommt - reine Verschwendung des ohnehin
 # knappen Budgets.
 _active_token_idx = 0
+# UTC-Datum (YYYY-MM-DD), an dem _active_token_idx zuletzt (zurück-)gesetzt
+# wurde - Grundlage für den Tages-Reset in _maybe_reset_daily().
+_active_token_idx_day = ""
+
+
+def _today_utc() -> str:
+    # Eigene Funktion statt inline, damit Tests den "heutigen Tag" per
+    # Monkeypatch (cmm._today_utc = lambda: "...") kontrollieren können -
+    # dasselbe Muster wie die bestehenden requests.get/os.environ-Patches.
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+
+
+def _maybe_reset_daily() -> None:
+    """CMMs Free-Tier-Limit wird SERVERSEITIG täglich neu vergeben - der
+    Rotationszeiger muss das nachvollziehen, sonst wandert er über Wochen
+    ohne Neustart unwiederbringlich durch alle Token-Slots, obwohl früher
+    gedeckelte Slots längst wieder freies Tageskontingent haben."""
+    global _active_token_idx, _active_token_idx_day
+    today = _today_utc()
+    if _active_token_idx_day != today:
+        if _active_token_idx_day and _active_token_idx:
+            log.info("CMM: neuer Tag (%s) - Token-Rotationszeiger zurück auf "
+                     "Slot 1 (Tageskontingent serverseitig neu vergeben)", today)
+        _active_token_idx = 0
+        _active_token_idx_day = today
 
 
 class CMMClient:
@@ -77,6 +109,7 @@ class CMMClient:
     def token() -> str:
         """Der aktuell aktive Token (für /cmm-Probe & 'ist überhaupt einer
         gesetzt'-Checks) - der erste, der noch nicht als ausgeschöpft gilt."""
+        _maybe_reset_daily()
         toks = CMMClient.tokens()
         if not toks:
             return ""
@@ -84,6 +117,7 @@ class CMMClient:
 
     def _get(self, path: str, params: dict | None = None):
         global _active_token_idx
+        _maybe_reset_daily()
         toks = self.tokens()
         if not toks:
             raise RuntimeError(f"{TOKEN_ENV} fehlt in der .env (per /setcmm setzen)")

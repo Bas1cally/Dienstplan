@@ -110,6 +110,7 @@ def _reset_token_state(cmm):
     muss also zwischen Tests im selben Prozess sauber zurückgesetzt werden,
     sonst leckt der Fortschritt eines Tests in den nächsten."""
     cmm._active_token_idx = 0
+    cmm._active_token_idx_day = ""
 
 
 def test_tokens_collects_primary_and_fallback_slots_in_order():
@@ -204,6 +205,48 @@ def test_get_raises_when_all_tokens_exhausted():
         cmm.requests.get = orig_get
         cmm.os.environ.clear()
         cmm.os.environ.update(orig_env)
+        _reset_token_state(cmm)
+
+
+def test_get_resets_rotation_pointer_on_new_utc_day():
+    """Wave-3-Audit-Fund (18.07.): CMMs 100-Requests-Limit wird TÄGLICH neu
+    vergeben, der Rotationszeiger wurde bisher nie zurückgesetzt - ein Bot
+    als Dauer-systemd-Service ohne geplante Neustarts hätte Token 1 nach
+    einem einzigen 429 für Wochen verbannt. Bei einem UTC-Tageswechsel muss
+    Slot 1 wieder eine Chance bekommen."""
+    import bot.sources.coinmarketman as cmm
+
+    calls = []
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append(headers["Authorization"])
+        if headers["Authorization"] == "Bearer tok1":
+            return _FakeResp(status=429)
+        return _FakeResp(status=200, payload={"ok": True})
+
+    orig_get, orig_env, orig_today = cmm.requests.get, dict(cmm.os.environ), cmm._today_utc
+    cmm.requests.get = fake_get
+    cmm.os.environ[cmm.TOKEN_ENV] = "tok1"
+    cmm.os.environ[f"{cmm.TOKEN_ENV}_2"] = "tok2"
+    _reset_token_state(cmm)
+    try:
+        cmm._today_utc = lambda: "2026-07-17"
+        c = CMMClient("https://api.example/api/external")
+        c.leaderboard()   # tok1 429 -> rotiert auf tok2, Zeiger merkt sich "17."
+        calls.clear()
+        c.leaderboard()   # noch derselbe Tag -> bleibt sticky bei tok2
+        assert calls == ["Bearer tok2"], "Vorbedingung: ohne Tageswechsel bleibt sticky"
+
+        cmm._today_utc = lambda: "2026-07-18"   # neuer UTC-Tag
+        calls.clear()
+        c.leaderboard()
+        assert calls == ["Bearer tok1", "Bearer tok2"], \
+            "neuer Tag -> Slot 1 bekommt wieder eine Chance, statt für immer übersprungen zu bleiben"
+    finally:
+        cmm.requests.get = orig_get
+        cmm.os.environ.clear()
+        cmm.os.environ.update(orig_env)
+        cmm._today_utc = orig_today
         _reset_token_state(cmm)
 
 
