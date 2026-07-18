@@ -4,6 +4,21 @@ Dieses Dokument hält Feature-Ideen fest, die über Session-Grenzen hinweg
 überleben müssen. Die nächste Session klont das Repo frisch — was hier steht,
 ist da; Chat-Verlauf ist es nicht.
 
+> **UPDATE 18.07. (abends) — FLOW-RUNDE (Nutzer: "ein Trade pro Stunde ist
+> das Ziel, konstanter Flow"). Nach dem ersten funktionierenden Live-Tag
+> (9 frische Signale, 3 Einstiege, +57.93$-MELANIA-Zyklus) vier Hebel per
+> AskUserQuestion abgesegnet und aktiviert (alle config.yaml):**
+> 1. `sprint.max_rides_per_leader: 1 -> 2` - das 1er-Limit war der größte
+>    Frequenz-Deckel (5 von 9 Signalen "leader_belegt", alle von der besten
+>    Signal-Maschine). Methodik-Schutz bleibt: 2 statt unbegrenzt, Journal
+>    attribuiert weiter jeden Ritt seinem Leader.
+> 2. `sprint.add_signal_frac: 0.5 -> 0.25` - Halter-Pool (watch 15/15
+>    holding), Überzeugungs-Moment ist das Aufstocken.
+> 3. `lighter.enabled + sprint_promote: true` - zweite Börse als Signal-
+>    Quelle, seit heute mit Staleness-Schutz.
+> 4. `autopilot.reanalyze_hours: 6 -> 3`, `sprint.pool_size: 20 -> 25`,
+>    `analysis.top_n: 90 -> 110` - schnellere Rotation, mehr Breite.
+>
 > **UPDATE 18.07. (später) — ZWEITER STRUKTUR-FUND: die Gates filterten
 > genau die Frequenz-Trader weg, die das '1 Trade pro Stunde'-Ziel liefern
 > könnten.** Beweis aus einem einzigen Analyse-Lauf: 0x12203316 (197 Trips,

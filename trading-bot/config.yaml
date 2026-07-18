@@ -94,14 +94,13 @@ copytrade:
                                # Qualitätslatte (das tun die LARP-/Sprint-Gates),
                                # nur den Größen-Boden.
     top_percent: 2.0           # Top-2% (nach Monats-ROI) gehen in die Tiefenanalyse
-    top_n: 90                  # harter Deckel für die Tiefenanalyse (API-Calls je
-                               # Wallet; 70->90 (17.07.): drittes CMM-Fenster
-                               # (pnlDay) bringt mehr Rohkandidaten - ohne mehr
-                               # Interleave-Plätze würden die neuen Day-Trader nur
-                               # den bisherigen Wochen-/Monats-Kandidaten die
-                               # Plätze streitig machen statt echten Zuwachs zu
-                               # bringen. ~+20 Wallets * ~1.5s Throttle = ~+30s
-                               # je Analyse (HL-eigenes Rate-Limit, nicht CMM-Budget)
+    top_n: 110                 # harter Deckel für die Tiefenanalyse (API-Calls je
+                               # Wallet). 90->110 (18.07., Flow-Runde): mehr Breite
+                               # für den auf 25 vergrößerten Pool; ~+20 Wallets *
+                               # ~1.5s Throttle = ~+30s je Analyse, läuft im
+                               # Hintergrund-Thread (HL-Rate-Limit, kein CMM-Budget).
+                               # Historie: 70->90 (17.07.) fürs dritte CMM-Fenster
+                               # (pnlDay).
     min_score: 35              # Mindest-Score, um als Leader infrage zu kommen
     larp:                      # harte K.O.-Gates gegen Blender (bot/copytrade/larp.py)
       min_round_trips: 30            # weniger Trades = Zufall nicht ausschließbar
@@ -161,7 +160,11 @@ shock:                    # die schnelle Verteidigung - direkt auf 1m-Preisdaten
 
 # === Autopilot: Vollautomatik (server.py / autopilot.py) ===
 autopilot:
-  reanalyze_hours: 6      # Day-Trading: Leader-Rotation alle 6h statt 24h
+  reanalyze_hours: 3      # 6 -> 3 (18.07., Flow-Runde): schnellere Pool-Rotation -
+                          # Wallets, die HEUTE aktiv geworden sind, kommen in
+                          # Stunden statt erst am Folgetag rein, tote Halter
+                          # fliegen doppelt so schnell raus. Läuft im
+                          # Hintergrund-Thread, blockiert den Tick-Loop nicht.
   min_keep_score: 35      # Leader unter diesem Score werden ausgetauscht
   realtime: true          # Edge 2: WebSocket - Leader-Fills wecken den Loop sofort
   autostart: true         # 24/7-Betrieb (VPS/systemd): startet ohne Dashboard-Klick
@@ -229,10 +232,16 @@ sprint:
   max_rides: 20             # 8 -> 20 (17.07.): "Datenflut" heißt so viel vom
                             # 20er-Pool wie möglich gleichzeitig messen, nicht
                             # künstlich auf 8 drosseln, während Kapazität da wäre.
-                            # max_rides_per_leader bleibt bei 1 (unverändert) -
-                            # das ist keine Kapazitätsbremse, sondern verhindert,
-                            # dass EIN Leaders korrelierter Mehrfach-Basket wie
-                            # mehrere unabhängige Messpunkte aussieht.
+  max_rides_per_leader: 2   # 1 -> 2 (18.07., Flow-Runde): das 1er-Limit war der
+                            # größte Frequenz-Deckel des Live-Tags - 5 von 9
+                            # frischen Signalen starben an "leader_belegt", alle
+                            # von der besten Signal-Maschine des Pools. Der
+                            # Methodik-Einwand (korrelierter Mehrfach-Basket
+                            # EINES Leaders sieht aus wie unabhängige Messpunkte)
+                            # bleibt beachtet: 2 statt unbegrenzt, und das
+                            # Journal attribuiert jeden Ritt seinem Leader -
+                            # Korrelation bleibt in den Daten auswertbar, statt
+                            # im Verwerfen zu verschwinden.
   confirm_delay_s: 10       # Flip-Flopper-Schutz: frisches Signal erst nach 10s
                             # durchgehend positiver Leader-PnL reiten, nicht
                             # blind instant (Live-Befund: Leader schießt nach
@@ -261,7 +270,9 @@ sprint:
                             # _maybe_market_gong() wird dadurch komplett zum
                             # No-Op, Mechanismus bleibt im Code für eine
                             # mögliche spätere Reaktivierung.
-  pool_size: 20             # Sprint scannt einen breiteren Leader-Pool als das
+  pool_size: 25             # 20 -> 25 (18.07., Flow-Runde): mehr Scan-Slots für
+                            # die zusätzlichen Kandidaten aus top_n 110 + Lighter.
+                            # Sprint scannt einen breiteren Leader-Pool als das
                             # Hauptbuch (max_leaders: 6). Sprint hält immer nur EINE
                             # Position -> mehr Quellen = weniger Leerlauf, ohne die
                             # Qualität der Einstiege zu senken (bestbewerteter Leader
@@ -287,7 +298,13 @@ sprint:
                             # geben können (0 Signale in ~2h trotz gefixter Sortierung).
   bust_frac: 0.05           # Liquidations-Modell: unter 5% Rest ist der Zyklus geplatzt
   partial_exit_frac: 0.75   # Leader baut >=75% ab -> wir gehen mit raus (Scale-out)
-  add_signal_frac: 0.5      # Aufstockung >=50% oder Richtungs-Flip im Bestand zählt
+  add_signal_frac: 0.25     # 0.5 -> 0.25 (18.07., Flow-Runde): der Pool besteht
+                            # live fast komplett aus Positions-Haltern (watch:
+                            # 15/15 holding) - deren Überzeugungs-Moment ist das
+                            # Aufstocken, und +50% ist dafür eine seltene Hürde.
+                            # +25% fängt deutlich mehr echte Nachkauf-Momente;
+                            # Bestätigungsfenster + Strikes policen schwache.
+                            # Aufstockung >=25% oder Richtungs-Flip im Bestand zählt
                             # als frisches Signal (nur im FLACH-Scan). Grund: der
                             # Richtungs-Pool besteht aus Positions-Tradern - die
                             # eröffnen selten neu (Live: voller Handelstag, 0 frische
@@ -322,15 +339,15 @@ sprint:
 # gleichgewichtet in ein PAPER-Buch, gepreist mit HL-Preisen - reine Messung,
 # kein Einfluss aufs Haupt-Buch. Read-only, Ausführung bleibt Hyperliquid.
 lighter:
-  enabled: false           # AUS: Reine Mess-Spur ohne Einfluss auf Haupt-Buch
-                          # ODER Sprint, solange dieses Flag aus bleibt. Der
-                          # 33-Tage-Report der isolierten Messung war -8.22% -
-                          # das war aber eine andere Mechanik (Dauer-Rebalancing
-                          # auf Zielgewichte), nicht das Sprint-Signalmodell
-                          # (frisches 0->Position, Strike-Bann). Seit 17.07.
-                          # existiert ein Promotion-Pfad ins Sprint-Buch (s.u.
-                          # sprint_promote) - erst EXPLIZIT beide Flags an
-                          # scharf schalten, keine automatische Aktivierung.
+  enabled: true            # AN (18.07., Flow-Runde, Nutzer-Go): Voraussetzung
+                          # für sprint_promote unten - self.lighter wird nur
+                          # bei enabled gebaut. Der alte -8.22%-Report der
+                          # isolierten Messung betraf eine andere Mechanik
+                          # (Dauer-Rebalancing auf Zielgewichte), nicht das
+                          # Sprint-Signalmodell (frisches 0->Position, Strike-
+                          # Bann) - fürs Sprint-Buch policen Strikes/Bans und
+                          # der Zeit+negativ-Cut die Lighter-Leader genauso wie
+                          # jeden HL-Leader.
   auto_discover: true
   coins: [BTC, ETH, SOL, HYPE, DOGE, AVAX, LINK, ARB]  # nur auf HL handelbare
   scan_seconds: 300
@@ -338,7 +355,12 @@ lighter:
   min_equity: 5000
   max_leaders: 5
   copy_ratio: 0.5
-  sprint_promote: false    # Nutzer-Entscheidung (17.07., Option B): Lighter-
+  sprint_promote: true     # AN (18.07., Flow-Runde, Nutzer-Go): zweite Börse
+                          # als unabhängige Signal-Quelle fürs Sprint-Buch,
+                          # inkl. Staleness-Schutz (sprint_snapshots liefert
+                          # leer, wenn der letzte erfolgreiche Scan älter als
+                          # 3x scan_seconds ist).
+                          # Ursprünglich (17.07., Option B): Lighter-
                           # Signale zusätzlich ins Sprint-Buch einspeisen
                           # (eigener lighter:-Adress-Namensraum, kollidiert nie
                           # mit echten HL-Adressen). EIGENER Schalter, getrennt
