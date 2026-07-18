@@ -370,6 +370,22 @@ def test_stats_exposes_position_details():
         assert p["coin"] == "BTC" and p["entry"] == 100.0 and p["unrealized_pnl"] > 0
 
 
+def test_stats_watch_shows_holding_vs_flat_pool_wallets():
+    """Nutzer-Fund 18.07. ('seit gestern Abend keine Signale, egal wie der
+    Pool aussieht'): ohne Sichtbarkeit, ob Pool-Wallets gerade Positionen
+    HALTEN (Baseline != leer - nur Close+Reopen/Flip/Aufstocken triggert
+    noch) oder FLACH sind (nur ein frisches 0->Position-Signal triggert),
+    lässt sich 'Bug oder erwartete Ruhe' nicht unterscheiden."""
+    with tempfile.TemporaryDirectory() as tmp:
+        two = leaders(("0xholder", 80), ("0xflat", 60))
+        b = book(tmp)
+        b.tick(two, [snap("0xholder", 50_000, BTC=500), snap("0xflat", 50_000)], P)
+        s = b.stats(P)["watch"]
+        assert s["tracked"] == 2
+        assert s["holding_now"] == 1 and s["flat_now"] == 1
+        assert s["sample"] == [{"addr": "0xholder"[:10], "coins": ["BTC"]}]
+
+
 def test_bust_floor():
     with tempfile.TemporaryDirectory() as tmp:
         b = _entered(tmp)

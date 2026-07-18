@@ -1211,6 +1211,20 @@ class SprintBook:
             # Vergleichsbasis' - sonst sieht 'scan.fresh_seen == 0' in beiden
             # Fällen identisch aus.
             "baseline_status": self._baseline_status,
+            # Beobachtungs-Diagnose (Nutzer-Fund 18.07.: 'seit gestern Abend
+            # keine Signale, egal wie der Pool aussieht' - Design-Frage statt
+            # Vermutung: hält der Pool schon Positionen (Baseline != leer,
+            # nur ein Close+Reopen/Flip/Aufstocken kann noch triggern) oder
+            # ist er flach (nur ein frisches 0->Position-Signal triggert
+            # überhaupt)? self._baselines IST der zuletzt bekannte Stand -
+            # kein Extra-Datenpunkt nötig, nur bisher nicht nach außen sichtbar.
+            "watch": {
+                "tracked": len(self._baselines),
+                "holding_now": sum(1 for b in self._baselines.values() if b),
+                "flat_now": sum(1 for b in self._baselines.values() if not b),
+                "sample": [{"addr": a[:10], "coins": sorted(b)}
+                          for a, b in list(self._baselines.items())[:10] if b],
+            },
             # Scan-Telemetrie (seit Prozess-Start): macht 'kein Signal kam' von
             # 'Signal kam, wurde verworfen' unterscheidbar
             "scan": {
