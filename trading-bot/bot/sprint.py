@@ -153,6 +153,13 @@ class SprintBook:
         self._ride_start_equity: float | None = None  # Equity bei Ritt-Beginn (PnL-Attribution)
         self._ride_start_t: float | None = None        # Ritt-Beginn (für Zeit+negativ-Cut)
         self._ride_entry_sizes: dict[str, float] = {}  # coin -> |Leader-Größe| beim Einstieg
+        # Ritt-Beginn JE COIN für den Zeit+negativ-Cut im MESS-MODUS (Live-Fund
+        # 18.07.: ein BTC-Mess-Ritt hing 3.3h im Minus, obwohl config.yaml
+        # max_ride_hours: 2 scharf hatte - der Cut lief bisher NUR im Einzel-
+        # Ritt-Zweig, _tick_parallel erfasste nicht einmal Startzeiten).
+        # Persistiert wie _ride_entry_sizes, damit ein Deploy die Uhr laufender
+        # Ritte nicht zurücksetzt.
+        self._ride_start_ts: dict[str, float] = {}
         # Baseline je Leader (addr -> coin -> signierte Größe): nur Übergänge
         # 0 -> Position NACH der Baseline sind frische Signale. Läuft für ALLE
         # Rotations-Leader mit (auch während eines Ritts), damit nach dem Ritt
@@ -553,6 +560,17 @@ class SprintBook:
                 self._settle_one(coin, prices, "tp")
             elif self.cfg.equity + pnl <= self.cfg.equity * self.cfg.bust_frac:
                 self._settle_one(coin, prices, "bust")
+            # Zeit+negativ-Cut JE RITT (Live-Fund 18.07.: lief bisher nur im
+            # Einzel-Ritt-Zweig - ein BTC-Mess-Ritt blutete 3.3h, obwohl
+            # max_ride_hours: 2 scharf war). setdefault seedet Alt-Ritte aus
+            # der Zeit VOR diesem Fix beim ersten Tick (Uhr startet ab jetzt,
+            # kein Sofort-Cut auf Basis einer nie erfassten Startzeit).
+            elif (self.cfg.max_ride_hours > 0 and pnl < 0
+                  and self.clock() - self._ride_start_ts.setdefault(coin, self.clock())
+                      > self.cfg.max_ride_hours * 3600):
+                log.warning("Sprint: Mess-Ritt %s >%.1fh im Minus (%.2f) - "
+                            "Zeit-Cut, Slot frei", coin, self.cfg.max_ride_hours, pnl)
+                self._settle_one(coin, prices, "zeit_negativ")
         # 2. Markt-Schutz: alle Mess-Ritte glattstellen, jeder = eigener Zyklus
         if risk_off:
             if self.paper.sizes():
@@ -661,6 +679,7 @@ class SprintBook:
                 self.paper.execute(coin, -size, px)
         leader = self.ride_leaders.pop(coin, "")
         self._ride_entry_sizes.pop(coin, None)
+        self._ride_start_ts.pop(coin, None)
         self._book_cycle(leader, pnl if pnl is not None else 0.0, reason, coin=coin)
 
     # ---------- IM RITT: halten, nur dem Ride-Leader folgen ----------
@@ -932,6 +951,7 @@ class SprintBook:
         self.paper.execute(coin, notional / price, price)
         if parallel:
             self.ride_leaders[coin] = snap.address
+            self._ride_start_ts[coin] = self.clock()   # Zeit+negativ-Uhr je Ritt
         else:
             self.ride_leader = snap.address
         self._ride_entry_sizes[coin] = abs(self._book_of(snap).get(coin, 0.0))
@@ -1263,6 +1283,12 @@ class SprintBook:
             # zurück -> Bedingung nie erfüllt), der Ritt blutet ggf. weiter.
             self._ride_entry_sizes = {str(c): float(s) for c, s in
                                       (raw.get("ride_entry_sizes") or {}).items()}
+            # Zeit+negativ-Uhren der Mess-Ritte über Neustarts halten - sonst
+            # bekäme jeder Dauer-Bluter nach jedem Deploy wieder die volle
+            # max_ride_hours-Karenz (Alt-States ohne das Feld: leeres Dict,
+            # der setdefault im Tick seedet dann ab jetzt).
+            self._ride_start_ts = {str(c): float(s) for c, s in
+                                   (raw.get("ride_start_ts") or {}).items()}
             # Ausstehender Bilanz-Reset über Neustarts halten (Deep-Dive-Fund):
             # ohne das geht der Reset verloren, wenn ein Neustart mitten in den
             # Mode-Switch-Drain fällt (der Drain hat parallel_rides=false schon
@@ -1328,6 +1354,7 @@ class SprintBook:
                 "total_trades": self.total_trades, "ride_leader": self.ride_leader,
                 "ride_leaders": self.ride_leaders, "ride_start_t": self._ride_start_t,
                 "ride_entry_sizes": self._ride_entry_sizes,
+                "ride_start_ts": self._ride_start_ts,
                 "bilanz_reset_pending": self._bilanz_reset_pending,
                 "strikes": self.strikes, "banned": sorted(self.banned),
                 "confidence": self.confidence,

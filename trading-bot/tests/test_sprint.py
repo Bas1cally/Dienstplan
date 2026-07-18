@@ -1382,6 +1382,57 @@ def test_flip_reentry_stays_instant_even_with_confirm_delay():
             "derselbe Zyklus läuft weiter (kein Zwischen-Settle beim Flip)"
 
 
+# ---------- Zeit+negativ-Cut auch im MESS-MODUS (Live-Fund 18.07.) ----------
+# Ein BTC-Mess-Ritt hing 3.3h im Minus, obwohl max_ride_hours: 2 scharf war -
+# der Cut lief bisher NUR im Einzel-Ritt-Zweig, _tick_parallel erfasste nicht
+# einmal Startzeiten je Ritt.
+
+def _parallel_cut_book(tmp, t, hours=2.0):
+    cfg = SprintConfig(exclude_coins=[], confirm_delay_s=0, parallel_rides=True,
+                       max_ride_hours=hours)
+    return SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+
+
+def test_parallel_time_cut_closes_long_negative_ride():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _parallel_cut_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # LONG, Entry 100
+        assert "BTC" in b.paper.sizes()
+        t["now"] += 2.5 * 3600   # über der 2h-Schwelle, leicht im Minus
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.5, "ETH": 100.0})
+        assert b.paper.sizes() == {}, "Dauer-Bluter wird auch im Mess-Modus gecuttet"
+        assert b.busted == 1
+        assert b.strikes.get("0xbest") == 1, "zeit_negativ ist NICHT strike-exempt"
+
+
+def test_parallel_time_cut_spares_positive_ride():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _parallel_cut_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        t["now"] += 3 * 3600   # lange offen, aber im PLUS (unter TP-Schwelle)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 100.5, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), "im Plus läuft der Ritt weiter Richtung Ziel"
+
+
+def test_parallel_time_cut_clock_survives_restart():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _parallel_cut_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        t["now"] += 1.5 * 3600   # Deploy mitten im Ritt
+        b2 = _parallel_cut_book(tmp, t)
+        assert "BTC" in b2._ride_start_ts, "Uhr überlebt den Neustart"
+        t["now"] += 1 * 3600     # gesamt 2.5h seit dem ECHTEN Start
+        b2.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.5, "ETH": 100.0})
+        assert b2.paper.sizes() == {}, \
+            "Cut rechnet ab dem echten Ritt-Beginn, nicht ab dem Deploy"
+
+
 # ---------- Bestätigungsfenster auch im MESS-MODUS (Wave-3-Fund 18.07.) ----------
 # Audit-Befund: tick() kehrte im parallel_rides-Zweig bisher IMMER vor dem
 # einzigen _process_pending()-Aufruf zurück - config.yaml hatte confirm_delay_s
