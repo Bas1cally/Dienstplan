@@ -196,7 +196,7 @@ scalp:
   max_holding_minutes: 30   # Zeit-Stop - ein Scalp wird nie eine Dauerposition
   max_notional_frac: 0.15   # max. 15% Equity Notional
 
-# === Sprint-Buch: 1000$ x10 (BTC x20, ETH x15) auf den BESTEN Leader ===
+# === Sprint-Buch: 1000$ x10 auf den BESTEN Leader (BTC gesperrt, 19.07.) ===
 # Eigenes Paper-Konto: spiegelt die Positionen des jeweils besten Leaders der
 # laufenden Rotation mit vollem, coin-abhängigem Hebel (leverage_overrides
 # unten). Bei +100$ (10%) Take-Profit -> Gewinn gebucht ("banked"), Konto auf
@@ -208,11 +208,12 @@ sprint:
   equity: 1000
   leverage: 10               # Basis-Hebel für alle Coins ohne eigenen Eintrag
                              # unten in leverage_overrides.
-  leverage_overrides:        # Nutzer (17.07.): BTC/ETH liquider/weniger
-                             # sprunghaft als der Rest - vertragen mehr Hebel,
-                             # ohne am festen +10%-Ziel öfter vorbeizuscalpen.
-    BTC: 20
-    ETH: 15
+  leverage_overrides: {}     # MAJORS-OVERRIDES RAUS (Nutzer 19.07., Edge-Runde:
+                             # "Majors sind wir raus"): BTC x20/ETH x15 waren das
+                             # Experiment vom 17.07. - die Daten sagen dagegen:
+                             # die großen Bleeds kamen von Mega-Hebel-Majors
+                             # (BTC 20x: -180$), ALLE großen Gewinner von
+                             # High-Vol-Coins mit Basis-Hebel. Alles wieder 10x.
   target_profit: 100
   max_positions: 1          # EIN Ritt = EINE Position. Live-Vorfall: Leader
                             # eröffnete einen 7-Coin-Aktien-Korb, der Bot fraß
@@ -232,6 +233,26 @@ sprint:
   max_rides: 20             # 8 -> 20 (17.07.): "Datenflut" heißt so viel vom
                             # 20er-Pool wie möglich gleichzeitig messen, nicht
                             # künstlich auf 8 drosseln, während Kapazität da wäre.
+  trail_frac: 0.3           # EDGE-RUNDE (19.07.): Trailing-TP statt fixem Ziel.
+                            # Ab +target_profit wird NICHT mehr geschlossen,
+                            # sondern der Peak getrailt - Exit erst bei 30%
+                            # Rückfall vom Peak (oder Leader-Exit). Datenbasis:
+                            # ALLE großen Gewinner waren Überschießer (+225/
+                            # +220/+112 bei +100-Ziel) - das fixe Ziel kappte
+                            # systematisch den rechten Tail. Preis: knappe
+                            # Zielerreicher geben bis zu 30% wieder her.
+  hot_hand_extra_rides: 2   # EDGE-RUNDE: Leader mit >= 1 Gewinn-Zyklus im
+                            # EIGENEN Buch bekommen 2 Extra-Slots (also 4
+                            # statt 2) - Kapazität folgt der heißen Hand
+                            # (beste Signal-Quelle wurde 6x leader_belegt
+                            # gedrosselt, während No-Names gleich viel hatten).
+  hot_hand_size_mult: 1.5   # EDGE-RUNDE: ab 2 Gewinn-Zyklen im eigenen Buch
+                            # 1.5x Notional - Größe folgt Beweisstand, niemand
+                            # wird kleiner als Basis (Rookies unverändert 1.0x).
+  trusted_skip_confirm: true # EDGE-RUNDE: bewiesene Leader (>= 1 Gewinn-Zyklus)
+                            # überspringen das 10s-Bestätigungsfenster - früh
+                            # ist bei Momentum die halbe Edge. Das Fenster
+                            # bleibt Anti-Flip-Flopper-Schutz für No-Names.
   max_rides_per_leader: 2   # 1 -> 2 (18.07., Flow-Runde): das 1er-Limit war der
                             # größte Frequenz-Deckel des Live-Tags - 5 von 9
                             # frischen Signalen starben an "leader_belegt", alle
@@ -325,13 +346,14 @@ sprint:
                             # ohnehin nie (nur relevant wenn crypto_only=true) -
                             # 0 = altes/deaktiviertes Verhalten, hier zur
                             # Klarheit explizit gesetzt statt nur implizit tot.
-  exclude_coins: []          # BTC-SPERRE AUFGEHOBEN (Nutzer 17.07.): war raus
-                            # wegen Beta-statt-Alpha + Fee-Falle am fixen
-                            # +10%-Ziel. Jetzt Testlauf mit BTC x20 Hebel (s.o.);
-                            # die max_ride_hours-Zeit+negativ-Cut (2h) verhindert,
-                            # dass ein zäher BTC-Ritt für immer hängen bleibt.
-                            # Nach ~1 Woche Daten (/quest assets, /report) neu
-                            # entscheiden, ob BTC wieder raus muss.
+  exclude_coins: [BTC]       # BTC-SPERRE WIEDER AKTIV (Nutzer 19.07., Edge-
+                            # Runde: "btc sperren, das war nur weil wir null
+                            # Signale hatten"). Der Testlauf vom 17.07. ist
+                            # ausgewertet: BTC-Ritte lieferten die größten
+                            # Bleeds (-167 manuell, -180 zeit_negativ), keinen
+                            # einzigen TP - Beta statt Alpha, wie ursprünglich
+                            # vermutet. Signal-Not besteht nicht mehr (Flow-
+                            # Runde), also zurück zur Sperre.
 
 # === Lighter (zkLighter): fremde Trader auto-entdecken + auf HL messen ===
 # Probe hat bestätigt: Lighter gibt fremde Positionen öffentlich her. Der Bot

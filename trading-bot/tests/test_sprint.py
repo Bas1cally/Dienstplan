@@ -1382,6 +1382,108 @@ def test_flip_reentry_stays_instant_even_with_confirm_delay():
             "derselbe Zyklus läuft weiter (kein Zwischen-Settle beim Flip)"
 
 
+# ---------- Edge-Runde 19.07.: Trailing-TP, Hot-Hand, Trust=Speed ----------
+
+def _edge_book(tmp, t, **overrides):
+    overrides.setdefault("exclude_coins", [])
+    overrides.setdefault("confirm_delay_s", 0)
+    overrides.setdefault("parallel_rides", True)
+    cfg = SprintConfig(**overrides)
+    return SprintBook(cfg, FEE, runtime_dir=Path(tmp), clock=lambda: t["now"])
+
+
+def test_trailing_tp_lets_winner_run_past_target():
+    """Edge-Kern: fixes +10%-Ziel kappte die Überschießer (+225 kam nur durch
+    eine Tick-Lücke durch). Mit trail_frac läuft der Ritt über das Ziel hinaus
+    und schließt erst beim Rückfall vom Peak - als tp, mit dem HÖHEREN PnL."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, trail_frac=0.3)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # LONG Entry 100
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 101.5, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), \
+            "+~150$ ist ÜBER dem 100$-Ziel - früher sofort zu, jetzt läuft er"
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 102.5, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), "Peak steigt weiter (~+240), kein Exit"
+        # Rückfall auf ~+140 = unter 70% vom ~240er-Peak -> Trail zieht
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 101.45, "ETH": 100.0})
+        assert b.paper.sizes() == {}, "Trail-Exit beim Rückfall vom Peak"
+        assert b.won == 1
+        assert b.banked > 120, f"mehr als das fixe Ziel eingesammelt: {b.banked:.2f}"
+
+
+def test_trailing_tp_disabled_keeps_instant_tp():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, trail_frac=0.0)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 101.5, "ETH": 100.0})
+        assert b.paper.sizes() == {} and b.won == 1, "trail aus -> altes Sofort-TP"
+
+
+def test_leader_record_counts_wins_and_exempt_losses():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t)
+        b._book_cycle("0xA", 50.0, "tp")
+        b._book_cycle("0xA", -20.0, "leader_exit")
+        b._book_cycle("0xA", -30.0, "risk_off")   # erzwungen -> zählt nicht
+        assert b.leader_record["0xa"] == {"won": 1, "lost": 1}
+        assert b.wins_of("0xA") == 1
+        # Persistenz über Neustart
+        b2 = _edge_book(tmp, t)
+        assert b2.wins_of("0xa") == 1
+
+
+def test_hot_hand_gets_extra_slots_rookie_stays_capped():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, max_rides_per_leader=1, hot_hand_extra_rides=2)
+        b.leader_record["0xbest"] = {"won": 1, "lost": 0}
+        prices = {"BTC": 100.0, "ETH": 100.0, "SOL": 100.0}
+        b.tick(LED, [snap("0xbest", 50_000)], prices)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], prices)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500, ETH=300)], prices)
+        assert set(b.paper.sizes()) == {"BTC", "ETH"}, \
+            "Hot Hand darf über das Basis-Limit (1) hinaus"
+        rook = leaders(("0xrookie", 60))
+        b.tick(rook, [snap("0xrookie", 50_000)], prices)
+        b.tick(rook, [snap("0xrookie", 50_000, SOL=300)], prices)
+        assert "SOL" in b.paper.sizes()
+        b.tick(rook, [snap("0xrookie", 50_000, SOL=300, BTC=100)], prices)
+        assert b.stats(prices)["scan"]["rejected"].get("leader_belegt") == 1, \
+            "Rookie bleibt beim Basis-Limit gedeckelt"
+
+
+def test_hot_hand_size_mult_after_two_wins():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, hot_hand_size_mult=1.5)
+        b.leader_record["0xbest"] = {"won": 2, "lost": 0}
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        notional = abs(b.paper.sizes()["BTC"]) * 100.0
+        assert 14_800 < notional <= 15_000, \
+            f"1.5x auf die 10k-Basis ab 2 Gewinn-Zyklen, war {notional:.0f}"
+
+
+def test_trusted_leader_skips_confirm_window_rookie_waits():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, confirm_delay_s=10.0, trusted_skip_confirm=True)
+        b.leader_record["0xbest"] = {"won": 1, "lost": 0}
+        two = leaders(("0xbest", 90), ("0xrookie", 50))
+        prices = {"BTC": 100.0, "ETH": 100.0}
+        b.tick(two, [snap("0xbest", 50_000), snap("0xrookie", 50_000)], prices)
+        b.tick(two, [snap("0xbest", 50_000, BTC=500),
+                     snap("0xrookie", 50_000, ETH=300)], prices)
+        assert "BTC" in b.paper.sizes(), "bewiesener Leader: SOFORT drin, kein 10s-Fenster"
+        assert "ETH" not in b.paper.sizes(), "Rookie wartet weiter im Fenster"
+        assert any(p["coin"] == "ETH" for p in b.stats(prices)["pending"])
+
+
 # ---------- Zeit+negativ-Cut auch im MESS-MODUS (Live-Fund 18.07.) ----------
 # Ein BTC-Mess-Ritt hing 3.3h im Minus, obwohl max_ride_hours: 2 scharf war -
 # der Cut lief bisher NUR im Einzel-Ritt-Zweig, _tick_parallel erfasste nicht

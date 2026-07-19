@@ -439,6 +439,28 @@ class SprintConfig:
     # Default 0 = exakt das alte, strenge Verhalten; config.yaml schaltet
     # den Produktivwert scharf.
     confirm_tolerance: float = 0.0
+    # === Edge-Runde (Nutzer 19.07.: "ich brauch die Edge") ===
+    # Trailing-TP: ab Erreichen von target_profit NICHT mehr sofort schließen,
+    # sondern den Peak trailen - Exit erst, wenn der Ritt-PnL um trail_frac
+    # vom Peak zurückfällt (oder der Leader aussteigt). Datenbasis: ALLE
+    # großen Gewinner waren TP-Überschießer (+225/+220/+112 bei +100-Ziel),
+    # die nur durch Tick-Lücken durchkamen - das fixe Ziel kappte systematisch
+    # den rechten Tail. Preis: ein Ritt, der das Ziel nur knapp erreicht, gibt
+    # bis zu trail_frac davon wieder her. 0 = aus (altes Sofort-TP-Verhalten).
+    trail_frac: float = 0.0
+    # Hot-Hand-Konzentration: Leader mit >= 1 GEWINN-Zyklus im EIGENEN Buch
+    # (leader_record, echte Beweise statt Analyse-Scores) bekommen
+    # max_rides_per_leader + hot_hand_extra_rides Slots; ab >= 2 Gewinn-Zyklen
+    # zusätzlich hot_hand_size_mult auf das Notional. Kapazität und Größe
+    # folgen der heißen Hand (0xc9c78160: 3 TP-Gewinner, aber 6x
+    # 'leader_belegt' verworfen) statt Gleichverteilung auf No-Names.
+    # Defaults aus/neutral - config.yaml schaltet scharf.
+    hot_hand_extra_rides: int = 0
+    hot_hand_size_mult: float = 1.0
+    # Trust = Speed: Leader mit >= 1 Gewinn-Zyklus überspringen das
+    # Bestätigungsfenster (confirm_delay_s) - frühester Einstieg für bewiesene
+    # Quellen, das Fenster bleibt Anti-Flip-Flopper-Schutz für Unbekannte.
+    trusted_skip_confirm: bool = False
     # LARP-Strikes: Verlust-Ritt -> Strike +1, Gewinn-Ritt -> Strike -1 (min 0).
     # Bei strike_ban Strikes wird der Leader fürs Sprint-Buch gesperrt.
     strike_ban: int = 2

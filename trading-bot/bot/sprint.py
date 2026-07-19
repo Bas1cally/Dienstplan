@@ -160,6 +160,19 @@ class SprintBook:
         # Persistiert wie _ride_entry_sizes, damit ein Deploy die Uhr laufender
         # Ritte nicht zurücksetzt.
         self._ride_start_ts: dict[str, float] = {}
+        # Gewinn-/Verlust-Zyklen JE LEADER im EIGENEN Buch (Edge-Runde 19.07.):
+        # Grundlage für Hot-Hand-Slots/-Sizing und Trust=Speed. Bewusst aus
+        # ECHTEN Zyklen statt Analyse-Scores - ein Leader ist erst 'bewiesen',
+        # wenn er UNS Geld verdient hat. Verluste aus _STRIKE_EXEMPT-Gründen
+        # (risk_off/markt_zu = erzwungene Schließungen) zählen nicht gegen ihn,
+        # konsistent zur Strike-Philosophie. Persistiert wie strikes/confidence.
+        self.leader_record: dict[str, dict] = {}
+        # Peak-PnL je laufendem Ritt (Trailing-TP): coin -> höchster gesehener
+        # Ritt-PnL; Einzel-Ritt-Modus nutzt den Schlüssel "__single__".
+        # Persistiert, damit ein Deploy den Peak eines laufenden Ritts nicht
+        # vergisst (sonst würde der Trail nach Neustart vom aktuellen PnL aus
+        # neu messen und zu spät/gar nicht ziehen).
+        self._ride_peak: dict[str, float] = {}
         # Baseline je Leader (addr -> coin -> signierte Größe): nur Übergänge
         # 0 -> Position NACH der Baseline sind frische Signale. Läuft für ALLE
         # Rotations-Leader mit (auch während eines Ritts), damit nach dem Ritt
@@ -265,7 +278,7 @@ class SprintBook:
                 self.reset_bilanz()
         # 1. Ziel/Bust hat Vorrang - Zyklus=Ritt, also sofort abrechnen+resetten
         eq = self.paper.equity(prices)
-        if eq >= self.cfg.equity + self.cfg.target_profit:
+        if self.paper.sizes() and self._take_profit_due("__single__", eq - self.cfg.equity):
             self._settle_ride(prices, "tp")
             return
         if eq <= self.cfg.equity * self.cfg.bust_frac:
@@ -365,11 +378,10 @@ class SprintBook:
                 if ko:
                     self._reject(coin, snap.address, ko)
                     continue
-                if self.cfg.confirm_delay_s <= 0:
-                    # Feature AUS: exakt das alte Sofort-Verhalten, kein
-                    # Pending-Umweg (der würde sonst auch bei delay=0 noch
-                    # die "Leader nicht im Minus"-Prüfung anwenden - das wäre
-                    # kein "aus" mehr, sondern eine andere neue Regel).
+                if self.cfg.confirm_delay_s <= 0 or self._skip_confirm(snap.address):
+                    # Feature AUS - oder Trust=Speed (Edge-Runde): ein Leader
+                    # mit bewiesenem Gewinn-Zyklus wartet nicht 10s wie ein
+                    # No-Name, er hat den Flip-Flopper-Verdacht widerlegt.
                     if len(self.paper.sizes()) >= self.cfg.max_positions:
                         self._reject(coin, snap.address, "korb_begrenzt")
                         continue
@@ -517,7 +529,7 @@ class SprintBook:
             if coin in self.paper.sizes():
                 self._reject(coin, leader, "coin_belegt")
                 continue
-            if self._leader_rides(leader) >= self.cfg.max_rides_per_leader:
+            if self._leader_rides(leader) >= self._leader_ride_limit(leader):
                 self._reject(coin, leader, "leader_belegt")
                 continue
             if len(self.paper.sizes()) >= self.cfg.max_rides:
@@ -556,7 +568,7 @@ class SprintBook:
             pnl = self._ride_pnl(coin, prices)
             if pnl is None:
                 continue
-            if pnl >= self.cfg.target_profit:
+            if self._take_profit_due(coin, pnl):
                 self._settle_one(coin, prices, "tp")
             elif self.cfg.equity + pnl <= self.cfg.equity * self.cfg.bust_frac:
                 self._settle_one(coin, prices, "bust")
@@ -597,7 +609,7 @@ class SprintBook:
                 # Flip = neue Richtung, neue Überzeugung -> neuer Mess-Ritt
                 # (das Settle hat den Leader-Slot gerade freigegeben)
                 self._settle_one(coin, prices, "leader_flip")
-                if self._leader_rides(snap.address) < self.cfg.max_rides_per_leader:
+                if self._leader_rides(snap.address) < self._leader_ride_limit(snap.address):
                     self._enter(coin, snap, prices, parallel=True)
             elif abs(leader_sz) <= (1 - self.cfg.partial_exit_frac) * entry_sz:
                 self._settle_one(coin, prices, "leader_scaleout")
@@ -628,7 +640,7 @@ class SprintBook:
                 if opened:
                     self._reject(coin, snap.address, "korb_begrenzt")
                     continue
-                if self._leader_rides(snap.address) >= self.cfg.max_rides_per_leader:
+                if self._leader_rides(snap.address) >= self._leader_ride_limit(snap.address):
                     # 1 Position PRO TRADER: sonst füllt ein aktiver Leader über
                     # mehrere Ticks alle Slots und 7 korrelierte Wetten sähen
                     # aus wie 7 unabhängige Messpunkte (Nutzer-Befund)
@@ -640,7 +652,9 @@ class SprintBook:
                 if len(self.paper.sizes()) >= self.cfg.max_rides:
                     self._reject(coin, snap.address, "max_ritte")
                     continue
-                if self.cfg.confirm_delay_s <= 0:
+                if self.cfg.confirm_delay_s <= 0 or self._skip_confirm(snap.address):
+                    # Trust=Speed (Edge-Runde): bewiesene Leader sofort rein -
+                    # bei Momentum-Signalen ist früh die halbe Edge.
                     before = len(self.paper.sizes())
                     self._enter(coin, snap, prices, parallel=True)
                     opened = len(self.paper.sizes()) > before
@@ -654,6 +668,53 @@ class SprintBook:
     def _leader_rides(self, addr: str) -> int:
         key = addr.lower()
         return sum(1 for a in self.ride_leaders.values() if a.lower() == key)
+
+    def wins_of(self, addr: str) -> int:
+        """Gewinn-Zyklen dieses Leaders im EIGENEN Buch (Edge-Runde)."""
+        return self.leader_record.get(addr.lower(), {}).get("won", 0)
+
+    def _leader_ride_limit(self, addr: str) -> int:
+        """Slot-Limit je Leader: Basis + Hot-Hand-Bonus ab dem ersten
+        bewiesenen Gewinn-Zyklus (Edge-Runde 19.07.: Kapazität folgt der
+        heißen Hand - die beste Signal-Quelle des Live-Tags wurde 6x mit
+        'leader_belegt' gedrosselt, während No-Names dieselben Slots hatten)."""
+        base = self.cfg.max_rides_per_leader
+        if self.wins_of(addr) >= 1:
+            return base + self.cfg.hot_hand_extra_rides
+        return base
+
+    def _size_mult(self, addr: str) -> float:
+        """Notional-Faktor: ab 2 Gewinn-Zyklen im eigenen Buch greift
+        hot_hand_size_mult - Größe folgt dem Beweisstand, nie umgekehrt
+        (niemand wird KLEINER als Basis, Rookies fahren unverändert 1.0x)."""
+        if self.wins_of(addr) >= 2:
+            return self.cfg.hot_hand_size_mult
+        return 1.0
+
+    def _skip_confirm(self, addr: str) -> bool:
+        """Trust = Speed (Edge-Runde): bewiesene Leader (>= 1 Gewinn-Zyklus)
+        überspringen das Bestätigungsfenster - das Fenster bleibt Anti-Flip-
+        Flopper-Schutz für Unbekannte."""
+        return self.cfg.trusted_skip_confirm and self.wins_of(addr) >= 1
+
+    def _take_profit_due(self, key: str, pnl: float) -> bool:
+        """Take-Profit-Entscheidung inkl. Trailing (Edge-Runde 19.07.):
+
+        trail_frac == 0: altes Verhalten - schließen, sobald pnl >= Ziel.
+        trail_frac > 0: das Ziel SCHARF-SCHALTET nur den Trail (Peak wird ab
+        Einstieg mitgeführt) - geschlossen wird erst, wenn der PnL um
+        trail_frac vom Peak zurückfällt. Datenbasis: alle großen Gewinner
+        waren Überschießer (+225/+220/+112 bei +100-Ziel), das fixe Ziel
+        kappte systematisch den rechten Tail. Bewusster Preis: ein Ritt, der
+        das Ziel nur knapp erreicht, gibt bis zu trail_frac davon wieder her -
+        der Trail tauscht garantierte +100 gegen die Chance auf +150/+225."""
+        peak = max(self._ride_peak.get(key, pnl), pnl)
+        self._ride_peak[key] = peak
+        if self.cfg.trail_frac <= 0:
+            return pnl >= self.cfg.target_profit
+        if peak < self.cfg.target_profit:
+            return False
+        return pnl <= peak * (1 - self.cfg.trail_frac)
 
     def _ride_pnl(self, coin: str, prices: dict[str, float]) -> float | None:
         """PnL eines Mess-Ritts auf seiner eigenen 1000$-Basis, konservativ
@@ -680,6 +741,7 @@ class SprintBook:
         leader = self.ride_leaders.pop(coin, "")
         self._ride_entry_sizes.pop(coin, None)
         self._ride_start_ts.pop(coin, None)
+        self._ride_peak.pop(coin, None)
         self._book_cycle(leader, pnl if pnl is not None else 0.0, reason, coin=coin)
 
     # ---------- IM RITT: halten, nur dem Ride-Leader folgen ----------
@@ -932,8 +994,10 @@ class SprintBook:
         lev = self._leverage_for(coin)
         if parallel:
             # Mess-Modus: JEDER Ritt startet auf frischer equity-Basis (1000$),
-            # unabhängig vom Sammelbuch - 1 Signal = 1 Ritt = 1k (Nutzer)
-            notional = direction * lev * self.cfg.equity
+            # unabhängig vom Sammelbuch - 1 Signal = 1 Ritt = 1k (Nutzer).
+            # Hot-Hand-Sizing (Edge-Runde): ab 2 Gewinn-Zyklen im eigenen Buch
+            # skaliert der Einsatz mit (_size_mult) - Größe folgt Beweisstand.
+            notional = direction * lev * self.cfg.equity * self._size_mult(snap.address)
         else:
             equity = self.paper.equity(prices)
             target = direction * lev * equity
@@ -1063,6 +1127,7 @@ class SprintBook:
         self._ride_start_equity = None
         self._ride_start_t = None
         self._ride_entry_sizes.clear()
+        self._ride_peak.pop("__single__", None)
         self._save_state()
 
     def _book_cycle(self, leader: str, pnl: float, reason: str,
@@ -1076,6 +1141,17 @@ class SprintBook:
             self.won += 1
         else:
             self.busted += 1
+
+        # Leader-Bilanz im eigenen Buch (Edge-Runde): Gewinne zählen immer,
+        # Verluste nur, wenn der Grund nicht strike-exempt ist (erzwungene
+        # Schließungen wie risk_off sind nicht die Schuld des Leaders -
+        # dieselbe Logik wie bei den Strikes direkt darunter).
+        if leader:
+            rec = self.leader_record.setdefault(leader.lower(), {"won": 0, "lost": 0})
+            if won:
+                rec["won"] += 1
+            elif reason not in _STRIKE_EXEMPT:
+                rec["lost"] += 1
 
         if leader and reason not in _STRIKE_EXEMPT:
             key = leader.lower()
@@ -1289,6 +1365,11 @@ class SprintBook:
             # der setdefault im Tick seedet dann ab jetzt).
             self._ride_start_ts = {str(c): float(s) for c, s in
                                    (raw.get("ride_start_ts") or {}).items()}
+            self._ride_peak = {str(c): float(s) for c, s in
+                               (raw.get("ride_peak") or {}).items()}
+            self.leader_record = {str(a): {"won": int((r or {}).get("won", 0)),
+                                           "lost": int((r or {}).get("lost", 0))}
+                                  for a, r in (raw.get("leader_record") or {}).items()}
             # Ausstehender Bilanz-Reset über Neustarts halten (Deep-Dive-Fund):
             # ohne das geht der Reset verloren, wenn ein Neustart mitten in den
             # Mode-Switch-Drain fällt (der Drain hat parallel_rides=false schon
@@ -1355,6 +1436,8 @@ class SprintBook:
                 "ride_leaders": self.ride_leaders, "ride_start_t": self._ride_start_t,
                 "ride_entry_sizes": self._ride_entry_sizes,
                 "ride_start_ts": self._ride_start_ts,
+                "ride_peak": self._ride_peak,
+                "leader_record": self.leader_record,
                 "bilanz_reset_pending": self._bilanz_reset_pending,
                 "strikes": self.strikes, "banned": sorted(self.banned),
                 "confidence": self.confidence,
