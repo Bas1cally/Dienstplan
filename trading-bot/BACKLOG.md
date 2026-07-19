@@ -1,100 +1,81 @@
-# Backlog — geplante Features (noch nicht gebaut)
+# Backlog — Quest-Bot
 
-Dieses Dokument hält Feature-Ideen fest, die über Session-Grenzen hinweg
-überleben müssen. Die nächste Session klont das Repo frisch — was hier steht,
-ist da; Chat-Verlauf ist es nicht.
+Dieses Dokument hält fest, was über Session-Grenzen hinweg überleben muss.
+Die nächste Session klont das Repo frisch — was hier steht, ist da;
+Chat-Verlauf ist es nicht.
+
+**Lage (19.07.):** Der Quest-Bot (Sprint-Buch) ist das EINZIGE aktive Buch.
+Das Haupt-Copy-Buch handelt seit 15.07. nicht mehr (`feed_only: true` — es
+liefert nur noch Preise/Snapshots/Discovery für Quest), alle Beobachter
+(Anomaly/Orderbook/TWAP/Labs) sind aus. Alles unter OFFEN ist Quest.
 
 ---
 
-## MASTERPLAN 19.07. — „Vom Flow zur Profitabilität"
+## OFFEN — nächste Bauplätze (Quest)
 
-> **REVISION (gleicher Tag, Nutzer-Veto): Phasen A+B VERWORFEN, ersetzt
-> durch die EDGE-RUNDE (gebaut + deployt).** Nutzer: "du denkst zu sehr
-> wie eine ich-muss-sicher-sein-Maschine, ich brauch die Edge und nicht
-> diesen lieber-dämpfen-Bullshit." Statt Stop-Loss/Rookie-Dämpfung wurde
-> die in den Daten sichtbare Edge bewaffnet (alles config-schaltbar,
-> Commit f0b4423): Trailing-TP (trail_frac 0.3 - Überschießer laufen
-> lassen statt bei +10% kappen), Hot-Hand-Konzentration (leader_record:
-> >=1 Gewinn-Zyklus -> 4 Slots, >=2 -> 1.5x Notional), Trust=Speed
-> (bewiesene Leader ohne Bestätigungsfenster), BTC-Sperre wieder aktiv +
-> Majors-Overrides raus ("das war nur weil wir null Signale hatten").
-> Phasen C (Kohorten-Analytik), D (Elite-Umschaltung) und E (Live-
-> Readiness) bleiben unverändert gültig und sind der nächste Bauplatz.
+### 1. Kohorten-Analytik `/quest cohorts` (Masterplan Phase C — als NÄCHSTES)
+Journal-Auswertung je (1) Quelle (HL vs `lighter:`), (2) Hebel-Klasse,
+(3) Exit-Reason (jetzt inkl. `plus_lock`/Trail-tp), (4) Coin-Klasse
+(Krypto vs `xyz:`) — jeweils Anzahl, Winrate, Summen-PnL, Ø-PnL; dazu
+eine tägliche Digest-Zeile. Beantwortet die offenen Steuerfragen aus
+Daten statt Bauchgefühl: Lighter weiter zulassen/vorfiltern? Zeit-Cut-
+Schwelle richtig? Trail-frac 0.3 optimal? Plus-Lock-Schwellen richtig?
 
-**Lagebild nach 48h Live-Iteration:** Der Flow steht (2+ Zyklen/Stunde,
-alle 4 Flow-Hebel liefern nachweisbar). Die Bilanz NICHT: 8✅/15💥 über
-Nacht, Schatztruhe von +58,87$ auf +6,66$. Muster in den Daten: TP-Gewinner
-sind GROSS (+225 PUMP, +112 LTC), Verluste sind VIELE MITTLERE
-(zeit_negativ-Cuts -20 bis -180). Zwei strukturelle Löcher: (1) zwischen
-Bust (-95%!) und dem 2h-Zeit-Cut existiert KEIN Verlust-Deckel je Ritt -
-ein 20x-BTC-Ritt darf 2h lang bis -180$ bluten; (2) jeder Ritt fährt volle
-Größe, egal ob der Leader 10 Confidence-Punkte hat oder ein vorfilterloser
-Lighter-Rookie ist (lighter:366058 kostete -166$ Lehrgeld über 3 Ritte,
-bevor der Bann griff). Der Plan behebt das in Phasen - jede Phase liefert
-für sich Nutzen, keine hängt von einer späteren ab.
+### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
+Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
+abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3 Zyklen bei >= 60%
+Zyklus-Winrate im EIGENEN Buch (`leader_record` existiert seit der
+Edge-Runde) -> Elite-Pool für den Einzel-Ritt. Dazu Confidence-
+Kalibrierung: STAR_THRESHOLD 100 ist mit +5/Gewinn praktisch unerreichbar
+(20 TP-Zyklen EINES Leaders) - runter auf ~25-30 ODER Vergabe anheben,
+sonst bleibt das Star-System toter Code. Absorbiert auch die alte offene
+Frage „Star-Bonus im Haupt-Buch-Score": das Haupt-Buch handelt nicht mehr
+(feed_only) - der „codeweite Star-Filter" von damals heißt heute Elite-
+Pool-Zulassung, es gibt keinen zweiten Einhängepunkt mehr.
 
-### Phase A — Verlust-Deckel je Ritt (größter PnL-Hebel, klein im Code)
-`sprint.max_ride_loss_frac` (z.B. 0.10 = 100$ auf 1000$-Basis): Ritt wird
-geschlossen, sobald sein PnL unter -frac*equity fällt - in BEIDEN Modi,
-mit Strike (eigener Reason `stop_loss`). Begründung: TP-Ziel ist +10%;
-mehr als -10% je Ritt zu riskieren ist strukturell asymmetrisch. Alle
-Nacht-Verluste über -100$ wären gedeckelt gewesen. EHRLICHE UNBEKANNTE:
-wie viele TP-Gewinner zwischenzeitlich unter -10% notierten (und vom Stop
-gekillt worden wären), wissen wir nicht - deshalb loggt jedes Settle ab
-sofort `min_pnl` (tiefster Ritt-Stand) ins Journal, damit die Schwelle
-nach ein paar Tagen DATENBASIERT kalibrierbar ist. Paper-Messung darf
-mutig starten: Stop sofort scharf auf 0.12, Kalibrierung folgt.
-
-### Phase B — Rookie-/Confidence-Sizing (Lehrgeld strukturell senken)
-Notional-Faktor je Leader-Vertrauen statt flacher voller Größe:
-- Rookie (noch kein abgeschlossener Zyklus in unserem Buch): 0.5x
-- ab erstem Gewinn-Zyklus: 1.0x
-- ab Confidence >= 25: 1.25x (Deckel)
-Lighter-Leader (kein LARP-Vorfilter möglich) sind IMMER Rookies beim
-Start. Damit kostet die Wahrheitsfindung über einen schlechten Leader
-halb so viel, gute Leader verdienen mit Aufschlag - das Strike-System
-bleibt der Richter, nur der Einsatz skaliert mit dem Beweisstand.
-Braucht: Zyklus-Historie je Leader (aus confidence + won/busted je
-Leader ableitbar; ggf. kleines `leader_record`-Dict persistieren).
-
-### Phase C — Kohorten-Analytik (Entscheidungen aus Daten, nicht Anekdoten)
-Neuer Befehl `/quest cohorts` + tägliche Digest-Zeile: Journal-Auswertung
-je (1) Quelle (HL vs `lighter:`), (2) Hebel-Klasse (3x/5x/10x/15-20x),
-(3) Exit-Reason, (4) Coin-Klasse (Krypto vs xyz:) - jeweils Anzahl,
-Winrate, Summen-PnL, Ø-PnL. Beantwortet die offenen Steuerfragen direkt:
-BTC-20x behalten? (Nutzer wollte „nach einer Woche filtern"), Lighter
-weiter zulassen/vorfiltern?, Zeit-Cut-Schwelle richtig? Ohne diese
-Auswertung bleibt jede dieser Entscheidungen Bauchgefühl.
-
-### Phase D — Elite-Umschaltung (das dokumentierte ENDZIEL sauber erreichen)
-Kriterien DEFINIEREN (nicht mehr ad hoc), wann `parallel_rides: false`
-kommt: z.B. >= 100 abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3
-Zyklen bei >= 60% Zyklus-Winrate im EIGENEN Buch -> diese bilden den
-Elite-Pool für den Einzel-Ritt (voller Einsatz, Bestätigungsfenster,
-Star-Preemption). Dazu Confidence-Kalibrierung: STAR_THRESHOLD 100 ist
-mit +5/Gewinn praktisch unerreichbar (20 TP-Zyklen EINES Leaders) -
-runter auf ~25-30 ODER Vergabe anheben, sonst bleibt das Star-System
-toter Code. Mess-Modus läuft bis dahin als Daten-Lieferant weiter.
-
-### Phase E — Live-Readiness (erst nach 2+ Wochen positivem Elite-Paper)
-Sprint-Live-Executor hinter eigenem Flag (echte Orders statt Paper),
-mit den vorhandenen Sicherungen (Hebel-Kappung ist schon live-treu);
+### 3. Live-Readiness (Masterplan Phase E — bewusst zuletzt)
+Sprint-Live-Executor hinter eigenem Flag (echte Orders statt Paper), mit
+den vorhandenen Sicherungen (Hebel-Kappung ist schon live-treu);
 Slippage-/Fee-Validierung gegen echte Fills; Kill-Switch + Tages-
-Verlustlimit auf Sprint-Ebene. BEWUSST zuletzt: erst wenn die Strategie
-im Paper nachweislich verdient, lohnt Ausführungs-Engineering.
+Verlustlimit auf Sprint-Ebene. Erst nach 2+ Wochen positivem Elite-Paper.
 
-### Hygiene (nebenbei, kein eigener Meilenstein)
+### 4. Report-Fix für den Mess-Modus — WIEDER AKUT
+`report.py`s Sprint-Block liest `sprint_book.json`s rohes `realized_pnl`/
+`trades` als „Zyklus N läuft" - unter `parallel_rides: true` FALSCH
+(kumulierte Realisierung statt aktueller Zyklus; verlässlich ist nur
+`banked` aus `sprint_cycles.json`). War als „niedrige Priorität, erst
+wenn parallel_rides wieder aktiv" archiviert - parallel_rides IST seit
+17.07. wieder aktiv, der Fehler steht also live in jedem /report.
+
+### 5. CMM/HyperTracker-Ausbau (Discovery füttert den Quest-Pool)
+Details im Archiv-Abschnitt unten („CMM/HyperTracker-Ausbau") - kurz:
+(a) Tiefen-Scoring via closed-trades/summary für die Top-K je Analyse,
+(b) Smart-Money-Kohorten (segmentIds 8/9/10) als zusätzliche Quelle,
+(c) Positions-API statt eigener Fills-Rekonstruktion (langfristig),
+(d) Kohorten-Bias als MarketGuard-Input. Budget: 100 Req/Tag je Token.
+
+### 6. Hygiene
 - Telegram `getUpdates`-Timeouts häufen sich (Server->Telegram zäh) -
   Long-Polling-Timeout/Retry im Notifier prüfen.
-- Audit-Kadenz beibehalten: nach jeder größeren Bau-Phase ein
-  Read-only-Deep-Dive (Wave-Muster) vor dem nächsten Umbau.
-- BACKLOG konsolidieren: erledigte Updates in einen „Archiv"-Abschnitt.
+- Audit-Kadenz: nach jeder größeren Bau-Phase ein Read-only-Deep-Dive
+  (Wave-Muster) vor dem nächsten Umbau.
 
-**Empfohlene Reihenfolge: A (sofort, kleinster Eingriff/größter Hebel) ->
-B -> C parallel zur laufenden Messung -> D erst bei erfüllten Kriterien ->
-E zuletzt. A+B zusammen hätten die Nacht-Bilanz von -52$ Drawdown auf
-grob -20$ gedämpft, ohne einen einzigen Gewinner zu verkleinern (alle
-Gewinner kamen von etablierten Leadern in Voll-Größe).**
+---
+
+## ARCHIV — Chronik & erledigte Specs (Kontext für neue Sessions)
+
+### Masterplan 19.07. „Vom Flow zur Profitabilität" (Kern erledigt/revidiert)
+Phasen A (Stop-Loss je Ritt) + B (Rookie-Dämpfung) wurden am selben Tag
+per Nutzer-Veto VERWORFEN ("ich brauch die Edge und nicht diesen
+lieber-dämpfen-Bullshit") und durch die EDGE-RUNDE ersetzt (Commit
+f0b4423): Trailing-TP (`trail_frac 0.3`), Hot-Hand-Konzentration
+(`leader_record`: >=1 Gewinn -> 4 Slots, >=2 -> 1.5x Notional),
+Trust=Speed (`trusted_skip_confirm`), BTC-Sperre + Majors-Overrides raus.
+Direkt danach (gleicher Tag, Commit f90f00b): Plus-Sicherung
+(`plus_lock_arm 30`/`plus_lock_floor 5` - „sobald wir im Plus sind nie
+mit Minus rausgehen", strike-exempt) + `/quest amnestie` (Strikes+Bans
+auf null, Confidence/leader_record bleiben - die alten Urteile entstanden
+unterm alten Exit-Regime). Phasen C/D/E leben oben unter OFFEN weiter.
 
 > **UPDATE 18.07. (abends) — FLOW-RUNDE (Nutzer: "ein Trade pro Stunde ist
 > das Ziel, konstanter Flow"). Nach dem ersten funktionierenden Live-Tag
@@ -251,9 +232,8 @@ Gewinner kamen von etablierten Leadern in Voll-Größe).**
 > Discovery, Sprint selbst. Kein Code gelöscht — reversibel per Config,
 > falls eine Spur später wieder Entwicklungsfokus verdient.
 >
-> Bekannter Report-Anzeige-Fehler (noch NICHT gefixt, nur dokumentiert; seit
-> dem Umschalten auf `parallel_rides: false` nicht mehr im Normalbetrieb
-> sichtbar, betrifft nur eine künftige erneute Mess-Phase):
+> Bekannter Report-Anzeige-Fehler (INZWISCHEN WIEDER AKUT, siehe OFFEN #4
+> oben - parallel_rides ist seit 17.07. wieder aktiv; Original-Vermerk:
 > `report.py`s Sprint-Block liest `sprint_book.json`s rohes
 > `realized_pnl`/`trades` als „Zyklus N läuft: Equity X" — das ist unter
 > Einzel-Ritt korrekt (Buch wird zwischen Zyklen resettet), war aber unter
@@ -356,9 +336,10 @@ Gewinner kamen von etablierten Leadern in Voll-Größe).**
 
 ---
 
-## Confidence Points / interner LARP-Star-Rang (Sprint-basiert)
+## Confidence Points / interner LARP-Star-Rang (ARCHIV/Referenz-Spec)
 
 **Status:** UMGESETZT (QOL-Runde, 15.07.2026). Läuft im Sprint-Buch.
+Offen daran ist nur noch die Schwellen-Kalibrierung — siehe OFFEN #2.
 
 **Auftrag des Nutzers (wörtlich sinngemäß):**
 Wenn ein Leader einen Sprint erfolgreich beendet und banked, bekommt er
@@ -424,11 +405,12 @@ Restliche Feinheiten: „fuchsen wir aus, wenn es soweit ist" (Nutzer).
 
 ---
 
-## CMM/HyperTracker-Ausbau (nach der Discovery-Reform)
+## CMM/HyperTracker-Ausbau (OFFEN — Detail zu OFFEN #5 oben)
 
 **Status:** Discovery über das perp-pnl-Board ist LIVE (13.07.2026). Die API
 kann deutlich mehr — Spec: github.com/Coin-Market-Man/hypertracker-skills
-(SKILL.md). Budget beachten: Free-Tier = 100 Requests/TAG.
+(SKILL.md). Budget beachten: Free-Tier = 100 Requests/TAG (je Token,
+Multi-Token-Rotation seit 17.07. mit Tages-Reset seit 18.07.).
 
 Kandidaten für später, nach Nutzen sortiert:
 1. **Tiefen-Scoring via `GET /closed-trades/summary?address=…`** — echte
@@ -451,13 +433,13 @@ Kandidaten für später, nach Nutzen sortiert:
    keine Confidence-Reduktion. Bann friert Confidence implizit ein (gebannte
    Leader werden vor `_enter` abgewiesen, können also nie mehr Punkte
    verdienen — kein Sonderfall-Code nötig).
-3. **Noch offen — der *breitere* codeweite Filter:** Sprint-interner Teil
-   **ERLEDIGT** (Star-Vorrang bei gleichzeitigen Signalen + Preemption eines
-   profitablen Ritts). Weiterhin offen und bewusst NICHT Teil der QOL-Runde
-   (Nutzer-Entscheidung: „nur Sprint-intern jetzt"): ein Star-Bonus im
-   Haupt-Buch-Leaderboard-Score (`rotate_leaders`)? Voraussetzung/Boost für
-   den Sprung auf echtes Kapital? Kernidee klar (Star = codeweites
-   Qualitätssignal), konkrete Einhängepunkte für später offen.
+3. ~~Der *breitere* codeweite Filter~~ **ÜBERHOLT (19.07., BACKLOG-
+   Aufräumen):** Sprint-interner Teil war ERLEDIGT (Star-Vorrang +
+   Preemption). Der damals offene Rest — „Star-Bonus im Haupt-Buch-
+   Leaderboard-Score" — ist gegenstandslos: das Haupt-Buch handelt seit
+   15.07. nicht mehr (`feed_only`), es GIBT keinen zweiten Einhängepunkt.
+   Die lebende Nachfolge-Idee (Star/Record als Zulassung zum Elite-
+   Einzel-Ritt und später zum echten Kapital) steckt in OFFEN #2.
 4. ~~Sichtbarkeit~~ **ERLEDIGT:** `/sprint` und `/sprint pool` zeigen ⭐ bei
    `confidence >= 100`; Journal-Kind `sprint_star` + Telegram-Push beim
    Erreichen der 100.
