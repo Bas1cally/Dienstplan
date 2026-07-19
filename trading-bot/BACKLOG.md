@@ -6,8 +6,20 @@ ist da; Chat-Verlauf ist es nicht.
 
 ---
 
-## MASTERPLAN 19.07. — „Vom Flow zur Profitabilität" (Nutzer: „Überleg dir
-## wie du das alles besser machst")
+## MASTERPLAN 19.07. — „Vom Flow zur Profitabilität"
+
+> **REVISION (gleicher Tag, Nutzer-Veto): Phasen A+B VERWORFEN, ersetzt
+> durch die EDGE-RUNDE (gebaut + deployt).** Nutzer: "du denkst zu sehr
+> wie eine ich-muss-sicher-sein-Maschine, ich brauch die Edge und nicht
+> diesen lieber-dämpfen-Bullshit." Statt Stop-Loss/Rookie-Dämpfung wurde
+> die in den Daten sichtbare Edge bewaffnet (alles config-schaltbar,
+> Commit f0b4423): Trailing-TP (trail_frac 0.3 - Überschießer laufen
+> lassen statt bei +10% kappen), Hot-Hand-Konzentration (leader_record:
+> >=1 Gewinn-Zyklus -> 4 Slots, >=2 -> 1.5x Notional), Trust=Speed
+> (bewiesene Leader ohne Bestätigungsfenster), BTC-Sperre wieder aktiv +
+> Majors-Overrides raus ("das war nur weil wir null Signale hatten").
+> Phasen C (Kohorten-Analytik), D (Elite-Umschaltung) und E (Live-
+> Readiness) bleiben unverändert gültig und sind der nächste Bauplatz.
 
 **Lagebild nach 48h Live-Iteration:** Der Flow steht (2+ Zyklen/Stunde,
 alle 4 Flow-Hebel liefern nachweisbar). Die Bilanz NICHT: 8✅/15💥 über
