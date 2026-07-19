@@ -280,6 +280,14 @@ class LighterShadow:
         # den Staleness-Schutz in sprint_snapshots().
         self._last_scan_ok = 0.0
         self._leaders: list = []
+        # addr -> letzter bekannter Snapshot JE Konto (Live-Fund 19.07.: rank()
+        # wählt alle scan_seconds die Top-max_leaders nach Aktivität NEU - fällt
+        # ein Konto aus der Liste, während Sprint gerade seinen Ritt reitet,
+        # wurde der Ritt als 'leader_rotated' ZWANGSGESCHLOSSEN, obwohl der
+        # Leader real weiter da ist. Discovery-Churn ist kein Leader-Exit.
+        # Über diesen Cache bleiben geritten werdende Leader im Sprint-Feed,
+        # egal was die Top-Liste gerade tut.)
+        self._known: dict[str, "LeaderSnapshot"] = {}
 
     def tick(self, hl_prices: dict[str, float]) -> None:
         if not hl_prices:
@@ -290,6 +298,8 @@ class LighterShadow:
             try:
                 self._leaders = self.source.rank()
                 self._last_scan_ok = self.clock()
+                for s in self._leaders:
+                    self._known[str(s.address)] = s
             except Exception as e:
                 log.warning("Lighter-Ranking fehlgeschlagen: %s", str(e)[:80])
         if not self._leaders:
@@ -311,7 +321,8 @@ class LighterShadow:
             self.paper.execute(o.coin, o.delta_size, o.price)
 
     def sprint_snapshots(self, hl_prices: dict[str, float],
-                         prefix: str = "lighter:") -> tuple[list[dict], list]:
+                         prefix: str = "lighter:",
+                         keep: set | None = None) -> tuple[list[dict], list]:
         """Liefert die zuletzt gescannten Lighter-Leader im Sprint-tick()-Format
         (leaders, snapshots) - Nutzer-Entscheidung (17.07., Option B): Sprint
         soll Lighter-Signale direkt lesen können, nicht nur isoliert im
@@ -333,28 +344,48 @@ class LighterShadow:
         keine Fill-Historie hergibt.
 
         Staleness-Schutz (Wave-3-Audit-Fund 18.07.): tick() setzt self._leaders
-        NUR bei erfolgreichem rank() neu - schlägt der Scan wiederholt fehl
-        (z.B. Lighter-API über Stunden nicht erreichbar), blieb der Cache
-        bisher UNBEGRENZT lange gültig, ohne Zeitstempel-Prüfung. Ein Sprint-
-        Ritt über einen so eingefrorenen Lighter-Leader hätte dessen (real
-        längst geschlossene) Position für immer als offen gesehen - leader_
-        exit hätte nie gefeuert. Ab dem 3-fachen Scan-Intervall ohne
-        erfolgreichen Scan gelten die Snapshots als nicht mehr vertrauenswürdig
-        genug für frische Sprint-Ritte (0 Leader = 0 neue Signale, bestehende
-        Sprint-Ritte über diesen Leader laufen unabhängig weiter - Strikes/
-        Zeit+negativ-Cut policen sie wie gehabt)."""
-        if self.clock() - self._last_scan_ok > 3 * self.cfg.scan_seconds:
-            return [], []
+        NUR bei erfolgreichem rank() neu - ab dem 3-fachen Scan-Intervall ohne
+        erfolgreichen Scan liefert die Top-Liste NICHTS mehr (keine neuen
+        Signale aus eingefrorenen Daten). AUSNAHME (19.07.): Leader aus `keep`
+        (= Sprint reitet sie GERADE) werden auch bei Staleness aus dem Cache
+        weiter bedient - ein Daten-Ausfall bei Lighter darf einen laufenden
+        Ritt nicht als falschen 'leader_rotated' zwangsschließen; tp/bust/
+        zeit_negativ sichern den Ritt unabhängig davon ab (dasselbe Prinzip
+        wie der HL-Tracker: 'Stale ist ehrlich besser als falsch-leer').
+
+        keep (Live-Fund 19.07.): rank() wählt die Top-max_leaders je Scan NEU -
+        Discovery-Churn warf geritten werdende Leader aus dem Feed und ihr Ritt
+        wurde als 'leader_rotated' zwangsgeschlossen (BTC -14.30, lighter:30323
+        fiel schlicht aus der Top-5). Adressen in `keep` (OHNE Präfix) bleiben
+        über den _known-Cache im Feed, solange ihr Ritt läuft.
+
+        KEIN Preis-Filter mehr im Buch (19.07.): Coins sind bereits beim
+        Snapshot-Bau whitelist-gemappt (map_coin); ein transient fehlender
+        HL-Preis ließ einen Coin sonst aus dem Buch flackern - Baseline sah 0,
+        Coin kam zurück, zählte fälschlich als FRISCHES Signal (bzw. löste
+        einen falschen leader_exit aus). _enter() weist unpreisbare Coins
+        ohnehin mit 'kein_hl_preis' ab - dort gehört der Preis-Check hin,
+        nicht in die Buch-Stabilität."""
         LIGHTER_SPRINT_SCORE = 15.0
+        keep_addrs = {str(a) for a in (keep or set())}
         leaders: list[dict] = []
         snaps: list = []
-        for snap in self._leaders[: self.cfg.max_leaders]:
-            pos = {c: p for c, p in snap.positions.items() if hl_prices.get(c)}
-            if not pos:
-                continue
+        have: set[str] = set()
+
+        def add(snap) -> None:
+            if not snap.positions:
+                return
             addr = f"{prefix}{snap.address}"
             leaders.append({"address": addr, "score": LIGHTER_SPRINT_SCORE, "weight": 1.0})
-            snaps.append(LeaderSnapshot(addr, snap.equity, pos))
+            snaps.append(LeaderSnapshot(addr, snap.equity, dict(snap.positions)))
+            have.add(str(snap.address))
+
+        if self.clock() - self._last_scan_ok <= 3 * self.cfg.scan_seconds:
+            for snap in self._leaders[: self.cfg.max_leaders]:
+                add(snap)
+        for a in sorted(keep_addrs):
+            if a not in have and a in self._known:
+                add(self._known[a])
         return leaders, snaps
 
     def stats(self, hl_prices: dict[str, float]) -> dict:

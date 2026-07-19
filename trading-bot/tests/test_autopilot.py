@@ -299,7 +299,7 @@ def test_sprint_tick_inputs_merges_lighter_when_promote_enabled():
     ap.copier = type("C", (), {"last_snapshots": ["snap1"], "last_prices": {"BTC": 1.0}})()
 
     class _FakeLighter:
-        def sprint_snapshots(self, prices):
+        def sprint_snapshots(self, prices, keep=None):
             assert prices == {"BTC": 1.0}
             return ([{"address": "lighter:1", "score": 15.0, "weight": 1.0}],
                     ["lighter_snap"])
@@ -318,7 +318,7 @@ def test_sprint_tick_inputs_ignores_lighter_when_promote_disabled():
     ap.copier = type("C", (), {"last_snapshots": ["snap1"], "last_prices": {}})()
 
     class _BoomLighter:
-        def sprint_snapshots(self, prices):
+        def sprint_snapshots(self, prices, keep=None):
             raise AssertionError("darf nicht aufgerufen werden, wenn sprint_promote aus ist")
 
     ap.lighter = _BoomLighter()
@@ -623,7 +623,7 @@ def test_cmd_quest_pool_shows_lighter_signals_when_promoted():
         ap.sprint_leaders = [{"address": "0x" + "1" * 40, "score": 70}]
 
         class _FakeLighter:
-            def sprint_snapshots(self, prices):
+            def sprint_snapshots(self, prices, keep=None):
                 return ([{"address": "lighter:42", "score": 15.0, "weight": 1.0}],
                         [LeaderSnapshot("lighter:42", 1000.0, {
                             "BTC": LeaderPosition(coin="BTC", size=1.0, entry=100.0,
@@ -645,7 +645,7 @@ def test_cmd_quest_pool_omits_lighter_section_when_not_promoted():
         ap.sprint_leaders = [{"address": "0x" + "1" * 40, "score": 70}]
 
         class _BoomLighter:
-            def sprint_snapshots(self, prices):
+            def sprint_snapshots(self, prices, keep=None):
                 raise AssertionError("darf nicht aufgerufen werden, wenn sprint_promote aus ist")
 
         ap.lighter = _BoomLighter()

@@ -1266,8 +1266,19 @@ class Autopilot:
         leaders = self.sprint_leaders
         snaps = self.copier.last_snapshots if self.copier else []
         if self.lighter and self.cfg.lighter.sprint_promote:
+            # Gerade gerittene Lighter-Leader bleiben IMMER im Feed (keep,
+            # Live-Fund 19.07.): rank() wählt die Top-Liste je Scan neu -
+            # Discovery-Churn warf einen Leader mitten im Ritt aus dem Feed
+            # und der Ritt wurde als 'leader_rotated' zwangsgeschlossen
+            # (BTC -14.30), obwohl der Leader real weiter existiert.
+            riding: set[str] = set()
+            if self.sprint:
+                pre = "lighter:"
+                for a in list(self.sprint.ride_leaders.values()) + [self.sprint.ride_leader]:
+                    if a.startswith(pre):
+                        riding.add(a[len(pre):])
             extra_leaders, extra_snaps = self.lighter.sprint_snapshots(
-                self.copier.last_prices if self.copier else {})
+                self.copier.last_prices if self.copier else {}, keep=riding)
             leaders = leaders + extra_leaders
             snaps = snaps + extra_snaps
         return leaders, snaps

@@ -163,11 +163,17 @@ def test_rank_filters_and_tops():
     assert addrs[0] == "1", "aktivstes Konto zuerst (Equity x Positionen)"
 
 
-def test_sprint_snapshots_prefixes_addresses_and_filters_priceable_coins():
+def test_sprint_snapshots_prefixes_addresses_and_keeps_full_book():
     """Nutzer-Entscheidung (17.07., Option B): Lighter-Leader fürs Sprint-Buch
     bekommen einen eigenen Adress-Namensraum (lighter:-Präfix), damit sie nie
     mit echten HL-Adressen in strikes/banned/confidence kollidieren. Score
-    bewusst fix und niedrig (kein Ranking-API bei Lighter)."""
+    bewusst fix und niedrig (kein Ranking-API bei Lighter).
+
+    Kontrakt-Änderung 19.07.: KEIN Preis-Filter mehr im Buch - ein transient
+    fehlender HL-Preis ließ Coins aus dem Buch flackern (Baseline sah 0, Coin
+    kam zurück -> falsches frisches Signal bzw. falscher leader_exit). Coins
+    sind bereits per map_coin whitelist-gemappt; unpreisbare weist _enter()
+    mit 'kein_hl_preis' ab - dort gehört der Check hin."""
     import tempfile
 
     from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
@@ -179,15 +185,16 @@ def test_sprint_snapshots_prefixes_addresses_and_filters_priceable_coins():
         sh._leaders = [LeaderSnapshot("42", 10_000.0, {
             "BTC": LeaderPosition(coin="BTC", size=1.0, entry=100.0,
                                   position_value=1000.0, leverage=1),
-            "UNPRICEABLE": LeaderPosition(coin="UNPRICEABLE", size=1.0, entry=1.0,
-                                          position_value=1.0, leverage=1),
+            "MOMENTAN_OHNE_PREIS": LeaderPosition(coin="MOMENTAN_OHNE_PREIS", size=1.0,
+                                                  entry=1.0, position_value=1.0, leverage=1),
         })]
         sh._last_scan_ok = sh.clock()
         leaders, snaps = sh.sprint_snapshots({"BTC": 65_000.0})
 
     assert leaders == [{"address": "lighter:42", "score": 15.0, "weight": 1.0}]
     assert len(snaps) == 1 and snaps[0].address == "lighter:42"
-    assert list(snaps[0].positions.keys()) == ["BTC"], "unpreisbarer Coin rausgefiltert"
+    assert sorted(snaps[0].positions) == ["BTC", "MOMENTAN_OHNE_PREIS"], \
+        "Buch bleibt VOLLSTÄNDIG stabil - kein Preis-Flackern in der Baseline"
 
 
 def test_sprint_snapshots_respects_max_leaders_cap():
@@ -210,22 +217,58 @@ def test_sprint_snapshots_respects_max_leaders_cap():
     assert len(leaders) == 2 and len(snaps) == 2
 
 
-def test_sprint_snapshots_drops_leader_without_any_priceable_position():
+def test_sprint_snapshots_drops_leader_with_empty_book():
+    """Nur Leader ganz OHNE Positionen fliegen raus (nichts zu beobachten) -
+    seit 19.07. NICHT mehr Leader, deren Coins nur gerade keinen Preis haben
+    (das war die Flacker-Quelle für falsche frische Signale)."""
     import tempfile
 
-    from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
+    from bot.copytrade.tracker import LeaderSnapshot
     from bot.sources.lighter import LighterShadow
 
     cfg = LighterConfig()
     with tempfile.TemporaryDirectory() as tmp:
         sh = LighterShadow(cfg, 0.00045, source=LighterSource(cfg), runtime_dir=Path(tmp))
-        sh._leaders = [LeaderSnapshot("9", 10_000.0, {
-            "UNPRICEABLE": LeaderPosition(coin="UNPRICEABLE", size=1.0, entry=1.0,
-                                          position_value=1.0, leverage=1),
-        })]
+        sh._leaders = [LeaderSnapshot("9", 10_000.0, {})]
         sh._last_scan_ok = sh.clock()
         leaders, snaps = sh.sprint_snapshots({"BTC": 65_000.0})
     assert leaders == [] and snaps == []
+
+
+def test_sprint_snapshots_keep_survives_topn_churn():
+    """Live-Fund 19.07.: rank() wählt die Top-max_leaders je Scan NEU - fiel
+    ein Konto aus der Liste, während Sprint seinen Ritt ritt, wurde der Ritt
+    als 'leader_rotated' zwangsgeschlossen (BTC -14.30, lighter:30323).
+    Adressen in `keep` müssen aus dem _known-Cache im Feed bleiben."""
+    import tempfile
+
+    from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
+    from bot.sources.lighter import LighterShadow
+
+    def _snap(addr):
+        return LeaderSnapshot(addr, 10_000.0, {
+            "BTC": LeaderPosition(coin="BTC", size=1.0, entry=100.0,
+                                  position_value=1000.0, leverage=1)})
+
+    cfg = LighterConfig(max_leaders=2, scan_seconds=300)
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        sh = LighterShadow(cfg, 0.00045, source=LighterSource(cfg),
+                           runtime_dir=Path(tmp), clock=lambda: t["now"])
+        sh._known["30323"] = _snap("30323")          # frueher gescannt
+        sh._leaders = [_snap("111"), _snap("222")]   # 30323 aus Top-2 gefallen
+        sh._last_scan_ok = t["now"]
+        leaders, _ = sh.sprint_snapshots({"BTC": 65_000.0}, keep={"30323"})
+        addrs = [l["address"] for l in leaders]
+        assert "lighter:30323" in addrs, "geritten werdender Leader bleibt im Feed"
+        assert "lighter:111" in addrs and "lighter:222" in addrs
+
+        # Auch bei STALE Scans: keep wird weiter bedient, Top-Liste nicht
+        t["now"] += 3 * cfg.scan_seconds + 1
+        leaders, _ = sh.sprint_snapshots({"BTC": 65_000.0}, keep={"30323"})
+        addrs = [l["address"] for l in leaders]
+        assert addrs == ["lighter:30323"], \
+            "stale: keine NEUEN Signale mehr, aber der laufende Ritt bleibt versorgt"
 
 
 def test_sprint_snapshots_uses_cached_leaders_no_extra_network_call():
