@@ -1484,6 +1484,52 @@ def test_trusted_leader_skips_confirm_window_rookie_waits():
         assert any(p["coin"] == "ETH" for p in b.stats(prices)["pending"])
 
 
+def test_plus_lock_closes_green_before_it_turns_red():
+    """Nutzer 19.07.: 'sobald wir im Plus sind sollten wir nie mit Minus
+    rausgehen' - Ritte standen im Plus und endeten Stunden später per
+    Zeit-Cut im Minus. Peak >= arm -> Rückfall auf floor schließt grün."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, plus_lock_arm=30.0, plus_lock_floor=5.0)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)          # Entry 100
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 100.5, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), "~+41$ Peak - läuft weiter Richtung Ziel"
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 100.1, "ETH": 100.0})
+        assert b.paper.sizes() == {}, "Rückfall auf ~+1$ (<= floor 5) -> gesichert raus"
+        assert b.won == 1 and b.banked > 0, "klein-grün verbucht statt später rot"
+        assert b.strikes == {}, "plus_lock ist strike-exempt (unsere Regel)"
+
+
+def test_plus_lock_not_armed_below_threshold():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, plus_lock_arm=30.0, plus_lock_floor=5.0)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 100.2, "ETH": 100.0})
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.8, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), \
+            "Peak (~+11$) blieb unter arm (30$) - Sicherung nie scharf, Ritt läuft"
+
+
+def test_amnesty_clears_strikes_and_bans_keeps_positive_proof():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t)
+        b.strikes = {"0xa": 2, "0xb": 1}
+        b.banned = {"0xa"}
+        b.confidence = {"0xc": 10}
+        b.leader_record = {"0xc": {"won": 2, "lost": 0}}
+        n_strikes, n_bans = b.amnesty()
+        assert (n_strikes, n_bans) == (2, 1)
+        assert b.strikes == {} and b.banned == set()
+        assert b.confidence == {"0xc": 10}, "Confidence bleibt"
+        assert b.wins_of("0xc") == 2, "Gewinn-Historie bleibt"
+        b2 = _edge_book(tmp, t)
+        assert b2.strikes == {} and b2.banned == set(), "Amnestie überlebt Neustart"
+
+
 # ---------- Zeit+negativ-Cut auch im MESS-MODUS (Live-Fund 18.07.) ----------
 # Ein BTC-Mess-Ritt hing 3.3h im Minus, obwohl max_ride_hours: 2 scharf war -
 # der Cut lief bisher NUR im Einzel-Ritt-Zweig, _tick_parallel erfasste nicht

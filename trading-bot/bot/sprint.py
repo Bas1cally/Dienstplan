@@ -52,6 +52,7 @@ _REASON_TXT = {
     "star_preempt": "Star-Signal hat übernommen",
     "zeit_negativ": "zu lange im Minus (Zeit-Cut)",
     "markt_zu": "Börsen-Schluss (Gewinn gesichert)",
+    "plus_lock": "Plus gesichert (war im Plus - kein Minus-Exit)",
 }
 # Kein Strike: nicht die Entscheidung/Schuld des Leaders - erzwungene/externe
 # Schließung, sein eigenes Verhalten war dabei irrelevant. 'markt_zu' = unsere
@@ -63,7 +64,11 @@ _REASON_TXT = {
 # das soll wie jeder andere Verlust-Ritt einen Strike geben (pnl<0 in
 # _book_cycle heilt/striked wie gehabt, ein GEWINN-Manual-Close striked
 # also weiterhin nicht).
-_STRIKE_EXEMPT = {"risk_off", "markt_zu"}
+_STRIKE_EXEMPT = {"risk_off", "markt_zu", "plus_lock"}
+# 'plus_lock' (Nutzer 19.07.: "sobald wir im Plus sind sollten wir nie mit
+# Minus rausgehen") ist UNSERE Gewinn-Sicherungs-Regel, nicht die Entscheidung
+# des Leaders - und der Exit landet per Definition um breakeven-positiv, ein
+# Strike dafür wäre doppelt unfair.
 
 # Confidence-Points/Star (BACKLOG.md, Nutzer-Entscheidung 15.07.): NUR das
 # eigene, durchgehaltene +10%-Ziel (tp) und eine Star-Preemption (der Bot
@@ -280,6 +285,11 @@ class SprintBook:
         eq = self.paper.equity(prices)
         if self.paper.sizes() and self._take_profit_due("__single__", eq - self.cfg.equity):
             self._settle_ride(prices, "tp")
+            return
+        if self.paper.sizes() and self._plus_lock_due("__single__", eq - self.cfg.equity):
+            for coin in list(self.paper.sizes()):
+                self._close_coin(coin, prices, "plus_lock")
+            self._settle_ride(prices, "plus_lock")
             return
         if eq <= self.cfg.equity * self.cfg.bust_frac:
             self._settle_ride(prices, "bust")
@@ -570,6 +580,8 @@ class SprintBook:
                 continue
             if self._take_profit_due(coin, pnl):
                 self._settle_one(coin, prices, "tp")
+            elif self._plus_lock_due(coin, pnl):
+                self._settle_one(coin, prices, "plus_lock")
             elif self.cfg.equity + pnl <= self.cfg.equity * self.cfg.bust_frac:
                 self._settle_one(coin, prices, "bust")
             # Zeit+negativ-Cut JE RITT (Live-Fund 18.07.: lief bisher nur im
@@ -715,6 +727,22 @@ class SprintBook:
         if peak < self.cfg.target_profit:
             return False
         return pnl <= peak * (1 - self.cfg.trail_frac)
+
+    def _plus_lock_due(self, key: str, pnl: float) -> bool:
+        """Plus-Sicherung (Nutzer 19.07.: 'sobald wir im Plus sind sollten wir
+        nie mit Minus rausgehen' - Live-Muster: Ritte standen ordentlich im
+        Plus und wurden Stunden später vom Zeit-Cut oder Leader-Exit im MINUS
+        beendet). Hat der Ritt-Peak einmal plus_lock_arm erreicht, wird beim
+        Rückfall auf plus_lock_floor geschlossen - klein-grün statt rot.
+        Greift nur UNTER dem Trail-Bereich (ab target_profit übernimmt der
+        Trailing-TP, dessen Exit-Schwelle weit über dem Floor liegt). Der
+        Peak wird von _take_profit_due mitgeführt (läuft im selben Tick davor).
+        arm=0 heißt aus."""
+        c = self.cfg
+        if c.plus_lock_arm <= 0:
+            return False
+        peak = self._ride_peak.get(key, 0.0)
+        return peak >= c.plus_lock_arm and pnl <= c.plus_lock_floor
 
     def _ride_pnl(self, coin: str, prices: dict[str, float]) -> float | None:
         """PnL eines Mess-Ritts auf seiner eigenen 1000$-Basis, konservativ
@@ -1414,6 +1442,27 @@ class SprintBook:
             self.paper.reset()
             self.ride_leader = ""
             self._save_state()
+
+    def amnesty(self) -> tuple[int, int]:
+        """Strike-Amnestie (Nutzer 19.07.: 'Resete alle strikes wir sammeln
+        nochmal frisch Daten mit trail'): Strikes UND Bans (Bans sind nur die
+        Konsequenz von 2 Strikes) auf null - die alten Urteile entstanden
+        unter dem alten Exit-Regime (fixes TP, kein Trail, keine Plus-
+        Sicherung): Ritte standen im Plus und wurden trotzdem im Minus
+        beendet, der Strike traf den Leader für UNSER Exit-Timing.
+        Confidence und leader_record bleiben - positive Beweise verfallen
+        nicht durch einen Regelwechsel. Gibt (gelöschte Strikes, gelöschte
+        Bans) zurück."""
+        n_strikes = sum(1 for v in self.strikes.values() if v > 0)
+        n_bans = len(self.banned)
+        self.strikes.clear()
+        self.banned.clear()
+        log.warning("Sprint: AMNESTIE - %d Strike-Konten und %d Bans gelöscht "
+                    "(frische Datensammlung unter Trail-Regeln)", n_strikes, n_bans)
+        if self.journal:
+            self.journal.record("sprint_amnesty", strikes=n_strikes, bans=n_bans)
+        self._save_state()
+        return n_strikes, n_bans
 
     def reset_bilanz(self) -> None:
         log.warning("Sprint: Mess-Modus -> Einzel-Ritt - Bilanz (Zyklus/"

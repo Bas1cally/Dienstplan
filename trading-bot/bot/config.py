@@ -461,6 +461,15 @@ class SprintConfig:
     # Bestätigungsfenster (confirm_delay_s) - frühester Einstieg für bewiesene
     # Quellen, das Fenster bleibt Anti-Flip-Flopper-Schutz für Unbekannte.
     trusted_skip_confirm: bool = False
+    # Plus-Sicherung (Nutzer 19.07.: "sobald wir im Plus sind sollten wir nie
+    # mit Minus rausgehen"): hat der Ritt-Peak einmal plus_lock_arm ($ auf der
+    # 1000er-Basis) erreicht, wird beim Rückfall auf plus_lock_floor sofort
+    # geschlossen (Reason plus_lock, strike-exempt - unsere Regel, nicht die
+    # des Leaders). Greift nur unter dem Trail-Bereich; ab target_profit
+    # übernimmt der Trailing-TP. arm=0 heißt aus (Default, config.yaml
+    # schaltet scharf).
+    plus_lock_arm: float = 0.0
+    plus_lock_floor: float = 0.0
     # LARP-Strikes: Verlust-Ritt -> Strike +1, Gewinn-Ritt -> Strike -1 (min 0).
     # Bei strike_ban Strikes wird der Leader fürs Sprint-Buch gesperrt.
     strike_ban: int = 2

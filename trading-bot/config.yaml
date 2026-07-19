@@ -253,6 +253,20 @@ sprint:
                             # überspringen das 10s-Bestätigungsfenster - früh
                             # ist bei Momentum die halbe Edge. Das Fenster
                             # bleibt Anti-Flip-Flopper-Schutz für No-Names.
+  plus_lock_arm: 30         # PLUS-SICHERUNG (Nutzer 19.07.: "sobald wir im Plus
+                            # sind sollten wir nie mit Minus rausgehen" - Ritte
+                            # standen ordentlich im Plus und endeten Stunden
+                            # später per Zeit-Cut/Leader-Exit im Minus). War der
+                            # Ritt-Peak einmal >= 30$ (3% der Basis, deutlich
+                            # über dem Fee-Rauschen von ~9$), wird beim Rückfall
+                            # auf plus_lock_floor geschlossen: klein-grün statt
+                            # rot. 0 = aus.
+  plus_lock_floor: 5        # Exit-Schwelle der Plus-Sicherung: bei Rückfall auf
+                            # +5$ raus (Puffer, damit der Exit nach dem nächsten
+                            # Tick real noch grün landet, nicht bei exakt 0
+                            # ins Minus rutscht). Reason "plus_lock" ist
+                            # strike-exempt: unsere Sicherungs-Regel, nicht die
+                            # Entscheidung des Leaders.
   max_rides_per_leader: 2   # 1 -> 2 (18.07., Flow-Runde): das 1er-Limit war der
                             # größte Frequenz-Deckel des Live-Tags - 5 von 9
                             # frischen Signalen starben an "leader_belegt", alle

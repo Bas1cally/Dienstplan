@@ -514,6 +514,17 @@ class Autopilot:
             return ("🧹 <b>Bilanz zurückgesetzt</b>: Zyklus 1, Schatztruhe 0,00 $"
                     + (f" ({n} offene Position(en) davor geschlossen)" if n else "")
                     + ".\nStrikes/Bans/Confidence bleiben erhalten.")
+        if arg.lower().strip() in ("amnestie", "amnesty"):
+            # Nutzer 19.07.: frische Datensammlung unter den Trail-Regeln -
+            # die alten Strikes entstanden unterm alten Exit-Regime (Ritte
+            # standen im Plus, wurden trotzdem im Minus beendet - der Strike
+            # traf den Leader für UNSER Exit-Timing).
+            n_strikes, n_bans = self.sprint.amnesty()
+            self._force_analysis = True   # Ex-Gebannte sofort zurück in den Kandidatenkreis
+            return (f"🕊 <b>Amnestie</b>: {n_strikes} Strike-Konten und {n_bans} Bans "
+                    f"gelöscht - alle Leader starten unter den neuen Trail-Regeln "
+                    f"bei null. Confidence/Gewinn-Historie bleiben. "
+                    f"Frische Analyse angestoßen (Ex-Gebannte können zurück in den Pool).")
         if arg.lower().strip() == "pool":
             if not self.sprint_leaders:
                 return "Quest-Pool ist leer (nächste Analyse: /analyze)."
@@ -671,7 +682,7 @@ class Autopilot:
                 f"\n"
                 f"<i>/quest close = schließen | /quest pool = Pool-Liste | "
                 f"/quest assets = Krypto vs. Aktien | /quest funnel = Trichter-Diagnose | "
-                f"/quest reset = Bilanz auf 0</i>")
+                f"/quest reset = Bilanz auf 0 | /quest amnestie = Strikes/Bans löschen</i>")
 
     def _sprint_asset_breakdown(self) -> str:
         """Krypto vs. Aktien-Perps NUR für die aktuelle Ära (seit dem letzten
