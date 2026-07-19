@@ -4,6 +4,86 @@ Dieses Dokument hält Feature-Ideen fest, die über Session-Grenzen hinweg
 überleben müssen. Die nächste Session klont das Repo frisch — was hier steht,
 ist da; Chat-Verlauf ist es nicht.
 
+---
+
+## MASTERPLAN 19.07. — „Vom Flow zur Profitabilität" (Nutzer: „Überleg dir
+## wie du das alles besser machst")
+
+**Lagebild nach 48h Live-Iteration:** Der Flow steht (2+ Zyklen/Stunde,
+alle 4 Flow-Hebel liefern nachweisbar). Die Bilanz NICHT: 8✅/15💥 über
+Nacht, Schatztruhe von +58,87$ auf +6,66$. Muster in den Daten: TP-Gewinner
+sind GROSS (+225 PUMP, +112 LTC), Verluste sind VIELE MITTLERE
+(zeit_negativ-Cuts -20 bis -180). Zwei strukturelle Löcher: (1) zwischen
+Bust (-95%!) und dem 2h-Zeit-Cut existiert KEIN Verlust-Deckel je Ritt -
+ein 20x-BTC-Ritt darf 2h lang bis -180$ bluten; (2) jeder Ritt fährt volle
+Größe, egal ob der Leader 10 Confidence-Punkte hat oder ein vorfilterloser
+Lighter-Rookie ist (lighter:366058 kostete -166$ Lehrgeld über 3 Ritte,
+bevor der Bann griff). Der Plan behebt das in Phasen - jede Phase liefert
+für sich Nutzen, keine hängt von einer späteren ab.
+
+### Phase A — Verlust-Deckel je Ritt (größter PnL-Hebel, klein im Code)
+`sprint.max_ride_loss_frac` (z.B. 0.10 = 100$ auf 1000$-Basis): Ritt wird
+geschlossen, sobald sein PnL unter -frac*equity fällt - in BEIDEN Modi,
+mit Strike (eigener Reason `stop_loss`). Begründung: TP-Ziel ist +10%;
+mehr als -10% je Ritt zu riskieren ist strukturell asymmetrisch. Alle
+Nacht-Verluste über -100$ wären gedeckelt gewesen. EHRLICHE UNBEKANNTE:
+wie viele TP-Gewinner zwischenzeitlich unter -10% notierten (und vom Stop
+gekillt worden wären), wissen wir nicht - deshalb loggt jedes Settle ab
+sofort `min_pnl` (tiefster Ritt-Stand) ins Journal, damit die Schwelle
+nach ein paar Tagen DATENBASIERT kalibrierbar ist. Paper-Messung darf
+mutig starten: Stop sofort scharf auf 0.12, Kalibrierung folgt.
+
+### Phase B — Rookie-/Confidence-Sizing (Lehrgeld strukturell senken)
+Notional-Faktor je Leader-Vertrauen statt flacher voller Größe:
+- Rookie (noch kein abgeschlossener Zyklus in unserem Buch): 0.5x
+- ab erstem Gewinn-Zyklus: 1.0x
+- ab Confidence >= 25: 1.25x (Deckel)
+Lighter-Leader (kein LARP-Vorfilter möglich) sind IMMER Rookies beim
+Start. Damit kostet die Wahrheitsfindung über einen schlechten Leader
+halb so viel, gute Leader verdienen mit Aufschlag - das Strike-System
+bleibt der Richter, nur der Einsatz skaliert mit dem Beweisstand.
+Braucht: Zyklus-Historie je Leader (aus confidence + won/busted je
+Leader ableitbar; ggf. kleines `leader_record`-Dict persistieren).
+
+### Phase C — Kohorten-Analytik (Entscheidungen aus Daten, nicht Anekdoten)
+Neuer Befehl `/quest cohorts` + tägliche Digest-Zeile: Journal-Auswertung
+je (1) Quelle (HL vs `lighter:`), (2) Hebel-Klasse (3x/5x/10x/15-20x),
+(3) Exit-Reason, (4) Coin-Klasse (Krypto vs xyz:) - jeweils Anzahl,
+Winrate, Summen-PnL, Ø-PnL. Beantwortet die offenen Steuerfragen direkt:
+BTC-20x behalten? (Nutzer wollte „nach einer Woche filtern"), Lighter
+weiter zulassen/vorfiltern?, Zeit-Cut-Schwelle richtig? Ohne diese
+Auswertung bleibt jede dieser Entscheidungen Bauchgefühl.
+
+### Phase D — Elite-Umschaltung (das dokumentierte ENDZIEL sauber erreichen)
+Kriterien DEFINIEREN (nicht mehr ad hoc), wann `parallel_rides: false`
+kommt: z.B. >= 100 abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3
+Zyklen bei >= 60% Zyklus-Winrate im EIGENEN Buch -> diese bilden den
+Elite-Pool für den Einzel-Ritt (voller Einsatz, Bestätigungsfenster,
+Star-Preemption). Dazu Confidence-Kalibrierung: STAR_THRESHOLD 100 ist
+mit +5/Gewinn praktisch unerreichbar (20 TP-Zyklen EINES Leaders) -
+runter auf ~25-30 ODER Vergabe anheben, sonst bleibt das Star-System
+toter Code. Mess-Modus läuft bis dahin als Daten-Lieferant weiter.
+
+### Phase E — Live-Readiness (erst nach 2+ Wochen positivem Elite-Paper)
+Sprint-Live-Executor hinter eigenem Flag (echte Orders statt Paper),
+mit den vorhandenen Sicherungen (Hebel-Kappung ist schon live-treu);
+Slippage-/Fee-Validierung gegen echte Fills; Kill-Switch + Tages-
+Verlustlimit auf Sprint-Ebene. BEWUSST zuletzt: erst wenn die Strategie
+im Paper nachweislich verdient, lohnt Ausführungs-Engineering.
+
+### Hygiene (nebenbei, kein eigener Meilenstein)
+- Telegram `getUpdates`-Timeouts häufen sich (Server->Telegram zäh) -
+  Long-Polling-Timeout/Retry im Notifier prüfen.
+- Audit-Kadenz beibehalten: nach jeder größeren Bau-Phase ein
+  Read-only-Deep-Dive (Wave-Muster) vor dem nächsten Umbau.
+- BACKLOG konsolidieren: erledigte Updates in einen „Archiv"-Abschnitt.
+
+**Empfohlene Reihenfolge: A (sofort, kleinster Eingriff/größter Hebel) ->
+B -> C parallel zur laufenden Messung -> D erst bei erfüllten Kriterien ->
+E zuletzt. A+B zusammen hätten die Nacht-Bilanz von -52$ Drawdown auf
+grob -20$ gedämpft, ohne einen einzigen Gewinner zu verkleinern (alle
+Gewinner kamen von etablierten Leadern in Voll-Größe).**
+
 > **UPDATE 18.07. (abends) — FLOW-RUNDE (Nutzer: "ein Trade pro Stunde ist
 > das Ziel, konstanter Flow"). Nach dem ersten funktionierenden Live-Tag
 > (9 frische Signale, 3 Einstiege, +57.93$-MELANIA-Zyklus) vier Hebel per
