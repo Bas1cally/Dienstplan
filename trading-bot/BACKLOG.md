@@ -40,10 +40,24 @@ true`). Gegenwetten laufen unter der Identität `counter:<addr>` mit
 eigenem Strike-/Record-Konto - verliert die Gegenwette wiederholt
 (Leader hatte doch recht), bannt sie sich selbst (`counter_gesperrt`).
 Gebannte HL-Wallets bleiben dafür beobachtet (Toxic-Watch in
-`_tracked_addresses`, max 12); Flip eines Toxic-Leaders dreht die
-Gegenwette im selben Tick. `/quest cohorts` weist die Counter-Spur
-als eigene Quelle aus - nach 24h zeigt sich, ob Toxic Flow eine
-eigene Edge ist. V1 ohne (invertiertes) Bestätigungsfenster.
+`_tracked_addresses`, max 12). `/quest cohorts` weist die Counter-Spur
+als eigene Quelle aus. V1 ohne (invertiertes) Bestätigungsfenster.
+
+**v2 (gleicher Tag, Nutzer-Korrektur nach 90 min Live-Daten): Gegenwetten
+folgen dem Toxic-Leader NICHT mehr beim Exit.** Journal-Beweis: ALLE 9
+v1-Counter-Zyklen endeten durch Leader-Aktionen (2x leader_exit inkl.
+-204$ Zwangsschluss mitten im Drawdown, 3x leader_flip = invertiertes
+Mitspiegeln eines Flip-Flopper-Churns, 1x scaleout, 3x rotated), KEINER
+über eigene Ziele. Konsequente These: liegt der Leader falsch, ist auch
+sein Exit-Timing kein Signal. Eine Gegenwette ist UNSER Trade und endet
+nur noch über die eigene Mechanik (Trail-TP, Plus-Lock, Zeit-Cut, Bust).
+Die counter:-Bans aus v1 (counter:0x8d7d49eb, counter:lighter:702386)
+sind Artefakte des falschen Exit-Regimes - nach dem v2-Deploy einmal
+`/quest amnestie` fahren. Nebenfixe: Spiegel-Anzeige von strikes/banned/
+confidence auf 18 Zeichen (Counter-Identitäten kollidierten als
+'counter:0x'), und max_leverage() schreibt einen LEEREN Lookup-Cache
+nicht mehr fest (Bot startete im 429-Sturm -> hl_max_leverage war die
+ganze Prozess-Laufzeit null, PENGU-Kappung de facto aus).
 
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100

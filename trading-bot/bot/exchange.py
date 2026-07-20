@@ -137,7 +137,17 @@ class HyperliquidClient:
                 except Exception:
                     log.warning("max_leverage-Metadaten für DEX %r nicht ladbar",
                                dex, exc_info=True)
-            self._max_leverage_cache = cache
+            # LEEREN Cache NICHT festschreiben (Spiegel-Fund 20.07.: der Bot
+            # startete in einen HL-429-Sturm, meta() schlug für alle DEXs
+            # fehl, das leere Dict wurde für die GESAMTE Prozess-Laufzeit
+            # gecacht - jeder Entry stand mit hl_max_leverage=null im
+            # Journal und die PENGU-Hebel-Kappung war de facto aus). Ohne
+            # Daten beim nächsten Aufruf erneut versuchen; das ist billig,
+            # weil der Lookup nur je Einstieg läuft, nicht je Tick.
+            if cache:
+                self._max_leverage_cache = cache
+            else:
+                return None
         return self._max_leverage_cache.get(coin)
 
     # ---------- Account ----------

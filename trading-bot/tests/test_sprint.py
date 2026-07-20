@@ -1514,29 +1514,12 @@ def test_toxic_counter_disabled_keeps_reject():
         assert b.stats(P)["scan"]["rejected"].get("leader_gesperrt") == 1
 
 
-def test_toxic_counter_not_falsely_flip_settled_and_follows_exit():
-    """Gegenposition ist per Design entgegengesetzt - die Flip-Erkennung darf
-    das NICHT als Leader-Flip deuten. Steigt der Toxic-Leader aus, endet
-    auch die Gegenwette (leader_exit)."""
-    with tempfile.TemporaryDirectory() as tmp:
-        t = {"now": 1_000_000.0}
-        b = _edge_book(tmp, t, counter_toxic=True)
-        b.banned.add("0xbad")
-        two = leaders(("0xbest", 80))
-        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
-        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
-        assert "BTC" in b.paper.sizes()
-        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
-        assert "BTC" in b.paper.sizes(), \
-            "Leader hält unverändert LONG - Gegenwette läuft weiter, kein Fehl-Flip"
-        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
-        assert b.paper.sizes() == {}, "Toxic-Leader raus -> Gegenwette endet"
-
-
-def test_toxic_counter_flip_reenters_inverted():
-    """Flippt der Toxic-Leader (LONG->SHORT), wird die alte Gegenwette
-    abgerechnet und im selben Tick invertiert neu eröffnet (sein Flip zählt
-    über add_signal_frac als frisches Signal)."""
+def test_toxic_counter_ignores_leader_exit_and_flip():
+    """v2 (Nutzer 20.07.: 'wenn wir counter traden macht es keinen Sinn wenn
+    die Position zu macht weil der Leader beendet'): eine Gegenwette ist
+    UNSER Trade - weder Exit noch Flip des Toxic-Leaders beenden sie.
+    Journal-Beweis v1: alle 9 Counter-Zyklen endeten durch Leader-Aktionen
+    (inkl. -204$ Zwangsschluss mitten im Drawdown), keiner über eigene Ziele."""
     with tempfile.TemporaryDirectory() as tmp:
         t = {"now": 1_000_000.0}
         b = _edge_book(tmp, t, counter_toxic=True)
@@ -1546,32 +1529,54 @@ def test_toxic_counter_flip_reenters_inverted():
         b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
         assert b.paper.sizes().get("BTC", 0) < 0
         cycles_before = b.won + b.busted
+        # Toxic-Leader steigt aus -> Gegenwette läuft WEITER
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
+        assert b.paper.sizes().get("BTC", 0) < 0, "Leader-Exit ist KEIN Signal mehr"
+        # Toxic-Leader flippt auf Short -> Gegenwette bleibt unverändert
+        # (sein Flip ist ein frisches Signal, aber der Coin ist belegt)
         b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=-500)], P)
-        assert b.won + b.busted == cycles_before + 1, "alte Gegenwette abgerechnet"
-        assert b.paper.sizes().get("BTC", 0) > 0, \
-            "Toxic jetzt SHORT -> neue Gegenwette LONG, gleicher Tick"
+        assert b.paper.sizes().get("BTC", 0) < 0, "Flip dreht die Gegenwette NICHT mehr"
+        assert b.won + b.busted == cycles_before, "kein Leader-getriebenes Settle"
+        assert b.ride_leaders["BTC"] == "counter:0xbad"
 
 
-def test_toxic_counter_identity_self_bans_when_leader_is_right():
-    """Verliert die Gegenwette wiederholt (= der Leader hatte doch recht),
-    bannt die Strike-Maschine die COUNTER-Identität - danach keine neuen
-    Gegenwetten gegen diesen Leader, sichtbar als counter_gesperrt."""
+def test_toxic_counter_exits_via_own_take_profit():
+    """Die Gegenwette endet über UNSERE Mechanik: erreicht sie das Ziel,
+    schließt der TP - egal was der Toxic-Leader gerade hält."""
     with tempfile.TemporaryDirectory() as tmp:
         t = {"now": 1_000_000.0}
-        b = _edge_book(tmp, t, counter_toxic=True, strike_ban=1)
+        b = _edge_book(tmp, t, counter_toxic=True)
+        b.banned.add("0xbad")
+        two = leaders(("0xbest", 80))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
+        assert b.paper.sizes().get("BTC", 0) < 0   # Gegenwette SHORT
+        # Kurs fällt ~1.5% -> Short-PnL über dem +100$-Ziel -> eigener TP
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)],
+               {"BTC": 98.5, "ETH": 100.0})
+        assert b.paper.sizes() == {}, "eigenes Ziel schließt, Leader hält noch"
+        assert b.won == 1 and b.banked > 100
+
+
+def test_toxic_counter_identity_self_bans_via_own_exit():
+    """Verliert die Gegenwette wiederholt über die EIGENE Mechanik (hier:
+    Zeit-Cut), bannt die Strike-Maschine die Counter-Identität - danach
+    keine neuen Gegenwetten, sichtbar als counter_gesperrt."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, counter_toxic=True, strike_ban=1, max_ride_hours=2.0)
         b.banned.add("0xbad")
         two = leaders(("0xbest", 80))
         b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
         b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
         assert b.paper.sizes().get("BTC", 0) < 0
-        # Toxic-Leader steigt im PLUS aus (Kurs stieg) -> unsere Short-
-        # Gegenwette verliert -> Strike 1 für counter:0xbad -> Bann (ban=1)
-        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)],
-               {"BTC": 101.0, "ETH": 100.0})
-        assert b.paper.sizes() == {}
+        t["now"] += 2.5 * 3600   # Gegenwette hängt >2h im Minus -> Zeit-Cut
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)],
+               {"BTC": 100.5, "ETH": 100.0})
+        assert b.paper.sizes() == {}, "Zeit-Cut (eigene Mechanik) beendet die Gegenwette"
         assert "counter:0xbad" in b.banned, "Gegenwette enttarnt sich selbst"
         # Nächstes Toxic-Signal: KEINE neue Gegenwette mehr
-        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, ETH=300)], P)
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500, ETH=300)], P)
         assert b.paper.sizes() == {}
         assert b.stats(P)["scan"]["rejected"].get("counter_gesperrt") == 1
 

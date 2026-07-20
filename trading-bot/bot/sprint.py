@@ -606,25 +606,31 @@ class SprintBook:
             return
         by_addr = {s.address.lower(): s for s in snapshots}
         # 3. Exit-Folge je Ritt über SEINEN Leader. Counter-Ritte (Toxic Flow)
-        #    laufen unter "counter:<addr>" - beobachtet wird der ECHTE Leader,
-        #    nur die Flip-Logik ist gespiegelt (wir sind absichtlich GEGEN ihn:
-        #    gleiches Vorzeichen wie er = ER hat geflippt).
+        #    werden hier KOMPLETT ÜBERSPRUNGEN (Nutzer 20.07., v2: "wenn wir
+        #    counter traden macht es keinen Sinn wenn die Position zu macht
+        #    weil der Leader beendet"). Journal-Beweis aus 90 min v1: ALLE 9
+        #    Counter-Zyklen endeten durch Aktionen des TOXIC-Leaders (2x
+        #    leader_exit inkl. -204$ Zwangsschluss mitten im Drawdown, 3x
+        #    leader_flip = wir spiegelten den Churn eines Flip-Floppers
+        #    invertiert mit, 1x scaleout, 3x rotated) - kein einziger über
+        #    unsere eigenen Ziele. Die These 'der Leader liegt falsch' gilt
+        #    konsequent: dann ist auch sein EXIT-Timing kein Signal. Eine
+        #    Gegenwette ist UNSER Trade und endet NUR über die eigene
+        #    Mechanik in Schritt 1: Trail-TP, Plus-Lock, Zeit-Cut, Bust.
         for coin, our_size in list(self.paper.sizes().items()):
-            ident = self.ride_leaders.get(coin, "")
-            is_counter = ident.startswith("counter:")
-            src = ident[len("counter:"):] if is_counter else ident
-            snap = by_addr.get(src.lower()) if src else None
+            leader = self.ride_leaders.get(coin, "")
+            if leader.startswith("counter:"):
+                continue
+            snap = by_addr.get(leader.lower()) if leader else None
             if snap is None:
                 self._settle_one(coin, prices, "leader_rotated")
                 continue
             book = self._book_of(snap)
             leader_sz = book.get(coin, 0.0)
             entry_sz = self._ride_entry_sizes.get(coin, abs(leader_sz))
-            flipped = ((leader_sz > 0) == (our_size > 0)) if is_counter \
-                else ((leader_sz > 0) != (our_size > 0))
             if leader_sz == 0.0:
                 self._settle_one(coin, prices, "leader_exit")
-            elif flipped:
+            elif (leader_sz > 0) != (our_size > 0):
                 # Flip = neue Richtung, neue Überzeugung -> neuer Mess-Ritt
                 # (das Settle hat den Leader-Slot gerade freigegeben).
                 # BAN-CHECK PFLICHT (Spiegel-Fund 20.07.: lighter:726722 wurde
@@ -633,11 +639,8 @@ class SprintBook:
                 # das Settle hier kann den Bann gerade eben ausgelöst haben,
                 # und der Wiedereinstieg lief daran vorbei; der Frisch-Signal-
                 # Pfad in Schritt 4 prüft den Bann längst).
-                # Counter-Flip: KEIN Direkt-Re-Entry hier - der Flip zählt als
-                # frisches Signal (add_signal_frac) und der Toxic-Pass unten
-                # steigt im selben Tick invertiert wieder ein.
                 self._settle_one(coin, prices, "leader_flip")
-                if (not is_counter and snap.address.lower() not in self.banned
+                if (snap.address.lower() not in self.banned
                         and self._leader_rides(snap.address) < self._leader_ride_limit(snap.address)):
                     self._enter(coin, snap, prices, parallel=True)
             elif abs(leader_sz) <= (1 - self.cfg.partial_exit_frac) * entry_sz:
@@ -1423,13 +1426,16 @@ class SprintBook:
                                           / max(1, cycles_done + 1), 1),
             "leader": leader,
             "leader_is_star": self.is_star(leader) if leader else False,
-            "strikes": {a[:10]: n for a, n in self.strikes.items() if n > 0},
-            "banned": [a[:10] for a in self.banned],
+            # [:18] statt [:10] (Spiegel-Fund 20.07.): Counter-Identitäten
+            # kollidierten in der Anzeige - "counter:0x8d7d49eb" und
+            # "counter:0x786515c7" zeigten beide als "counter:0x".
+            "strikes": {a[:18]: n for a, n in self.strikes.items() if n > 0},
+            "banned": sorted({a[:18] for a in self.banned}),
             # Confidence nur für Leader mit Punkten (0 sind uninteressant);
             # stars separat abgeleitet, damit die Anzeige nicht bei jedem
             # Leader neu >= STAR_THRESHOLD rechnen muss.
-            "confidence": {a[:10]: n for a, n in self.confidence.items() if n > 0},
-            "stars": [a[:10] for a, n in self.confidence.items() if n >= STAR_THRESHOLD],
+            "confidence": {a[:18]: n for a, n in self.confidence.items() if n > 0},
+            "stars": [a[:18] for a, n in self.confidence.items() if n >= STAR_THRESHOLD],
             # Bestätigungs-Kandidaten (Flip-Flopper-Schutz): laufen gerade,
             # noch nicht promoted/verworfen - sonst wäre "wartet auf frisches
             # Signal" von "Signal wartet auf Bestätigung" ununterscheidbar.
