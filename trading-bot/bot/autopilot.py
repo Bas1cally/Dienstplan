@@ -587,6 +587,8 @@ class Autopilot:
             return self._sprint_asset_breakdown()
         if arg.lower().strip() == "funnel":
             return self._cmd_quest_funnel()
+        if arg.lower().strip() in ("cohorts", "kohorten"):
+            return self._cmd_quest_cohorts()
         s = self.sprint.stats(prices)
         lead = (f"<code>{s['leader'][:10]}…</code>" + (" ⭐" if s.get("leader_is_star") else "")
                 if s.get("leader") else "n/a")
@@ -681,6 +683,7 @@ class Autopilot:
                 f"{s['watch']['flat_now']} sind flach (jeder frische Einstieg triggert)\n"
                 f"\n"
                 f"<i>/quest close = schließen | /quest pool = Pool-Liste | "
+                f"/quest cohorts = Kohorten (Quelle/Grund/Asset) | "
                 f"/quest assets = Krypto vs. Aktien | /quest funnel = Trichter-Diagnose | "
                 f"/quest reset = Bilanz auf 0 | /quest amnestie = Strikes/Bans löschen</i>")
 
@@ -706,6 +709,63 @@ class Autopilot:
                          f"(Trefferquote {wr:.0f}%)")
         if assets["unbekannt"]["n"]:
             lines.append("<i>'unbekannt' = Zyklen ohne coin-Feld</i>")
+        return "\n".join(lines)
+
+    def _cmd_quest_cohorts(self) -> str:
+        """Kohorten-Auswertung der AKTUELLEN Ära (Masterplan Phase C, Nutzer:
+        'Entscheidungen aus Daten, nicht Anekdoten'): Winrate/PnL je Quelle
+        (HL vs Lighter), Exit-Grund, Asset-Klasse + Top/Flop-Leader. Beantwortet
+        die Steuerfragen (Lighter zulassen? Zeit-Cut richtig? Trail richtig?)
+        direkt aus dem vollen Journal statt aus dem Spiegel-Tail."""
+        if not self.sprint:
+            return "Quest-Bot nicht aktiv."
+        kinds = {"sprint_tp", "sprint_bust", "sprint_cycle_end"}
+        cycles = sorted((e for e in self._journal_chrono() if e.get("kind") in kinds),
+                        key=lambda e: e.get("t", 0))
+        n_era = self.sprint.won + self.sprint.busted
+        era = cycles[-n_era:] if n_era else []
+        if not era:
+            return "Noch keine abgeschlossenen Quest-Zyklen in dieser Ära."
+
+        def agg(keyfn):
+            out: dict[str, dict] = {}
+            for e in era:
+                d = out.setdefault(keyfn(e), {"n": 0, "won": 0, "pnl": 0.0})
+                pnl = float(e.get("pnl", 0))
+                d["n"] += 1
+                d["pnl"] += pnl
+                if pnl > 0:
+                    d["won"] += 1
+            return out
+
+        def fmt(title, data):
+            block = [f"<b>{title}</b>"]
+            for k, d in sorted(data.items(), key=lambda t: -t[1]["pnl"]):
+                block.append(f"  {k}: {d['n']}x, {d['won'] / d['n'] * 100:.0f}% grün, "
+                             f"{d['pnl']:+,.0f} $ (Ø {d['pnl'] / d['n']:+,.1f})")
+            return block
+
+        lines = [f"<b>Quest-Kohorten</b> (aktuelle Ära, {len(era)} Zyklen)", ""]
+        lines += fmt("Quelle", agg(lambda e: "Lighter"
+                     if str(e.get("leader", "")).startswith("lighter:") else "Hyperliquid"))
+        lines.append("")
+        lines += fmt("Exit-Grund", agg(lambda e: e.get("reason", "?")))
+        lines.append("")
+        lines += fmt("Asset-Klasse", agg(lambda e: "unbekannt" if not e.get("coin")
+                     else ("Aktien" if ":" in str(e.get("coin")) else "Krypto")))
+        per = {k: d for k, d in agg(
+            lambda e: str(e.get("leader") or "?")[:14]).items() if d["n"] >= 2}
+        if per:
+            ranked = sorted(per.items(), key=lambda t: -t[1]["pnl"])
+            lines.append("")
+            lines.append("<b>Top/Flop-Leader</b> (>= 2 Zyklen diese Ära):")
+            for k, d in ranked[:3]:
+                lines.append(f"  <code>{k}</code> {d['pnl']:+,.0f} $ "
+                             f"({d['n']}x, {d['won']}-{d['n'] - d['won']})")
+            flops = [t for t in ranked if t[1]["pnl"] < 0][-3:]
+            for k, d in reversed(flops):
+                lines.append(f"  <code>{k}</code> {d['pnl']:+,.0f} $ "
+                             f"({d['n']}x, {d['won']}-{d['n'] - d['won']})")
         return "\n".join(lines)
 
     def _cmd_quest_funnel(self) -> str:

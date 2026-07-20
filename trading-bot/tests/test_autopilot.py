@@ -968,6 +968,44 @@ def test_cmd_fullreport_offline_arg_passed_through():
     assert calls == [True]
 
 
+def test_cmd_quest_cohorts_groups_source_reason_asset():
+    """Masterplan Phase C (20.07.): Kohorten-Auswertung aus dem VOLLEN Journal -
+    Quelle (HL vs Lighter), Exit-Grund, Asset-Klasse, Top/Flop-Leader. Damit
+    fallen Steuerfragen (Lighter zulassen? Zeit-Cut richtig?) aus Daten."""
+    import tempfile
+
+    from bot.journal import Journal
+
+    class FakeSprint:
+        won, busted = 3, 2          # aktuelle Ära = 5 Zyklen
+        strikes, banned, confidence = {}, set(), {}
+
+    ap = _autopilot()
+    ap.sprint = FakeSprint()
+    with tempfile.TemporaryDirectory() as tmp:
+        j = Journal(path=Path(tmp) / "trades.jsonl")
+        j.record("sprint_cycle_end", coin="BTC", pnl=-999.0, leader="0xold")  # alte Ära
+        j.record("sprint_tp", coin="ETH", pnl=150.0, leader="0xgood", reason="tp")
+        j.record("sprint_cycle_end", coin="SOL", pnl=-60.0, leader="lighter:111",
+                 reason="zeit_negativ")
+        j.record("sprint_cycle_end", coin="HYPE", pnl=-40.0, leader="lighter:111",
+                 reason="leader_flip")
+        j.record("sprint_tp", coin="PUMP", pnl=80.0, leader="0xgood", reason="tp")
+        j.record("sprint_cycle_end", coin="xyz:MU", pnl=20.0, leader="0xgood",
+                 reason="plus_lock")
+        ap.journal = j
+        out = ap._cmd_quest_cohorts()
+
+    assert "aktuelle Ära, 5 Zyklen" in out
+    assert "Hyperliquid: 3x, 100% grün, +250 $" in out
+    assert "Lighter: 2x, 0% grün, -100 $" in out
+    assert "tp: 2x, 100% grün, +230 $" in out
+    assert "zeit_negativ: 1x" in out
+    assert "Aktien: 1x, 100% grün, +20 $" in out
+    assert "0xgood" in out and "lighter:111" in out, "Top/Flop-Leader gelistet"
+    assert "-999" not in out, "alte Ära bleibt draußen"
+
+
 def test_sprint_asset_breakdown_scoped_to_current_era():
     """Krypto vs. Aktien NUR für die aktuelle Ära (letzte won+busted Zyklen).
     Alte Mess-Woche-Zyklen davor werden ausgeschlossen - genau das 'Krypto/

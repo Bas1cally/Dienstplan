@@ -1484,6 +1484,44 @@ def test_trusted_leader_skips_confirm_window_rookie_waits():
         assert any(p["coin"] == "ETH" for p in b.stats(prices)["pending"])
 
 
+def test_banned_leader_flip_does_not_reenter():
+    """Spiegel-Fund 20.07. (Ban-Bypass): lighter:726722 wurde bei 2 Strikes
+    gebannt und machte über den Flip-Re-Entry-Pfad weitere 3 Verlust-Ritte
+    (~-220$ NACH dem Bann) - das Settle des Flips kann den Bann gerade
+    ausgelöst haben, der Wiedereinstieg lief daran vorbei."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, strike_ban=1)   # 1 Strike = sofortiger Bann
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)      # LONG Entry 100
+        assert "BTC" in b.paper.sizes()
+        # Leader flippt auf Short, unser Long steht leicht im Minus -> Settle
+        # mit Verlust -> Strike 1 -> BANN. Der Re-Entry darf NICHT feuern.
+        b.tick(LED, [snap("0xbest", 50_000, BTC=-500)], {"BTC": 99.5, "ETH": 100.0})
+        assert "0xbest" in b.banned, "Vorbedingung: Flip-Verlust löste den Bann aus"
+        assert b.paper.sizes() == {}, \
+            "gebannter Leader darf über den Flip-Pfad NICHT wieder einsteigen"
+
+
+def test_hot_hand_denied_for_net_loser_despite_wins():
+    """Spiegel-Fund 20.07.: lighter:366058 bekam mit 2 Siegen bei 5 Pleiten
+    die 1.5x-Size (-164$ in einem Ritt). Heiße Hand braucht jetzt Siege UND
+    positive Bilanz - ein Netto-Verlierer bleibt bei Basis-Slots/-Size und
+    wartet im Bestätigungsfenster wie jeder No-Name."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, max_rides_per_leader=1, hot_hand_extra_rides=2,
+                       hot_hand_size_mult=1.5, trusted_skip_confirm=True)
+        b.leader_record["0xbest"] = {"won": 2, "lost": 5}
+        assert b._leader_ride_limit("0xbest") == 1, "keine Extra-Slots"
+        assert b._size_mult("0xbest") == 1.0, "keine Extra-Size"
+        assert b._skip_confirm("0xbest") is False, "kein Fenster-Skip"
+        b.leader_record["0xbest"] = {"won": 2, "lost": 1}   # positive Bilanz
+        assert b._leader_ride_limit("0xbest") == 3
+        assert b._size_mult("0xbest") == 1.5
+        assert b._skip_confirm("0xbest") is True
+
+
 def test_plus_lock_closes_green_before_it_turns_red():
     """Nutzer 19.07.: 'sobald wir im Plus sind sollten wir nie mit Minus
     rausgehen' - Ritte standen im Plus und endeten Stunden später per

@@ -261,10 +261,14 @@ sprint:
                             # über dem Fee-Rauschen von ~9$), wird beim Rückfall
                             # auf plus_lock_floor geschlossen: klein-grün statt
                             # rot. 0 = aus.
-  plus_lock_floor: 5        # Exit-Schwelle der Plus-Sicherung: bei Rückfall auf
-                            # +5$ raus (Puffer, damit der Exit nach dem nächsten
-                            # Tick real noch grün landet, nicht bei exakt 0
-                            # ins Minus rutscht). Reason "plus_lock" ist
+  plus_lock_floor: 15       # Exit-Schwelle der Plus-Sicherung. 5 -> 15 (Spiegel-
+                            # Fund 20.07.): mit +5$ Floor landeten echte Exits
+                            # bei -13/-13/-71 - zwischen zwei Ticks (unter Last
+                            # bis ~90s!) fällt der Preis durch den Floor DURCH,
+                            # geprüft wird erst der nächste Tick. +15$ Puffer
+                            # fängt normale Tick-Gaps; echte Kurs-Sprünge kann
+                            # kein Paper-Floor der Welt abfangen (auch live
+                            # slippen Stops). Reason "plus_lock" bleibt
                             # strike-exempt: unsere Sicherungs-Regel, nicht die
                             # Entscheidung des Leaders.
   max_rides_per_leader: 2   # 1 -> 2 (18.07., Flow-Runde): das 1er-Limit war der

@@ -619,9 +619,16 @@ class SprintBook:
                 self._settle_one(coin, prices, "leader_exit")
             elif (leader_sz > 0) != (our_size > 0):
                 # Flip = neue Richtung, neue Überzeugung -> neuer Mess-Ritt
-                # (das Settle hat den Leader-Slot gerade freigegeben)
+                # (das Settle hat den Leader-Slot gerade freigegeben).
+                # BAN-CHECK PFLICHT (Spiegel-Fund 20.07.: lighter:726722 wurde
+                # bei 2 Strikes gebannt und machte über GENAU diesen Pfad
+                # weitere 3 Verlust-Ritte, Strikes 3-5, ~-220$ NACH dem Bann -
+                # das Settle hier kann den Bann gerade eben ausgelöst haben,
+                # und der Wiedereinstieg lief daran vorbei; der Frisch-Signal-
+                # Pfad in Schritt 4 prüft den Bann längst).
                 self._settle_one(coin, prices, "leader_flip")
-                if self._leader_rides(snap.address) < self._leader_ride_limit(snap.address):
+                if (snap.address.lower() not in self.banned
+                        and self._leader_rides(snap.address) < self._leader_ride_limit(snap.address)):
                     self._enter(coin, snap, prices, parallel=True)
             elif abs(leader_sz) <= (1 - self.cfg.partial_exit_frac) * entry_sz:
                 self._settle_one(coin, prices, "leader_scaleout")
@@ -685,29 +692,38 @@ class SprintBook:
         """Gewinn-Zyklen dieses Leaders im EIGENEN Buch (Edge-Runde)."""
         return self.leader_record.get(addr.lower(), {}).get("won", 0)
 
+    def _proven(self, addr: str, min_wins: int) -> bool:
+        """Hot-Hand-Kriterium (nachgeschärft, Spiegel-Fund 20.07.): Siege
+        allein reichten NICHT - lighter:366058 bekam mit 2 Siegen bei 5+
+        Pleiten die volle 1.5x-Size und verlor damit -164$ in EINEM Ritt.
+        Heiße Hand heißt jetzt: genug Siege UND positive Sieg-Bilanz
+        (mehr gewonnen als verloren), nicht nur 'hat mal gewonnen'."""
+        rec = self.leader_record.get(addr.lower(), {})
+        won, lost = rec.get("won", 0), rec.get("lost", 0)
+        return won >= min_wins and won > lost
+
     def _leader_ride_limit(self, addr: str) -> int:
-        """Slot-Limit je Leader: Basis + Hot-Hand-Bonus ab dem ersten
-        bewiesenen Gewinn-Zyklus (Edge-Runde 19.07.: Kapazität folgt der
-        heißen Hand - die beste Signal-Quelle des Live-Tags wurde 6x mit
-        'leader_belegt' gedrosselt, während No-Names dieselben Slots hatten)."""
+        """Slot-Limit je Leader: Basis + Hot-Hand-Bonus für BEWIESENE Leader
+        (>= 1 Sieg UND positive Bilanz - Edge-Runde 19.07., nachgeschärft
+        20.07.: Kapazität folgt der heißen Hand, nicht dem Ex-Glückstreffer)."""
         base = self.cfg.max_rides_per_leader
-        if self.wins_of(addr) >= 1:
+        if self._proven(addr, 1):
             return base + self.cfg.hot_hand_extra_rides
         return base
 
     def _size_mult(self, addr: str) -> float:
-        """Notional-Faktor: ab 2 Gewinn-Zyklen im eigenen Buch greift
+        """Notional-Faktor: ab 2 Gewinn-Zyklen UND positiver Bilanz greift
         hot_hand_size_mult - Größe folgt dem Beweisstand, nie umgekehrt
         (niemand wird KLEINER als Basis, Rookies fahren unverändert 1.0x)."""
-        if self.wins_of(addr) >= 2:
+        if self._proven(addr, 2):
             return self.cfg.hot_hand_size_mult
         return 1.0
 
     def _skip_confirm(self, addr: str) -> bool:
-        """Trust = Speed (Edge-Runde): bewiesene Leader (>= 1 Gewinn-Zyklus)
-        überspringen das Bestätigungsfenster - das Fenster bleibt Anti-Flip-
-        Flopper-Schutz für Unbekannte."""
-        return self.cfg.trusted_skip_confirm and self.wins_of(addr) >= 1
+        """Trust = Speed (Edge-Runde): bewiesene Leader (>= 1 Sieg UND
+        positive Bilanz) überspringen das Bestätigungsfenster - das Fenster
+        bleibt Anti-Flip-Flopper-Schutz für Unbekannte und Netto-Verlierer."""
+        return self.cfg.trusted_skip_confirm and self._proven(addr, 1)
 
     def _take_profit_due(self, key: str, pnl: float) -> bool:
         """Take-Profit-Entscheidung inkl. Trailing (Edge-Runde 19.07.):

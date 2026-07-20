@@ -13,13 +13,23 @@ liefert nur noch Preise/Snapshots/Discovery für Quest), alle Beobachter
 
 ## OFFEN — nächste Bauplätze (Quest)
 
-### 1. Kohorten-Analytik `/quest cohorts` (Masterplan Phase C — als NÄCHSTES)
-Journal-Auswertung je (1) Quelle (HL vs `lighter:`), (2) Hebel-Klasse,
-(3) Exit-Reason (jetzt inkl. `plus_lock`/Trail-tp), (4) Coin-Klasse
-(Krypto vs `xyz:`) — jeweils Anzahl, Winrate, Summen-PnL, Ø-PnL; dazu
-eine tägliche Digest-Zeile. Beantwortet die offenen Steuerfragen aus
-Daten statt Bauchgefühl: Lighter weiter zulassen/vorfiltern? Zeit-Cut-
-Schwelle richtig? Trail-frac 0.3 optimal? Plus-Lock-Schwellen richtig?
+### 1. ~~Kohorten-Analytik~~ UMGESETZT 20.07. (`/quest cohorts`)
+Gebaut: Ära-scoped Auswertung je Quelle (HL vs Lighter), Exit-Grund,
+Asset-Klasse + Top/Flop-Leader (>= 2 Zyklen), direkt aus dem vollen
+Journal. Noch offen davon: tägliche Digest-Zeile (klein) und Hebel-
+Klassen-Gruppierung (braucht Entry-Join, erst wenn wirklich vermisst).
+
+### 1b. LIGHTER-ENTSCHEIDUNG STEHT AN (Daten liegen vor, Nutzer-Call)
+Spiegel-Analyse 20.07. (30h nach Amnestie): 14✅/52💥, Schatztruhe
+-1.450$ - dominiert von Lighter-Leadern (Journal-Tail: 14 von 16
+sichtbaren Zyklen Lighter-geführt, Summe ~-646$; das isolierte Lighter-
+Messbuch bestätigt -9,4%). Struktur-Problem: Lighter-Discovery liefert
+ENDLOS neue IDs, jede kostet ~2 Strikes Lehrgeld (~-100 bis -300$) bis
+zum Bann - ein Lehrgeld-Laufband ohne Vorfilter (keine Fill-Historie
+verfügbar). Zwei der Verlust-Treiber waren allerdings BUGS (Ban-Bypass
+im Flip-Re-Entry, Hot-Hand ohne Bilanz-Check - beide 20.07. gefixt);
+Zahlen nach den Fixes neu bewerten, DANN entscheiden: sprint_promote
+aus / Quarantäne-Sizing für Lighter-Rookies / weiterlaufen lassen.
 
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
@@ -39,13 +49,11 @@ den vorhandenen Sicherungen (Hebel-Kappung ist schon live-treu);
 Slippage-/Fee-Validierung gegen echte Fills; Kill-Switch + Tages-
 Verlustlimit auf Sprint-Ebene. Erst nach 2+ Wochen positivem Elite-Paper.
 
-### 4. Report-Fix für den Mess-Modus — WIEDER AKUT
-`report.py`s Sprint-Block liest `sprint_book.json`s rohes `realized_pnl`/
-`trades` als „Zyklus N läuft" - unter `parallel_rides: true` FALSCH
-(kumulierte Realisierung statt aktueller Zyklus; verlässlich ist nur
-`banked` aus `sprint_cycles.json`). War als „niedrige Priorität, erst
-wenn parallel_rides wieder aktiv" archiviert - parallel_rides IST seit
-17.07. wieder aktiv, der Fehler steht also live in jedem /report.
+### 4. ~~Report-Fix für den Mess-Modus~~ ERLEDIGT (geprüft 20.07.)
+Beim Nachprüfen stellte sich heraus: der monierte Codepfad existiert
+nicht mehr - `_cmd_report` wurde längst auf `quest_scorecard`/`banked`
+umgebaut (ritt-scharf, parallel-sicher), niemand liest mehr
+`sprint_book.json`s rohes `realized_pnl` als „aktueller Zyklus".
 
 ### 5. CMM/HyperTracker-Ausbau (Discovery füttert den Quest-Pool)
 Details im Archiv-Abschnitt unten („CMM/HyperTracker-Ausbau") - kurz:
