@@ -27,9 +27,11 @@ Messbuch bestätigt -9,4%). Struktur-Problem: Lighter-Discovery liefert
 ENDLOS neue IDs, jede kostet ~2 Strikes Lehrgeld (~-100 bis -300$) bis
 zum Bann - ein Lehrgeld-Laufband ohne Vorfilter (keine Fill-Historie
 verfügbar). Zwei der Verlust-Treiber waren allerdings BUGS (Ban-Bypass
-im Flip-Re-Entry, Hot-Hand ohne Bilanz-Check - beide 20.07. gefixt);
-Zahlen nach den Fixes neu bewerten, DANN entscheiden: sprint_promote
-aus / Quarantäne-Sizing für Lighter-Rookies / weiterlaufen lassen.
+im Flip-Re-Entry, Hot-Hand ohne Bilanz-Check - beide 20.07. gefixt).
+**NUTZER-ENTSCHEIDUNG 20.07.: "24h fair neu messen"** - kein Vorab-
+Urteil auf verbuggten Daten; Lighter läuft unverändert weiter, morgen
+fällt die Entscheidung (aus / Rookie-Drosselung / weiter) per
+`/quest cohorts` aus den POST-Fix-Zahlen.
 
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
