@@ -33,6 +33,18 @@ Urteil auf verbuggten Daten; Lighter läuft unverändert weiter, morgen
 fällt die Entscheidung (aus / Rookie-Drosselung / weiter) per
 `/quest cohorts` aus den POST-Fix-Zahlen.
 
+**NACHTRAG 20.07. — TOXIC FLOW GEBAUT (Nutzer: "unsere gestrikten
+Leader werden ab sofort counter traded"):** frische Signale GEBANNTER
+Leader werden invertiert geritten statt verworfen (`counter_toxic:
+true`). Gegenwetten laufen unter der Identität `counter:<addr>` mit
+eigenem Strike-/Record-Konto - verliert die Gegenwette wiederholt
+(Leader hatte doch recht), bannt sie sich selbst (`counter_gesperrt`).
+Gebannte HL-Wallets bleiben dafür beobachtet (Toxic-Watch in
+`_tracked_addresses`, max 12); Flip eines Toxic-Leaders dreht die
+Gegenwette im selben Tick. `/quest cohorts` weist die Counter-Spur
+als eigene Quelle aus - nach 24h zeigt sich, ob Toxic Flow eine
+eigene Edge ist. V1 ohne (invertiertes) Bestätigungsfenster.
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
 abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3 Zyklen bei >= 60%

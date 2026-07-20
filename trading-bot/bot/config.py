@@ -470,6 +470,16 @@ class SprintConfig:
     # schaltet scharf).
     plus_lock_arm: float = 0.0
     plus_lock_floor: float = 0.0
+    # Toxic Flow (Nutzer 20.07.: "unsere gestrikten Leader werden ab sofort
+    # counter traded"): frische Signale GEBANNTER Leader werden nicht mehr
+    # verworfen (Spiegel: 119x leader_gesperrt = 119 verschenkte Datenpunkte),
+    # sondern in der GEGENRICHTUNG geritten. Jeder Counter-Ritt läuft unter
+    # der Identität "counter:<addr>" mit EIGENEM Strike-/Record-Konto:
+    # verliert die Gegenwette wiederholt (= der Leader hatte doch recht),
+    # bannt die Strike-Maschine die Counter-Identität automatisch - dieselbe
+    # Wahrheitsfindung wie bei jedem anderen Leader. Nur im Mess-Modus
+    # (parallel_rides) aktiv; der Elite-Einzel-Ritt reitet nur Bewiesene.
+    counter_toxic: bool = False
     # LARP-Strikes: Verlust-Ritt -> Strike +1, Gewinn-Ritt -> Strike -1 (min 0).
     # Bei strike_ban Strikes wird der Leader fürs Sprint-Buch gesperrt.
     strike_ban: int = 2

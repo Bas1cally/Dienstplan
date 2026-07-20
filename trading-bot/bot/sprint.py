@@ -605,19 +605,26 @@ class SprintBook:
         if not leaders or not snapshots:
             return
         by_addr = {s.address.lower(): s for s in snapshots}
-        # 3. Exit-Folge je Ritt über SEINEN Leader
+        # 3. Exit-Folge je Ritt über SEINEN Leader. Counter-Ritte (Toxic Flow)
+        #    laufen unter "counter:<addr>" - beobachtet wird der ECHTE Leader,
+        #    nur die Flip-Logik ist gespiegelt (wir sind absichtlich GEGEN ihn:
+        #    gleiches Vorzeichen wie er = ER hat geflippt).
         for coin, our_size in list(self.paper.sizes().items()):
-            leader = self.ride_leaders.get(coin, "")
-            snap = by_addr.get(leader.lower()) if leader else None
+            ident = self.ride_leaders.get(coin, "")
+            is_counter = ident.startswith("counter:")
+            src = ident[len("counter:"):] if is_counter else ident
+            snap = by_addr.get(src.lower()) if src else None
             if snap is None:
                 self._settle_one(coin, prices, "leader_rotated")
                 continue
             book = self._book_of(snap)
             leader_sz = book.get(coin, 0.0)
             entry_sz = self._ride_entry_sizes.get(coin, abs(leader_sz))
+            flipped = ((leader_sz > 0) == (our_size > 0)) if is_counter \
+                else ((leader_sz > 0) != (our_size > 0))
             if leader_sz == 0.0:
                 self._settle_one(coin, prices, "leader_exit")
-            elif (leader_sz > 0) != (our_size > 0):
+            elif flipped:
                 # Flip = neue Richtung, neue Überzeugung -> neuer Mess-Ritt
                 # (das Settle hat den Leader-Slot gerade freigegeben).
                 # BAN-CHECK PFLICHT (Spiegel-Fund 20.07.: lighter:726722 wurde
@@ -626,8 +633,11 @@ class SprintBook:
                 # das Settle hier kann den Bann gerade eben ausgelöst haben,
                 # und der Wiedereinstieg lief daran vorbei; der Frisch-Signal-
                 # Pfad in Schritt 4 prüft den Bann längst).
+                # Counter-Flip: KEIN Direkt-Re-Entry hier - der Flip zählt als
+                # frisches Signal (add_signal_frac) und der Toxic-Pass unten
+                # steigt im selben Tick invertiert wieder ein.
                 self._settle_one(coin, prices, "leader_flip")
-                if (snap.address.lower() not in self.banned
+                if (not is_counter and snap.address.lower() not in self.banned
                         and self._leader_rides(snap.address) < self._leader_ride_limit(snap.address)):
                     self._enter(coin, snap, prices, parallel=True)
             elif abs(leader_sz) <= (1 - self.cfg.partial_exit_frac) * entry_sz:
@@ -639,6 +649,8 @@ class SprintBook:
                 self.is_star(str(l.get("address", ""))), float(l.get("score", 0))),
                 reverse=True):
             addr = str(l.get("address", "")).lower()
+            if self.cfg.counter_toxic and addr in self.banned:
+                continue   # Toxic-Flow-Pass unten übernimmt (Gegenwette statt Reject)
             snap = by_addr.get(addr)
             if snap is None:
                 continue
@@ -683,6 +695,65 @@ class SprintBook:
                     # (nach _tick_parallel, s. tick()) promotet zum dann
                     # aktuellen Preis, siehe _promote_pending_parallel.
                     opened = self._register_pending(coin, snap)
+        # 5. Toxic Flow: frische Signale GEBANNTER Leader gegenhandeln
+        if self.cfg.counter_toxic:
+            self._tick_toxic(by_addr, prices)
+
+    def _tick_toxic(self, by_addr: dict, prices: dict[str, float]) -> None:
+        """Toxic Flow (Nutzer 20.07.: 'unsere gestrikten Leader werden ab
+        sofort counter traded'): gebannte Leader sind BEWIESENE Falsch-Trader
+        - ihre frischen Signale werden invertiert geritten statt verworfen
+        (Spiegel-Befund: 119x leader_gesperrt = 119 verschenkte Datenpunkte).
+
+        Jede Gegenwette läuft unter der Identität 'counter:<addr>' mit
+        EIGENEM Strike-/Record-/Confidence-Konto: verliert die Gegenwette
+        wiederholt (= der Leader hatte doch recht), bannt die Strike-Maschine
+        die Counter-Identität und der Spuk endet von selbst - dieselbe
+        Wahrheitsfindung wie bei jedem anderen Leader. Gewinnt sie, baut die
+        Counter-Identität ganz normal Hot-Hand-Status auf.
+
+        V1 bewusst OHNE Bestätigungsfenster (das prüft 'Leader nicht im
+        Minus' - für eine Gegenwette wäre die Logik invertiert; bis dahin
+        urteilen Strikes). Baselines für Gebannte hält _refresh_baselines
+        am Leben, solange counter_toxic an ist."""
+        for addr in sorted(self.banned):
+            if addr.startswith("counter:"):
+                continue   # keine Gegenwette auf eine Gegenwette
+            snap = by_addr.get(addr)
+            if snap is None:
+                continue
+            prev = self._baselines.get(addr)
+            if prev is None:
+                continue   # erster Blick nach dem Bann: erst Baseline legen
+            fresh = self._fresh_coins(self._book_of(snap), prev)
+            if not fresh:
+                continue
+            self._note_fresh(len(fresh), snap.address)
+            ckey = f"counter:{snap.address}"
+            if ckey.lower() in self.banned:
+                # Die Gegenwette selbst wurde enttarnt (Leader hatte doch
+                # recht) - sichtbar verwerfen, nicht still.
+                for coin in fresh:
+                    self._reject(coin, snap.address, "counter_gesperrt")
+                continue
+            fresh.sort(key=lambda c: abs(snap.exposure(c)), reverse=True)
+            opened = False
+            for coin in fresh:
+                if opened:
+                    self._reject(coin, snap.address, "korb_begrenzt")
+                    continue
+                if self._leader_rides(ckey) >= self._leader_ride_limit(ckey):
+                    self._reject(coin, snap.address, "leader_belegt")
+                    continue
+                if coin in self.paper.sizes():
+                    self._reject(coin, snap.address, "coin_belegt")
+                    continue
+                if len(self.paper.sizes()) >= self.cfg.max_rides:
+                    self._reject(coin, snap.address, "max_ritte")
+                    continue
+                before = len(self.paper.sizes())
+                self._enter(coin, snap, prices, parallel=True, counter=True)
+                opened = len(self.paper.sizes()) > before
 
     def _leader_rides(self, addr: str) -> int:
         key = addr.lower()
@@ -882,6 +953,11 @@ class SprintBook:
     def _refresh_baselines(self, leaders: list[dict], snapshots: list) -> None:
         keep = {str(l.get("address", "")).lower() for l in leaders}
         keep.add(self.ride_leader.lower())
+        # Toxic Flow: Gebannte bleiben BEOBACHTET (Baseline lebt weiter),
+        # sonst gäbe es keine frischen Signale zum Gegenhandeln - der Bann
+        # nimmt ihnen den Pool-Slot, nicht die Rolle als Kontra-Indikator.
+        if self.cfg.counter_toxic:
+            keep |= {a for a in self.banned if not a.startswith("counter:")}
         now = self.clock()
         changed = False
         for s in snapshots:
@@ -1020,7 +1096,7 @@ class SprintBook:
         return lev
 
     def _enter(self, coin: str, snap, prices: dict[str, float],
-               parallel: bool = False) -> None:
+               parallel: bool = False, counter: bool = False) -> None:
         ko = self._ineligible_reason(coin)
         if ko:
             self._reject(coin, snap.address, ko)
@@ -1034,14 +1110,21 @@ class SprintBook:
         # Zahlen bewegten sich schleppend), sondern nehmen nur seine Richtung
         # (Long/Short) und fahren die VOLLE leverage-Größe. Bei +10%-und-raus
         # zählt die Richtung, nicht wie viel Kapital der Leader selbst riskiert.
+        # Toxic Flow: counter=True invertiert die Richtung (Gegenwette gegen
+        # einen bewiesenen Falsch-Trader) und bucht den Ritt unter der
+        # Identität 'counter:<addr>' - eigenes Strike-/Record-Konto.
         direction = 1.0 if snap.exposure(coin) >= 0 else -1.0
+        if counter:
+            direction = -direction
+        ident = f"counter:{snap.address}" if counter else snap.address
         lev = self._leverage_for(coin)
         if parallel:
             # Mess-Modus: JEDER Ritt startet auf frischer equity-Basis (1000$),
             # unabhängig vom Sammelbuch - 1 Signal = 1 Ritt = 1k (Nutzer).
             # Hot-Hand-Sizing (Edge-Runde): ab 2 Gewinn-Zyklen im eigenen Buch
-            # skaliert der Einsatz mit (_size_mult) - Größe folgt Beweisstand.
-            notional = direction * lev * self.cfg.equity * self._size_mult(snap.address)
+            # skaliert der Einsatz mit (_size_mult) - Größe folgt Beweisstand
+            # (für Counter-Ritte: der Beweisstand der COUNTER-Identität).
+            notional = direction * lev * self.cfg.equity * self._size_mult(ident)
         else:
             equity = self.paper.equity(prices)
             target = direction * lev * equity
@@ -1058,29 +1141,39 @@ class SprintBook:
             self._ride_start_t = self.clock()  # Ritt-Beginn (für den Zeit+negativ-Cut)
         self.paper.execute(coin, notional / price, price)
         if parallel:
-            self.ride_leaders[coin] = snap.address
+            self.ride_leaders[coin] = ident
             self._ride_start_ts[coin] = self.clock()   # Zeit+negativ-Uhr je Ritt
         else:
-            self.ride_leader = snap.address
+            self.ride_leader = ident
         self._ride_entry_sizes[coin] = abs(self._book_of(snap).get(coin, 0.0))
         side = "LONG" if notional > 0 else "SHORT"
         cycle = self.won + self.busted + 1
-        log.info("Sprint: %s %s $%.0f (frisches Signal von %s, Zyklus %d)",
-                 side, coin, abs(notional), snap.address[:10], cycle)
+        log.info("Sprint: %s%s %s $%.0f (frisches Signal von %s, Zyklus %d)",
+                 "COUNTER " if counter else "", side, coin, abs(notional),
+                 snap.address[:10], cycle)
         if self.journal:
             # hl_max_leverage im Journal sichtbar (Live-Fund PENGU): ohne das
             # ist aus dem Journal/Status-Spiegel nicht unterscheidbar, ob
             # 'voller konfigurierter Hebel gefahren' heißt 'HL erlaubt hier
             # wirklich mehr' oder 'der HL-Lookup lieferte None' (kein Client
             # verdrahtet, Coin unbekannt, Metadaten nicht ladbar).
+            # leader=ident: Counter-Ritte laufen unter 'counter:<addr>', damit
+            # Kohorten/Scorecard die Gegenwetten als eigene Spur auswerten.
             self.journal.record("sprint_entry", coin=coin, side=side,
                                 notional=round(abs(notional), 0),
-                                leader=snap.address, cycle=cycle,
-                                leverage=lev, hl_max_leverage=self._last_hl_max_leverage)
+                                leader=ident, cycle=cycle,
+                                leverage=lev, hl_max_leverage=self._last_hl_max_leverage,
+                                **({"counter": True} if counter else {}))
         if self.notifier:
-            self.notifier.send(f"🟢 <b>Quest-Einstieg</b>: {side} {coin} "
-                               f"${abs(notional):,.0f}\nLeader <code>{snap.address[:10]}…</code> "
-                               f"| Zyklus {cycle}")
+            if counter:
+                self.notifier.send(
+                    f"🔁 <b>Quest-COUNTER</b>: {side} {coin} ${abs(notional):,.0f}\n"
+                    f"Gegenwette gegen <code>{snap.address[:10]}…</code> "
+                    f"(gebannt) | Zyklus {cycle}")
+            else:
+                self.notifier.send(f"🟢 <b>Quest-Einstieg</b>: {side} {coin} "
+                                   f"${abs(notional):,.0f}\nLeader <code>{snap.address[:10]}…</code> "
+                                   f"| Zyklus {cycle}")
         self._save_state()
 
     def _close_coin(self, coin: str, prices: dict[str, float], reason: str) -> None:
@@ -1287,7 +1380,9 @@ class SprintBook:
             # Jede Zeile bekommt IHREN Leader - sonst ist nicht zuordenbar, ob
             # 7 Ritte von 7 Tradern oder von einem stammen (Nutzer-Befund).
             for p in positions:
-                p["leader"] = self.ride_leaders.get(p["coin"], "")[:10]
+                # [:18] statt [:10]: 'counter:0x12345678' braucht Platz, sonst
+                # sähen alle Gegenwetten im Spiegel identisch aus ('counter:0x')
+                p["leader"] = self.ride_leaders.get(p["coin"], "")[:18]
             ride_pnls = sum(p["unrealized_pnl"] for p in positions)
             eq = self.cfg.equity + ride_pnls
         else:

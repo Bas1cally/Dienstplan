@@ -746,8 +746,13 @@ class Autopilot:
             return block
 
         lines = [f"<b>Quest-Kohorten</b> (aktuelle Ära, {len(era)} Zyklen)", ""]
-        lines += fmt("Quelle", agg(lambda e: "Lighter"
-                     if str(e.get("leader", "")).startswith("lighter:") else "Hyperliquid"))
+        def source_of(e):
+            ldr = str(e.get("leader", ""))
+            if ldr.startswith("counter:"):
+                return "Counter (Toxic Flow)"
+            return "Lighter" if ldr.startswith("lighter:") else "Hyperliquid"
+
+        lines += fmt("Quelle", agg(source_of))
         lines.append("")
         lines += fmt("Exit-Grund", agg(lambda e: e.get("reason", "?")))
         lines.append("")
@@ -1377,6 +1382,20 @@ class Autopilot:
             if a and a not in seen:
                 seen.add(a)
                 addrs.append(a)
+        # Toxic-Watch (Nutzer 20.07., Counter-Trading): gebannte HL-Wallets
+        # BLEIBEN beobachtet, obwohl sie keinen Pool-Slot mehr haben - ihre
+        # frischen Signale sind jetzt Kontra-Indikatoren. Gedeckelt (12),
+        # damit die Bann-Liste das Snapshot-Budget nicht auffrisst; Lighter-
+        # Gebannte brauchen keinen Slot hier (kommen über den Lighter-Feed,
+        # solange sie in dessen Top-Liste stehen).
+        if self.cfg.sprint.counter_toxic and self.sprint:
+            have = {x.lower() for x in addrs}
+            for a in sorted(self.sprint.banned):
+                if a.startswith("0x") and a not in have:
+                    addrs.append(a)
+                    have.add(a)
+                    if len(have) - len(seen) >= 12:
+                        break
         return addrs
 
     def _sprint_banned(self) -> set[str]:

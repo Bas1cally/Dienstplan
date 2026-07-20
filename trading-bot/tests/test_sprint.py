@@ -1484,6 +1484,98 @@ def test_trusted_leader_skips_confirm_window_rookie_waits():
         assert any(p["coin"] == "ETH" for p in b.stats(prices)["pending"])
 
 
+# ---------- Toxic Flow (Nutzer 20.07.): gebannte Leader counter-traden ----------
+
+def test_toxic_counter_enters_opposite_direction():
+    """Gebannter Leader eröffnet LONG -> wir gehen SHORT, gebucht unter der
+    Counter-Identität (eigenes Strike-/Record-Konto)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, counter_toxic=True)
+        b.banned.add("0xbad")
+        two = leaders(("0xbest", 80))
+        snaps = [snap("0xbest", 50_000), snap("0xbad", 50_000)]
+        b.tick(two, snaps, P)                                   # Baselines
+        b.tick(two, [snap("0xbest", 50_000),
+                     snap("0xbad", 50_000, BTC=500)], P)        # Toxic geht LONG
+        assert b.paper.sizes().get("BTC", 0) < 0, "Gegenwette: wir SHORT"
+        assert b.ride_leaders["BTC"] == "counter:0xbad"
+
+
+def test_toxic_counter_disabled_keeps_reject():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, counter_toxic=False)
+        b.banned.add("0xbad")
+        two = leaders(("0xbad", 80))
+        b.tick(two, [snap("0xbad", 50_000)], P)
+        b.tick(two, [snap("0xbad", 50_000, BTC=500)], P)
+        assert b.paper.sizes() == {}
+        assert b.stats(P)["scan"]["rejected"].get("leader_gesperrt") == 1
+
+
+def test_toxic_counter_not_falsely_flip_settled_and_follows_exit():
+    """Gegenposition ist per Design entgegengesetzt - die Flip-Erkennung darf
+    das NICHT als Leader-Flip deuten. Steigt der Toxic-Leader aus, endet
+    auch die Gegenwette (leader_exit)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, counter_toxic=True)
+        b.banned.add("0xbad")
+        two = leaders(("0xbest", 80))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
+        assert "BTC" in b.paper.sizes()
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
+        assert "BTC" in b.paper.sizes(), \
+            "Leader hält unverändert LONG - Gegenwette läuft weiter, kein Fehl-Flip"
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
+        assert b.paper.sizes() == {}, "Toxic-Leader raus -> Gegenwette endet"
+
+
+def test_toxic_counter_flip_reenters_inverted():
+    """Flippt der Toxic-Leader (LONG->SHORT), wird die alte Gegenwette
+    abgerechnet und im selben Tick invertiert neu eröffnet (sein Flip zählt
+    über add_signal_frac als frisches Signal)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, counter_toxic=True)
+        b.banned.add("0xbad")
+        two = leaders(("0xbest", 80))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
+        assert b.paper.sizes().get("BTC", 0) < 0
+        cycles_before = b.won + b.busted
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=-500)], P)
+        assert b.won + b.busted == cycles_before + 1, "alte Gegenwette abgerechnet"
+        assert b.paper.sizes().get("BTC", 0) > 0, \
+            "Toxic jetzt SHORT -> neue Gegenwette LONG, gleicher Tick"
+
+
+def test_toxic_counter_identity_self_bans_when_leader_is_right():
+    """Verliert die Gegenwette wiederholt (= der Leader hatte doch recht),
+    bannt die Strike-Maschine die COUNTER-Identität - danach keine neuen
+    Gegenwetten gegen diesen Leader, sichtbar als counter_gesperrt."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, counter_toxic=True, strike_ban=1)
+        b.banned.add("0xbad")
+        two = leaders(("0xbest", 80))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
+        assert b.paper.sizes().get("BTC", 0) < 0
+        # Toxic-Leader steigt im PLUS aus (Kurs stieg) -> unsere Short-
+        # Gegenwette verliert -> Strike 1 für counter:0xbad -> Bann (ban=1)
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)],
+               {"BTC": 101.0, "ETH": 100.0})
+        assert b.paper.sizes() == {}
+        assert "counter:0xbad" in b.banned, "Gegenwette enttarnt sich selbst"
+        # Nächstes Toxic-Signal: KEINE neue Gegenwette mehr
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, ETH=300)], P)
+        assert b.paper.sizes() == {}
+        assert b.stats(P)["scan"]["rejected"].get("counter_gesperrt") == 1
+
+
 def test_banned_leader_flip_does_not_reenter():
     """Spiegel-Fund 20.07. (Ban-Bypass): lighter:726722 wurde bei 2 Strikes
     gebannt und machte über den Flip-Re-Entry-Pfad weitere 3 Verlust-Ritte

@@ -233,6 +233,16 @@ sprint:
   max_rides: 20             # 8 -> 20 (17.07.): "Datenflut" heißt so viel vom
                             # 20er-Pool wie möglich gleichzeitig messen, nicht
                             # künstlich auf 8 drosseln, während Kapazität da wäre.
+  counter_toxic: true       # TOXIC FLOW (Nutzer 20.07.: "unsere gestrikten
+                            # Leader werden ab sofort counter traded"): frische
+                            # Signale GEBANNTER Leader werden invertiert
+                            # geritten statt verworfen (Spiegel: 119x
+                            # leader_gesperrt = verschenkte Datenpunkte).
+                            # Gegenwetten laufen unter "counter:<addr>" mit
+                            # EIGENEM Strike-Konto - verliert die Gegenwette
+                            # wiederholt (Leader hatte doch recht), bannt sich
+                            # die Counter-Identität selbst. Gebannte HL-Wallets
+                            # bleiben dafür beobachtet (Toxic-Watch, max 12).
   trail_frac: 0.3           # EDGE-RUNDE (19.07.): Trailing-TP statt fixem Ziel.
                             # Ab +target_profit wird NICHT mehr geschlossen,
                             # sondern der Peak getrailt - Exit erst bei 30%
