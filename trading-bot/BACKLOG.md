@@ -96,6 +96,26 @@ gebankt, 15✅/10💥), der konkrete Fall (Original + Gegenwette beide
 gebannt) trat live noch nicht auf — vorausschauende Härtung, kein
 akuter Bugfix.
 
+**NACHTRAG 4 (21.07., "Noch Ideen?" — Spiegel-getriebener Fund) —
+Lighter-`_known`-Cache übersteht jetzt Neustarts.** Der 19.07.-Fix
+(`_known`-Cache hält geritten werdende Lighter-Leader im Feed, egal was
+die Top-Liste gerade tut) lebte nur im RAM. Bei diesem Projekt ist ein
+Neustart Alltag (jeder Deploy) - fiel der GERADE gerittene Leader beim
+ERSTEN Scan nach dem Neustart nicht in die frische Top-Liste, war er
+auch noch nicht in `_known` (leer nach Neustart) -> `keep` griff nicht
+-> exakt die `leader_rotated`-Zwangsschließung, die der Cache eigentlich
+verhindern soll. Live im Spiegel beobachtet: `lighter:513030` (ETH)
+wurde 1 Minute nach einem Deploy so zwangsgeschlossen (+110.49$ - diesmal
+Glück gehabt, hätte genauso ein Verlust sein können). Fix:
+`LighterShadow._known` wird bei jedem erfolgreichen Scan nach
+`runtime/lighter_known.json` gespiegelt und beim Start geladen (nur
+Einträge <= 3x `scan_seconds` alt - dieselbe Staleness-Grenze wie beim
+Top-Listen-Schutz, uralte Momentaufnahmen nach langer Downtime werden
+verworfen statt geglaubt). 2 neue Tests (`test_lighter.py`): Restart
+mit frischer Instanz + leerem RAM-`_known` versorgt einen gerittenen
+Leader trotzdem sofort; eine zu alte Momentaufnahme wird beim Laden
+verworfen.
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
 abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3 Zyklen bei >= 60%

@@ -287,7 +287,56 @@ class LighterShadow:
         # Leader real weiter da ist. Discovery-Churn ist kein Leader-Exit.
         # Über diesen Cache bleiben geritten werdende Leader im Sprint-Feed,
         # egal was die Top-Liste gerade tut.)
+        #
+        # Kaltstart-Lücke (Spiegel-Fund 21.07.): _known lebte NUR im RAM -
+        # ein Neustart (bei diesem Projekt sehr häufig, jeder Deploy) leerte
+        # ihn komplett. Fiel der GERADE gerittene Leader beim ersten Scan
+        # NACH dem Neustart nicht in die frische Top-Liste, war er auch noch
+        # nicht in _known -> keep griff nicht -> genau die 'leader_rotated'-
+        # Zwangsschließung, die dieser Cache eigentlich verhindern soll, live
+        # beobachtet direkt nach einem Deploy (lighter:513030, ETH, +110.49 -
+        # diesmal glücklich im Plus, hätte aber genauso ein Verlust sein
+        # können). Fix: _known wird auf Platte gespiegelt und beim Start
+        # geladen (nur Einträge <= 3x scan_seconds alt, dieselbe Staleness-
+        # Grenze wie beim Top-Listen-Schutz oben).
         self._known: dict[str, "LeaderSnapshot"] = {}
+        self._known_path = runtime / "lighter_known.json"
+        self._load_known()
+
+    def _save_known(self) -> None:
+        try:
+            data = {
+                addr: {
+                    "t": self.clock(),
+                    "equity": snap.equity,
+                    "positions": {
+                        c: {"size": p.size, "entry": p.entry,
+                            "position_value": p.position_value, "leverage": p.leverage}
+                        for c, p in snap.positions.items()
+                    },
+                }
+                for addr, snap in self._known.items()
+            }
+            self._known_path.write_text(json.dumps(data))
+        except OSError:
+            log.debug("lighter_known.json nicht schreibbar", exc_info=True)
+
+    def _load_known(self) -> None:
+        try:
+            raw = json.loads(self._known_path.read_text())
+        except (OSError, ValueError):
+            return
+        max_age = 3 * self.cfg.scan_seconds
+        now = self.clock()
+        for addr, entry in raw.items():
+            if now - float(entry.get("t", 0)) > max_age:
+                continue   # zu alt (Bot war lange down) - lieber neu scannen als raten
+            positions = {
+                c: LeaderPosition(coin=c, size=p["size"], entry=p["entry"],
+                                  position_value=p["position_value"], leverage=p["leverage"])
+                for c, p in entry.get("positions", {}).items()
+            }
+            self._known[addr] = LeaderSnapshot(addr, entry.get("equity", 0.0), positions)
 
     def tick(self, hl_prices: dict[str, float]) -> None:
         if not hl_prices:
@@ -300,6 +349,7 @@ class LighterShadow:
                 self._last_scan_ok = self.clock()
                 for s in self._leaders:
                     self._known[str(s.address)] = s
+                self._save_known()
             except Exception as e:
                 log.warning("Lighter-Ranking fehlgeschlagen: %s", str(e)[:80])
         if not self._leaders:

@@ -271,6 +271,76 @@ def test_sprint_snapshots_keep_survives_topn_churn():
             "stale: keine NEUEN Signale mehr, aber der laufende Ritt bleibt versorgt"
 
 
+def test_known_cache_survives_restart_for_ridden_leader():
+    """Spiegel-Fund 21.07.: _known lebte nur im RAM - ein Neustart (bei
+    diesem Projekt sehr häufig, jeder Deploy) leerte ihn komplett. Fiel der
+    GERADE gerittene Leader beim ersten Scan NACH dem Neustart nicht in die
+    frische Top-Liste, griff `keep` nicht mehr -> genau die
+    'leader_rotated'-Zwangsschließung, die _known verhindern soll, live
+    direkt nach einem Deploy beobachtet (lighter:513030, ETH). Fix: _known
+    wird gespiegelt (lighter_known.json) und beim Neustart geladen."""
+    import tempfile
+
+    from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
+    from bot.sources.lighter import LighterShadow
+
+    def _snap(addr):
+        return LeaderSnapshot(addr, 10_000.0, {
+            "ETH": LeaderPosition(coin="ETH", size=1.0, entry=100.0,
+                                  position_value=1000.0, leverage=1)})
+
+    cfg = LighterConfig(max_leaders=2, scan_seconds=300)
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        sh1 = LighterShadow(cfg, 0.00045, source=LighterSource(cfg),
+                            runtime_dir=Path(tmp), clock=lambda: t["now"])
+        sh1._leaders = [_snap("513030"), _snap("111")]
+        sh1._last_scan_ok = t["now"]
+        sh1._known["513030"] = _snap("513030")
+        sh1._save_known()
+
+        # "Neustart" kurz danach: 513030 ist NICHT mehr in der frischen
+        # Top-Liste (Discovery-Churn) - eine frische Instanz (leeres RAM-
+        # _known) muss den Ritt trotzdem versorgen können, OHNE selbst
+        # erst neu gescannt zu haben.
+        t["now"] += 30
+        sh2 = LighterShadow(cfg, 0.00045, source=LighterSource(cfg),
+                            runtime_dir=Path(tmp), clock=lambda: t["now"])
+        assert "513030" not in sh2._leaders   # noch kein eigener Scan gelaufen
+        leaders, snaps = sh2.sprint_snapshots({"ETH": 1900.0}, keep={"513030"})
+        addrs = [l["address"] for l in leaders]
+        assert "lighter:513030" in addrs, \
+            "gerittener Leader übersteht den Neustart über die persistierte _known-Kopie"
+
+
+def test_known_cache_ignores_stale_entries_after_long_downtime():
+    """Gegenstück: war der Bot LANGE down (> 3x scan_seconds), ist die
+    gespeicherte Momentaufnahme zu alt, um als aktuell zu gelten - lieber
+    ehrlich neu scannen als auf Uralt-Daten weiterreiten."""
+    import tempfile
+
+    from bot.copytrade.tracker import LeaderPosition, LeaderSnapshot
+    from bot.sources.lighter import LighterShadow
+
+    def _snap(addr):
+        return LeaderSnapshot(addr, 10_000.0, {
+            "ETH": LeaderPosition(coin="ETH", size=1.0, entry=100.0,
+                                  position_value=1000.0, leverage=1)})
+
+    cfg = LighterConfig(max_leaders=2, scan_seconds=300)
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        sh1 = LighterShadow(cfg, 0.00045, source=LighterSource(cfg),
+                            runtime_dir=Path(tmp), clock=lambda: t["now"])
+        sh1._known["513030"] = _snap("513030")
+        sh1._save_known()
+
+        t["now"] += 3 * cfg.scan_seconds + 1
+        sh2 = LighterShadow(cfg, 0.00045, source=LighterSource(cfg),
+                            runtime_dir=Path(tmp), clock=lambda: t["now"])
+        assert "513030" not in sh2._known, "zu alte Momentaufnahme wird verworfen, nicht geladen"
+
+
 def test_sprint_snapshots_uses_cached_leaders_no_extra_network_call():
     """KEIN eigener rank()-Aufruf - nutzt exakt den scan_seconds-gedrosselten
     Cache aus tick(), kein zusätzliches Lighter-API-Budget."""
