@@ -59,6 +59,23 @@ confidence auf 18 Zeichen (Counter-Identitäten kollidierten als
 nicht mehr fest (Bot startete im 429-Sturm -> hl_max_leverage war die
 ganze Prozess-Laufzeit null, PENGU-Kappung de facto aus).
 
+**NACHTRAG 2 (gleicher Tag, Spiegel-Fund nach der v2/Amnestie-Kombo):
+Toxic-by-Record - Toxic Flow ist jetzt amnestie-fest.** Symptom (Nutzer:
+"wo sind alle Signale plötzlich?"): nach `/quest amnestie` war `banned`
+komplett leer, Toxic Flow hatte 78 Minuten kein einziges Ziel mehr - die
+miese LANGZEIT-Bilanz derselben Leader (`leader_record`, überlebt
+Amnestien BEWUSST) ging dabei verloren, weil nur `self.banned` gescannt
+wurde. Fix: `SprintBook._is_toxic()`/`toxic_addrs()` - ein Leader gilt
+zusätzlich als toxisch, wenn seine Lebenszeit-Bilanz im eigenen Buch um
+mind. `toxic_record_deficit` (3) negativ ist, unabhängig vom (amnestier-
+baren) Strike-Stand. Verdrahtet in: `_tick_toxic` (scannt jetzt
+`toxic_addrs()`), Flip-Re-Entry-Check, Fresh-Signal-Pass (neuer Reject-
+Grund `leader_toxisch`, falls `counter_toxic` aus ist), `_refresh_
+baselines` (Baseline bleibt am Leben), `_tracked_addresses`/Toxic-Watch,
+und `_build_sprint_pool` (ein record-toxischer Leader sitzt nie
+gleichzeitig FOLGEND im Pool UND wird gekontert). Strikes/Bans bleiben
+die kurzfristige Justiz, `leader_record` das Langzeitgedächtnis.
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
 abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3 Zyklen bei >= 60%

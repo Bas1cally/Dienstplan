@@ -640,7 +640,7 @@ class SprintBook:
                 # und der Wiedereinstieg lief daran vorbei; der Frisch-Signal-
                 # Pfad in Schritt 4 prüft den Bann längst).
                 self._settle_one(coin, prices, "leader_flip")
-                if (snap.address.lower() not in self.banned
+                if (not self._is_toxic(snap.address)
                         and self._leader_rides(snap.address) < self._leader_ride_limit(snap.address)):
                     self._enter(coin, snap, prices, parallel=True)
             elif abs(leader_sz) <= (1 - self.cfg.partial_exit_frac) * entry_sz:
@@ -652,7 +652,7 @@ class SprintBook:
                 self.is_star(str(l.get("address", ""))), float(l.get("score", 0))),
                 reverse=True):
             addr = str(l.get("address", "")).lower()
-            if self.cfg.counter_toxic and addr in self.banned:
+            if self.cfg.counter_toxic and self._is_toxic(addr):
                 continue   # Toxic-Flow-Pass unten übernimmt (Gegenwette statt Reject)
             snap = by_addr.get(addr)
             if snap is None:
@@ -667,6 +667,14 @@ class SprintBook:
             if addr in self.banned:
                 for coin in fresh:
                     self._reject(coin, snap.address, "leader_gesperrt")
+                continue
+            if self._is_toxic(addr):
+                # counter_toxic ist AUS (sonst wäre oben schon 'continue'
+                # gelaufen) - Record-toxisch, aber nicht formell gebannt:
+                # kein Gegenwette-Pass verfügbar, also sichtbar verwerfen
+                # statt einen bekannt miesen Leader stillschweigend zu reiten.
+                for coin in fresh:
+                    self._reject(coin, snap.address, "leader_toxisch")
                 continue
             fresh.sort(key=lambda c: abs(snap.exposure(c)), reverse=True)
             opened = False
@@ -717,11 +725,15 @@ class SprintBook:
 
         V1 bewusst OHNE Bestätigungsfenster (das prüft 'Leader nicht im
         Minus' - für eine Gegenwette wäre die Logik invertiert; bis dahin
-        urteilen Strikes). Baselines für Gebannte hält _refresh_baselines
-        am Leben, solange counter_toxic an ist."""
-        for addr in sorted(self.banned):
-            if addr.startswith("counter:"):
-                continue   # keine Gegenwette auf eine Gegenwette
+        urteilen Strikes). Baselines für Gebannte/Record-Toxische hält
+        _refresh_baselines am Leben, solange counter_toxic an ist.
+
+        Toxic-by-Record (Spiegel-Fund 20.07.): scannt toxic_addrs(), nicht
+        nur self.banned - eine Amnestie leert Bans, aber NICHT das
+        Langzeitgedächtnis (leader_record). Ohne das hätte jede Amnestie
+        den Toxic-Pool auf null gesetzt, bis die Strike-Maschine dieselben
+        Leader mühsam neu enttarnt."""
+        for addr in sorted(self.toxic_addrs()):
             snap = by_addr.get(addr)
             if snap is None:
                 continue
@@ -765,6 +777,39 @@ class SprintBook:
     def wins_of(self, addr: str) -> int:
         """Gewinn-Zyklen dieses Leaders im EIGENEN Buch (Edge-Runde)."""
         return self.leader_record.get(addr.lower(), {}).get("won", 0)
+
+    def _is_toxic(self, addr: str) -> bool:
+        """Toxic-by-Record (Spiegel-Fund 20.07.: '/quest amnestie' leerte
+        `banned` komplett -> Toxic Flow hatte 78min kein Futter mehr, obwohl
+        dieselben Leader ihre miese LANGZEIT-Bilanz nie verloren hatten).
+        Ein Leader gilt auch dann als toxisch, wenn seine Lebenszeit-Bilanz
+        im eigenen Buch (`leader_record`, überlebt Amnestien BEWUSST) um
+        mindestens `toxic_record_deficit` negativ ist - unabhängig vom
+        aktuellen (amnestierbaren) Strike-Stand. Strikes/Bans sind die
+        kurzfristige Justiz, der Record das Langzeitgedächtnis."""
+        key = addr.lower()
+        if key in self.banned:
+            return True
+        if self.cfg.toxic_record_deficit <= 0:
+            return False
+        rec = self.leader_record.get(key)
+        if not rec:
+            return False
+        return rec.get("lost", 0) - rec.get("won", 0) >= self.cfg.toxic_record_deficit
+
+    def toxic_addrs(self) -> set[str]:
+        """Alle aktuell toxischen HL-Adressen (Bann ODER Record-Defizit,
+        siehe _is_toxic) - OHNE eigene counter:-Identitäten. Für den Pool-
+        Aufbau (autopilot.py): ein toxischer Leader wird nie gleichzeitig
+        gefolgt UND gekontert."""
+        out = {a for a in self.banned if not a.startswith("counter:")}
+        if self.cfg.toxic_record_deficit > 0:
+            for addr, rec in self.leader_record.items():
+                if addr.startswith("counter:"):
+                    continue
+                if rec.get("lost", 0) - rec.get("won", 0) >= self.cfg.toxic_record_deficit:
+                    out.add(addr)
+        return out
 
     def _proven(self, addr: str, min_wins: int) -> bool:
         """Hot-Hand-Kriterium (nachgeschärft, Spiegel-Fund 20.07.): Siege
@@ -956,11 +1001,12 @@ class SprintBook:
     def _refresh_baselines(self, leaders: list[dict], snapshots: list) -> None:
         keep = {str(l.get("address", "")).lower() for l in leaders}
         keep.add(self.ride_leader.lower())
-        # Toxic Flow: Gebannte bleiben BEOBACHTET (Baseline lebt weiter),
-        # sonst gäbe es keine frischen Signale zum Gegenhandeln - der Bann
-        # nimmt ihnen den Pool-Slot, nicht die Rolle als Kontra-Indikator.
+        # Toxic Flow: Toxische (gebannt ODER Record-Defizit) bleiben
+        # BEOBACHTET (Baseline lebt weiter), sonst gäbe es keine frischen
+        # Signale zum Gegenhandeln - toxisch nimmt nur den Pool-Slot, nicht
+        # die Rolle als Kontra-Indikator.
         if self.cfg.counter_toxic:
-            keep |= {a for a in self.banned if not a.startswith("counter:")}
+            keep |= self.toxic_addrs()
         now = self.clock()
         changed = False
         for s in snapshots:

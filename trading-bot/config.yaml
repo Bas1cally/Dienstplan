@@ -243,6 +243,15 @@ sprint:
                             # wiederholt (Leader hatte doch recht), bannt sich
                             # die Counter-Identität selbst. Gebannte HL-Wallets
                             # bleiben dafür beobachtet (Toxic-Watch, max 12).
+  toxic_record_deficit: 3   # TOXIC-BY-RECORD (Spiegel-Fund 20.07.): "/quest
+                            # amnestie" leert `banned` komplett - Toxic Flow
+                            # hatte danach 78min kein Futter mehr, obwohl
+                            # dieselben Leader ihre miese Bilanz nie verloren
+                            # hatten (leader_record überlebt Amnestien bewusst).
+                            # Ein Leader gilt zusätzlich als toxisch, wenn er im
+                            # eigenen Buch mind. 3 Zyklen mehr verloren als
+                            # gewonnen hat - unabhängig vom (amnestierbaren)
+                            # Strike-Stand. 0 = aus (nur formell Gebannte).
   trail_frac: 0.3           # EDGE-RUNDE (19.07.): Trailing-TP statt fixem Ziel.
                             # Ab +target_profit wird NICHT mehr geschlossen,
                             # sondern der Peak getrailt - Exit erst bei 30%

@@ -673,6 +673,64 @@ def test_build_sprint_pool_evicts_banned_larp_next_candidate_rises():
         "nächstbester (0xd) rückt auf den frei gewordenen Slot statt leer zu bleiben"
 
 
+def test_build_sprint_pool_excludes_record_toxic_leader_without_ban():
+    """Spiegel-Fund 20.07.: bei aktivem Toxic Flow darf ein Leader mit
+    miesem Langzeit-Record (toxic_addrs) nicht gleichzeitig FOLGEND im Pool
+    sitzen UND als toxisch gekontert werden - auch wenn er (noch) nicht
+    formell gebannt ist."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.sprint.pool_size = 3
+        ap.cfg.sprint.counter_toxic = True
+        ap.cfg.sprint.toxic_record_deficit = 3
+        ap.leaders = []
+        ap.sprint.leader_record["0xb"] = {"won": 0, "lost": 4}   # Defizit 4
+        assert "0xb" not in ap.sprint.banned, "Vorbedingung: nicht formell gebannt"
+        ranked = [metrics("0xa", 60), metrics("0xb", 55),
+                  metrics("0xc", 50), metrics("0xd", 45)]
+        pool = ap._build_sprint_pool(ranked)
+    addrs = [p["address"] for p in pool]
+    assert "0xb" not in addrs, "Record-toxisch fliegt aus dem Follow-Pool"
+    assert "0xd" in addrs, "nächstbester rückt nach"
+
+
+def test_build_sprint_pool_keeps_leader_when_counter_toxic_disabled():
+    """Ohne counter_toxic bleibt _sprint_banned() beim alten Verhalten -
+    ein schlechter Record allein sperrt den Pool-Platz nicht."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.sprint.pool_size = 3
+        ap.cfg.sprint.counter_toxic = False
+        ap.cfg.sprint.toxic_record_deficit = 3
+        ap.leaders = []
+        ap.sprint.leader_record["0xb"] = {"won": 0, "lost": 4}
+        ranked = [metrics("0xa", 60), metrics("0xb", 55), metrics("0xc", 50)]
+        pool = ap._build_sprint_pool(ranked)
+    assert "0xb" in [p["address"] for p in pool]
+
+
+def test_tracked_addresses_toxic_watch_includes_record_toxic():
+    """toxic_addrs() ist amnestie-fest (Spiegel-Fund 20.07.) - die Toxic-
+    Watch in _tracked_addresses muss record-toxische Wallets auch OHNE
+    formellen Bann mitnehmen, sonst hat Toxic Flow nach einer Amnestie
+    keine Baseline mehr für sie."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.sprint.counter_toxic = True
+        ap.cfg.sprint.toxic_record_deficit = 3
+        ap.leaders = []
+        ap.sprint_leaders = []
+        ap.sprint.leader_record["0xtoxic"] = {"won": 0, "lost": 5}
+        addrs = ap._tracked_addresses()
+    assert "0xtoxic" in addrs
+
+
 def test_build_sprint_pool_rotates_idle_wallets_to_the_back():
     """Nutzer: 'scannen scannen Daten'. Eine Wallet, die über Stunden kein
     Signal gab (idle), rutscht beim Rebuild nach hinten - frische Kandidaten

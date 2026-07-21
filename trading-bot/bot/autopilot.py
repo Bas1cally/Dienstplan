@@ -1382,15 +1382,19 @@ class Autopilot:
             if a and a not in seen:
                 seen.add(a)
                 addrs.append(a)
-        # Toxic-Watch (Nutzer 20.07., Counter-Trading): gebannte HL-Wallets
-        # BLEIBEN beobachtet, obwohl sie keinen Pool-Slot mehr haben - ihre
-        # frischen Signale sind jetzt Kontra-Indikatoren. Gedeckelt (12),
-        # damit die Bann-Liste das Snapshot-Budget nicht auffrisst; Lighter-
-        # Gebannte brauchen keinen Slot hier (kommen über den Lighter-Feed,
-        # solange sie in dessen Top-Liste stehen).
+        # Toxic-Watch (Nutzer 20.07., Counter-Trading): toxische HL-Wallets
+        # (gebannt ODER Record-Defizit, siehe toxic_addrs) BLEIBEN beobachtet,
+        # obwohl sie keinen Pool-Slot mehr haben - ihre frischen Signale sind
+        # jetzt Kontra-Indikatoren. toxic_addrs() ist AMNESTIE-FEST (Spiegel-
+        # Fund 20.07.: reine self.sprint.banned wurde bei /quest amnestie
+        # komplett geleert, Toxic Flow hatte 78min kein Futter mehr, obwohl
+        # dieselben Leader ihre miese Langzeit-Bilanz nie verloren hatten).
+        # Gedeckelt (12), damit die Watch-Liste das Snapshot-Budget nicht
+        # auffrisst; Lighter-Toxische brauchen keinen Slot hier (kommen über
+        # den Lighter-Feed, solange sie in dessen Top-Liste stehen).
         if self.cfg.sprint.counter_toxic and self.sprint:
             have = {x.lower() for x in addrs}
-            for a in sorted(self.sprint.banned):
+            for a in sorted(self.sprint.toxic_addrs()):
                 if a.startswith("0x") and a not in have:
                     addrs.append(a)
                     have.add(a)
@@ -1399,9 +1403,18 @@ class Autopilot:
         return addrs
 
     def _sprint_banned(self) -> set[str]:
-        """Adressen, die Sprint als LARP enttarnt hat (lowercase). Leer, wenn
-        Sprint aus ist oder das Buch noch nicht existiert."""
-        return self.sprint.banned if self.sprint else set()
+        """Adressen, die vom Sprint-Pool ausgeschlossen bleiben (lowercase).
+        Bei aktivem Toxic Flow (counter_toxic) ist das toxic_addrs() - Bann
+        ODER Record-Defizit (Spiegel-Fund 20.07.: ein Leader mit miesem
+        Langzeit-Record, aber gerade nicht formell gebannt, darf nicht
+        gleichzeitig FOLGEND im Pool sitzen UND als toxisch gekontert werden).
+        Sonst nur self.sprint.banned (altes Verhalten). Leer, wenn Sprint aus
+        ist oder das Buch noch nicht existiert."""
+        if not self.sprint:
+            return set()
+        if self.cfg.sprint.counter_toxic:
+            return self.sprint.toxic_addrs()
+        return self.sprint.banned
 
     def _leverage_desc(self) -> str:
         """Lesbare Hebel-Zusammenfassung fürs Log/Telegram: Basis + Coin-

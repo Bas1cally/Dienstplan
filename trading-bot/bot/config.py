@@ -480,6 +480,17 @@ class SprintConfig:
     # Wahrheitsfindung wie bei jedem anderen Leader. Nur im Mess-Modus
     # (parallel_rides) aktiv; der Elite-Einzel-Ritt reitet nur Bewiesene.
     counter_toxic: bool = False
+    # Toxic-by-Record (Spiegel-Fund 20.07.: /quest amnestie leerte `banned`
+    # komplett -> Toxic Flow hatte kein Futter mehr, 78 min praktisch ohne
+    # Signale): ein Leader gilt zusätzlich als toxisch, wenn seine
+    # Lebenszeit-Bilanz im EIGENEN Buch um mindestens diesen Wert negativ
+    # ist (lost - won >= deficit). leader_record überlebt die Amnestie
+    # BEWUSST - damit ist der Toxic-Pool amnestie-fest: Strikes/Bans sind
+    # die kurzfristige Justiz, der Record das Langzeitgedächtnis.
+    # Record-Toxische fliegen (bei aktivem counter_toxic) auch aus dem
+    # normalen Pool - ein Leader wird nie gleichzeitig geritten UND
+    # gekontert. 0 = aus (nur Gebannte gelten als toxisch).
+    toxic_record_deficit: int = 0
     # LARP-Strikes: Verlust-Ritt -> Strike +1, Gewinn-Ritt -> Strike -1 (min 0).
     # Bei strike_ban Strikes wird der Leader fürs Sprint-Buch gesperrt.
     strike_ban: int = 2

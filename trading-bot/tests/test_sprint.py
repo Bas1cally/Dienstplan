@@ -1581,6 +1581,66 @@ def test_toxic_counter_identity_self_bans_via_own_exit():
         assert b.stats(P)["scan"]["rejected"].get("counter_gesperrt") == 1
 
 
+def test_toxic_by_record_counters_without_formal_ban():
+    """Spiegel-Fund 20.07.: ein Leader mit miesem LANGZEIT-Record, aber
+    (noch) nicht formell gebannt, ist trotzdem toxisch - toxic_record_deficit
+    macht das Gegenhandeln unabhängig vom aktuellen Strike-Stand."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, counter_toxic=True, toxic_record_deficit=3)
+        b.leader_record["0xbad"] = {"won": 1, "lost": 4}   # Defizit 3
+        assert "0xbad" not in b.banned, "Vorbedingung: nicht formell gebannt"
+        two = leaders(("0xbest", 80))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
+        assert b.paper.sizes().get("BTC", 0) < 0, "Record-toxisch wird gekontert"
+        assert b.ride_leaders["BTC"] == "counter:0xbad"
+
+
+def test_toxic_by_record_survives_amnesty():
+    """Kernfund: /quest amnestie leert `banned` - der Record-Defizit bleibt
+    (leader_record überlebt Amnestien bewusst), also bleibt der Leader
+    toxisch und Toxic Flow hat weiter Futter."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, counter_toxic=True, toxic_record_deficit=3)
+        b.banned.add("0xbad")
+        b.leader_record["0xbad"] = {"won": 0, "lost": 5}
+        assert b._is_toxic("0xbad") is True
+        b.amnesty()
+        assert "0xbad" not in b.banned, "Amnestie hat den Bann gelöscht"
+        assert b._is_toxic("0xbad") is True, "Record-Defizit macht ihn weiter toxisch"
+        assert "0xbad" in b.toxic_addrs()
+
+
+def test_toxic_by_record_below_threshold_stays_regular():
+    """Defizit unter der Schwelle -> ganz normaler Leader, wird gefolgt."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, counter_toxic=True, toxic_record_deficit=3)
+        b.leader_record["0xbad"] = {"won": 3, "lost": 4}   # Defizit nur 1
+        two = leaders(("0xbest", 80), ("0xbad", 50))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
+        assert b.paper.sizes().get("BTC", 0) > 0, "unter der Schwelle -> ganz normal gefolgt"
+        assert b.ride_leaders["BTC"] == "0xbad"
+
+
+def test_toxic_by_record_rejects_when_counter_flag_off():
+    """toxic_record_deficit ohne counter_toxic: kein Gegenwette-Mechanismus
+    verfügbar, ein bekannt schlechter Leader wird trotzdem NICHT gefolgt -
+    sichtbar verworfen statt stillschweigend geritten."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, counter_toxic=False, toxic_record_deficit=3)
+        b.leader_record["0xbad"] = {"won": 0, "lost": 5}
+        two = leaders(("0xbad", 80))
+        b.tick(two, [snap("0xbad", 50_000)], P)
+        b.tick(two, [snap("0xbad", 50_000, BTC=500)], P)
+        assert b.paper.sizes() == {}
+        assert b.stats(P)["scan"]["rejected"].get("leader_toxisch") == 1
+
+
 def test_banned_leader_flip_does_not_reenter():
     """Spiegel-Fund 20.07. (Ban-Bypass): lighter:726722 wurde bei 2 Strikes
     gebannt und machte über den Flip-Re-Entry-Pfad weitere 3 Verlust-Ritte
