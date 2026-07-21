@@ -1395,6 +1395,13 @@ class Autopilot:
         if self.cfg.sprint.counter_toxic and self.sprint:
             have = {x.lower() for x in addrs}
             for a in sorted(self.sprint.toxic_addrs()):
+                # Bestätigter Flip-Flopper (Original UND Gegenwette
+                # gebannt, Nutzer 21.07.): weder Folgen noch Kontern
+                # funktioniert - keinen der raren 12 Watch-Slots mehr
+                # dafür verschwenden. toxic_addrs() selbst bleibt
+                # unverändert (steuert weiterhin den Pool-Ausschluss).
+                if f"counter:{a}" in self.sprint.banned:
+                    continue
                 if a.startswith("0x") and a not in have:
                     addrs.append(a)
                     have.add(a)

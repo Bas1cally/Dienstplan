@@ -1641,6 +1641,86 @@ def test_toxic_by_record_rejects_when_counter_flag_off():
         assert b.stats(P)["scan"]["rejected"].get("leader_toxisch") == 1
 
 
+def test_flip_flopper_confirmed_when_counter_also_bans():
+    """Nutzer 21.07.: 'umgekehrte Strikes bei einer gebannten Wallet machen
+    keinen Sinn - 2 Strikes, er ist raus, 2 weitere trotz Counter heißt:
+    Wallet ist Flip-Flopper.' Bannt sich die GEGENWETTE gegen eine bereits
+    gebannte Wallet ebenfalls, ist das die Bestätigung: weder Folgen noch
+    Kontern funktioniert - journalisiert für die Toxic-Watch-Bereinigung."""
+    recorded = []
+
+    class J:
+        def record(self, kind, **d):
+            recorded.append((kind, d))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        cfg = SprintConfig(exclude_coins=[], confirm_delay_s=0, parallel_rides=True,
+                            counter_toxic=True, strike_ban=1, max_ride_hours=2.0)
+        b = SprintBook(cfg, FEE, journal=J(), runtime_dir=Path(tmp), clock=lambda: t["now"])
+        b.banned.add("0xbad")
+        two = leaders(("0xbest", 80))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
+        t["now"] += 2.5 * 3600   # Gegenwette hängt >2h im Minus -> Zeit-Cut -> eigener Bann
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)],
+               {"BTC": 100.5, "ETH": 100.0})
+        assert "counter:0xbad" in b.banned
+        assert any(k == "sprint_flip_flopper_confirmed" and d.get("leader") == "0xbad"
+                   for k, d in recorded), recorded
+
+
+def test_flip_flopper_not_confirmed_for_plain_ban():
+    """Ein ganz normaler (Nicht-Counter-)Bann ist KEIN Flip-Flopper-Fund -
+    das Event darf nur bei bestätigter Gegenwette gegen eine bereits
+    gebannte Wallet feuern, nicht bei jedem gewöhnlichen Strike-Bann."""
+    recorded = []
+
+    class J:
+        def record(self, kind, **d):
+            recorded.append((kind, d))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = SprintConfig(exclude_coins=[], confirm_delay_s=0)
+        b = SprintBook(cfg, FEE, journal=J(), runtime_dir=Path(tmp))
+        led = leaders(("0xbad", 80))
+        b.tick(led, [snap("0xbad", 50_000)], P)
+        b.tick(led, [snap("0xbad", 50_000, BTC=500)], P)
+        b.tick(led, [snap("0xbad", 50_000)], {"BTC": 99.0, "ETH": 100.0})
+        b.tick(led, [snap("0xbad", 50_000, BTC=500)], {"BTC": 99.0, "ETH": 100.0})
+        b.tick(led, [snap("0xbad", 50_000)], {"BTC": 98.0, "ETH": 100.0})
+        assert "0xbad" in b.banned
+        assert not any(k == "sprint_flip_flopper_confirmed" for k, _ in recorded), recorded
+
+
+def test_flip_flopper_not_confirmed_when_original_not_yet_banned():
+    """Bannt sich die Gegenwette, während die ORIGINAL-Wallet (noch) nicht
+    gebannt ist, ist das kein Flip-Flopper-Beweis - counter_toxic kann auch
+    rein über den Record-Defizit (toxic_addrs) ohne formellen Bann greifen."""
+    recorded = []
+
+    class J:
+        def record(self, kind, **d):
+            recorded.append((kind, d))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        cfg = SprintConfig(exclude_coins=[], confirm_delay_s=0, parallel_rides=True,
+                            counter_toxic=True, strike_ban=1, max_ride_hours=2.0,
+                            toxic_record_deficit=3)
+        b = SprintBook(cfg, FEE, journal=J(), runtime_dir=Path(tmp), clock=lambda: t["now"])
+        b.leader_record["0xbad"] = {"won": 0, "lost": 4}   # record-toxisch, NICHT formell gebannt
+        assert "0xbad" not in b.banned
+        two = leaders(("0xbest", 80))
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
+        t["now"] += 2.5 * 3600
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)],
+               {"BTC": 100.5, "ETH": 100.0})
+        assert "counter:0xbad" in b.banned
+        assert not any(k == "sprint_flip_flopper_confirmed" for k, _ in recorded), recorded
+
+
 def test_banned_leader_flip_does_not_reenter():
     """Spiegel-Fund 20.07. (Ban-Bypass): lighter:726722 wurde bei 2 Strikes
     gebannt und machte über den Flip-Re-Entry-Pfad weitere 3 Verlust-Ritte

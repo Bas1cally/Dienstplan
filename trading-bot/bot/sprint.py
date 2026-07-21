@@ -1357,6 +1357,25 @@ class SprintBook:
                         self.notifier.send(
                             f"🚫 <b>Leader enttarnt</b> <code>{leader[:10]}…</code>\n"
                             f"{n} Verlust-Ritte in Folge - vom Quest-Bot gesperrt.")
+                    # Flip-Flopper-Bestätigung (Nutzer 21.07.: "umgekehrte
+                    # Strikes bei einer gebannten Wallet machen keinen Sinn -
+                    # 2 Strikes, er ist raus, 2 weitere trotz Counter heißt:
+                    # Wallet ist Flip-Flopper"). Verliert die GEGENWETTE
+                    # gegen eine bereits gebannte Wallet ebenfalls bis zum
+                    # Bann, hat sich gezeigt: weder Folgen NOCH Kontern
+                    # funktioniert - kein Richtungs-Trader (ob gut oder
+                    # schlecht), sondern reines Rauschen/Churn. Aus dem
+                    # Toxic-Watch nehmen (toxic_addrs() prüft dasselbe
+                    # Kriterium) statt einen von max 12 Watch-Slots für immer
+                    # auf einer erwiesen wertlosen Adresse zu verschwenden.
+                    if key.startswith("counter:") and key[len("counter:"):] in self.banned:
+                        original = leader[len("counter:"):]
+                        log.warning("Sprint: %s bestätigter Flip-Flopper (Original "
+                                    "UND Gegenwette gebannt) - nicht mehr beobachtet",
+                                    original[:10])
+                        if self.journal:
+                            self.journal.record("sprint_flip_flopper_confirmed",
+                                                leader=original)
                 elif self.notifier:
                     self.notifier.send(f"⚠️ Strike {n}/{self.cfg.strike_ban} für "
                                        f"<code>{leader[:10]}…</code> (Verlust-Ritt {pnl:+,.2f}$)")

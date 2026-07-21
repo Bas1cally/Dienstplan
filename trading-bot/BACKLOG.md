@@ -76,6 +76,26 @@ und `_build_sprint_pool` (ein record-toxischer Leader sitzt nie
 gleichzeitig FOLGEND im Pool UND wird gekontert). Strikes/Bans bleiben
 die kurzfristige Justiz, `leader_record` das Langzeitgedächtnis.
 
+**NACHTRAG 3 (21.07., Spiegel-Audit-QOL) — Flip-Flopper-Erkennung.**
+Nutzer: "umgekehrte Strikes bei einer gebannten Wallet machen keinen
+Sinn — 2 Strikes, er ist raus, 2 weitere trotz Counter heißt: Wallet ist
+gebannt Flip-Flopper." Bannt sich die GEGENWETTE (`counter:<addr>`)
+selbst, während die Original-Adresse bereits gebannt ist, beweist das:
+weder Folgen NOCH Kontern funktioniert bei dieser Wallet — reines
+Rauschen/Churn, kein Richtungs-Skill in irgendeine Richtung. `_book_cycle`
+erkennt den Fall (`key.startswith("counter:") and Original in banned`),
+loggt eine Warnung und journalisiert `sprint_flip_flopper_confirmed`.
+Konsequenz: `_tracked_addresses()`s Toxic-Watch (autopilot.py) überspringt
+bestätigte Flip-Flopper bei der Vergabe der knappen 12 Watch-Slots — ein
+noch nicht doppelt widerlegter toxischer Leader bekommt den Slot
+stattdessen. `toxic_addrs()` selbst bleibt bewusst unverändert (steuert
+weiter den Pool-Ausschluss über `_sprint_banned()` — ein Flip-Flopper
+bleibt aus dem Follow-Pool draußen, nur die aktive Beobachtung wird
+eingespart). Spiegel-Stand beim Bau: Toxic Flow lief gut (+212.67$
+gebankt, 15✅/10💥), der konkrete Fall (Original + Gegenwette beide
+gebannt) trat live noch nicht auf — vorausschauende Härtung, kein
+akuter Bugfix.
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
 abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3 Zyklen bei >= 60%

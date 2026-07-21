@@ -731,6 +731,28 @@ def test_tracked_addresses_toxic_watch_includes_record_toxic():
     assert "0xtoxic" in addrs
 
 
+def test_tracked_addresses_toxic_watch_skips_confirmed_flip_flopper():
+    """Nutzer 21.07.: ist eine Wallet UND ihre Gegenwette gebannt (Flip-
+    Flopper - weder Folgen noch Kontern funktioniert), verschwendet die
+    Toxic-Watch keinen der 12 Slots mehr auf sie. toxic_addrs() selbst
+    bleibt unangetastet (steuert weiterhin den Pool-Ausschluss über
+    _sprint_banned) - nur die Beobachtungsliste wird schlanker."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.cfg.sprint.counter_toxic = True
+        ap.cfg.sprint.toxic_record_deficit = 3
+        ap.leaders = []
+        ap.sprint_leaders = []
+        ap.sprint.banned.add("0xflop")
+        ap.sprint.banned.add("counter:0xflop")   # Gegenwette auch gebannt -> Flip-Flopper
+        ap.sprint.leader_record["0xstill_toxic"] = {"won": 0, "lost": 5}
+        addrs = ap._tracked_addresses()
+    assert "0xflop" not in addrs, "bestätigter Flip-Flopper verbraucht keinen Watch-Slot mehr"
+    assert "0xstill_toxic" in addrs, "noch nicht bestätigt -> bleibt regulär beobachtet"
+
+
 def test_build_sprint_pool_rotates_idle_wallets_to_the_back():
     """Nutzer: 'scannen scannen Daten'. Eine Wallet, die über Stunden kein
     Signal gab (idle), rutscht beim Rebuild nach hinten - frische Kandidaten
