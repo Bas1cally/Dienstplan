@@ -144,6 +144,22 @@ Reduziert das Gap-Risiko (20s → 5s Fenster), eliminiert es aber nicht
 vollständig - echte Kurs-Sprünge kann kein Paper-Floor der Welt abfangen
 (auch live slippen Stops).
 
+**NACHTRAG 6 (22.07., Nutzer-Frage zu einer konkreten Meldung) —
+Plus-Lock-Text widersprach sich selbst bei Verlust.** Nutzer zitierte
+live: "🔻 Zyklus 101 (HYPE) beendet (Plus gesichert (war im Plus - kein
+Minus-Exit)): -7.24$" - der Text behauptete "kein Minus-Exit", obwohl der
+PnL direkt daneben negativ war. Kein neuer Bug (genau der Restrisiko-Fall
+aus NACHTRAG 5 - Fast-Path reduziert das Gap-Fenster, eliminiert es aber
+nicht), sondern eine seit dem 19.07.-Bau nie an die Realität angepasste
+Text-Annahme (`_STRIKE_EXEMPT`-Kommentar ging von "landet per Definition
+breakeven-positiv" aus). Fix: `_book_cycle` nutzt bei `plus_lock` mit
+negativem PnL jetzt `_PLUS_LOCK_OVERSHOOT_TXT` ("Plus-Sicherung zu spät
+ausgelöst - Kurs fiel zwischen zwei Checks durch den Floor") statt der
+pauschalen "kein Minus-Exit"-Zeile; der positive Normalfall behält den
+bisherigen Text. Kein Verhalten geändert (weiterhin strike-exempt, keine
+neue Strafe) - nur ehrliche Kommunikation. 2 neue Tests (Overshoot- und
+Normalfall-Text via Notifier-Nachricht geprüft).
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
 abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3 Zyklen bei >= 60%

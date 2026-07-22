@@ -1788,6 +1788,57 @@ def test_plus_lock_not_armed_below_threshold():
             "Peak (~+11$) blieb unter arm (30$) - Sicherung nie scharf, Ritt läuft"
 
 
+def test_plus_lock_overshoot_message_does_not_claim_no_minus_exit():
+    """Nutzer-Fund 22.07.: Meldung 'Plus gesichert (war im Plus - kein
+    Minus-Exit): -7.24$' widerspricht sich selbst - Gap-durch-den-Stop
+    (siehe fast_exit_check-Docstring) kann Plus-Lock trotzdem negativ
+    aussteigen lassen. Die Meldung darf das nicht länger abstreiten."""
+    sent = []
+
+    class N:
+        def send(self, m):
+            sent.append(m)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = SprintConfig(exclude_coins=[], confirm_delay_s=0, parallel_rides=True,
+                           plus_lock_arm=30.0, plus_lock_floor=15.0)
+        b = SprintBook(cfg, FEE, notifier=N(), runtime_dir=Path(tmp))
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)   # Entry 100
+        # Peak "künstlich" armed (simuliert einen bereits gesehenen Peak >= arm,
+        # wie er vor einem echten Kurssprung stünde) - direkter Settle-Aufruf mit
+        # einem NEGATIVEN Preis testet die Text-Logik, ohne einen echten
+        # mehrstufigen Kurssprung nachbauen zu müssen.
+        b._ride_peak["BTC"] = 35.0
+        sent.clear()
+        b._settle_one("BTC", {"BTC": 99.0, "ETH": 100.0}, "plus_lock")
+        msg = next(m for m in sent if "beendet" in m)
+        assert "kein Minus-Exit" not in msg, "darf sich bei negativem PnL nicht selbst widersprechen"
+        assert "zu spät" in msg
+
+
+def test_plus_lock_positive_message_still_says_no_minus_exit():
+    """Regressionsschutz: der normale (positive) Plus-Lock-Fall behält den
+    bisherigen, korrekten Text."""
+    sent = []
+
+    class N:
+        def send(self, m):
+            sent.append(m)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = SprintConfig(exclude_coins=[], confirm_delay_s=0, parallel_rides=True,
+                           plus_lock_arm=30.0, plus_lock_floor=5.0)
+        b = SprintBook(cfg, FEE, notifier=N(), runtime_dir=Path(tmp))
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        b._ride_peak["BTC"] = 35.0
+        sent.clear()
+        b._settle_one("BTC", {"BTC": 100.3, "ETH": 100.0}, "plus_lock")
+        msg = next(m for m in sent if "beendet" in m)
+        assert "kein Minus-Exit" in msg
+
+
 def test_fast_exit_check_catches_plus_lock_between_full_ticks():
     """Spiegel-Fund 22.07.: Plus-Lock (Floor 15$) schoss trotzdem bis zu
     -33.57$ ins Minus durch - der volle Tick lief nur alle poll_seconds

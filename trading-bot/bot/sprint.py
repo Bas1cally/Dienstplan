@@ -54,6 +54,14 @@ _REASON_TXT = {
     "markt_zu": "Börsen-Schluss (Gewinn gesichert)",
     "plus_lock": "Plus gesichert (war im Plus - kein Minus-Exit)",
 }
+# Nutzer-Fund 22.07.: die Meldung oben behauptete "kein Minus-Exit", obwohl
+# der gemeldete PnL negativ war (-7.24$, HYPE) - Plus-Lock kann trotz
+# Fast-Path (siehe fast_exit_check) durch einen Kurssprung ZWISCHEN zwei
+# Checks fallen (Gap-durch-den-Stop, Spiegel-Fund 22.07.: bis zu -33.57$
+# vor dem Fast-Path). Der Text log darf das nicht weiterhin abstreiten,
+# sonst wirkt die Meldung selbst-widersprüchlich (🔻 + "kein Minus-Exit").
+_PLUS_LOCK_OVERSHOOT_TXT = ("Plus-Sicherung zu spät ausgelöst (Kurs fiel "
+                           "zwischen zwei Checks durch den Floor)")
 # Kein Strike: nicht die Entscheidung/Schuld des Leaders - erzwungene/externe
 # Schließung, sein eigenes Verhalten war dabei irrelevant. 'markt_zu' = unsere
 # Börsen-Öffnungszeiten-Regel (Gewinn sichern), 'risk_off' = Markt-weiter
@@ -67,8 +75,10 @@ _REASON_TXT = {
 _STRIKE_EXEMPT = {"risk_off", "markt_zu", "plus_lock"}
 # 'plus_lock' (Nutzer 19.07.: "sobald wir im Plus sind sollten wir nie mit
 # Minus rausgehen") ist UNSERE Gewinn-Sicherungs-Regel, nicht die Entscheidung
-# des Leaders - und der Exit landet per Definition um breakeven-positiv, ein
-# Strike dafür wäre doppelt unfair.
+# des Leaders - beabsichtigt landet der Exit um breakeven-positiv, kann aber
+# durch einen Kurssprung ZWISCHEN zwei Checks auch negativ ausfallen (Spiegel-
+# Fund 22.07., siehe _PLUS_LOCK_OVERSHOOT_TXT) - trotzdem UNSER Timing-Problem,
+# nicht die Schuld des Leaders, ein Strike dafür wäre doppelt unfair.
 
 # Confidence-Points/Star (BACKLOG.md, Nutzer-Entscheidung 15.07.): NUR das
 # eigene, durchgehaltene +10%-Ziel (tp) und eine Star-Preemption (der Bot
@@ -1441,7 +1451,10 @@ class SprintBook:
                         f"bewiesener Erfolg, kein Zufall.")
 
         icon = "🏁" if reason == "tp" else "💥" if reason == "bust" else ("✅" if won else "🔻")
-        reason_txt = _REASON_TXT.get(reason, reason)
+        if reason == "plus_lock" and not won:
+            reason_txt = _PLUS_LOCK_OVERSHOOT_TXT
+        else:
+            reason_txt = _REASON_TXT.get(reason, reason)
         kind = {"tp": "sprint_tp", "bust": "sprint_bust"}.get(reason, "sprint_cycle_end")
         what = f"Zyklus {cycle}" + (f" ({coin})" if coin else "")
         log.warning("Sprint-%s %s (%s): PnL %+.2f (banked gesamt %+.2f)",
