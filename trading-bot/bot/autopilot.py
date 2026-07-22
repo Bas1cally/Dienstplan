@@ -1075,6 +1075,46 @@ class Autopilot:
 
     # ---------- Hauptschleife ----------
 
+    def _wait_for_next_tick(self) -> None:
+        """Wartet bis zum nächsten vollen Tick (copytrade.poll_seconds) -
+        ereignisgesteuert, ein Leader-Fill per WebSocket weckt sofort.
+
+        Fast-Path (Spiegel-Fund 22.07.: Plus-Lock schoss trotz Floor bis zu
+        -33.57$ durch, weil der volle Tick nur alle poll_seconds - typ. 20s -
+        lief; ein 10x-Ritt kann sich in dieser Zeit weiter bewegen als der
+        Floor-Puffer gibt). Läuft ein Mess-Ritt UND ist sprint.fast_check_
+        seconds an, wird die Wartezeit in kleinere Stücke zerlegt und
+        zwischendurch NUR der Exit-Reflex (SprintBook.fast_exit_check) mit
+        bereits vorhandenen WS-Mids nachgeholt - kein Leader-Scan, kein
+        zusätzlicher Netz-Call. Ohne offene Mess-Ritte oder mit
+        fast_check_seconds=0 (Default) exakt das alte Verhalten."""
+        poll_s = self.cfg.copytrade.poll_seconds
+        fast_s = self.cfg.sprint.fast_check_seconds if self.sprint else 0
+        if not (fast_s > 0 and self.sprint.paper.sizes()):
+            if self.feed and self.feed.connected:
+                if self.feed.wait(poll_s):
+                    log.info("Leader-Fill per WebSocket - Tick sofort (Copy-Lag minimiert)")
+            else:
+                self._stop.wait(poll_s)
+            return
+        remaining = poll_s
+        while remaining > 0 and not self._stop.is_set():
+            chunk = min(fast_s, remaining)
+            if self.feed and self.feed.connected:
+                if self.feed.wait(chunk):
+                    log.info("Leader-Fill per WebSocket - Tick sofort (Copy-Lag minimiert)")
+                    return
+            else:
+                self._stop.wait(chunk)
+            remaining -= chunk
+            if self._stop.is_set():
+                return
+            mids = self.feed.mids() if self.feed else None
+            if mids:
+                prices = dict(self.copier.last_prices) if self.copier else {}
+                prices.update(mids)
+                self.sprint.fast_exit_check(prices)
+
     def _run(self) -> None:
         # Setup darf NIE endgültig sterben (z.B. 429-Rate-Limit beim Hochfahren):
         # mit Backoff weiterprobieren, beim ersten Fehlschlag einmal alarmieren.
@@ -1160,14 +1200,9 @@ class Autopilot:
                 self._tick_error_count += 1
                 self._last_tick_error = traceback.format_exc()[-2000:]
                 log.exception("Autopilot-Tick fehlgeschlagen")
-            # Ereignisgesteuert: Leader-Fill weckt sofort, sonst normales Intervall
-            if self.feed and self.feed.connected:
-                if self.feed.wait(self.cfg.copytrade.poll_seconds):
-                    log.info("Leader-Fill per WebSocket - Tick sofort (Copy-Lag minimiert)")
-                if self._stop.is_set():
-                    break
-            else:
-                self._stop.wait(self.cfg.copytrade.poll_seconds)
+            self._wait_for_next_tick()
+            if self._stop.is_set():
+                break
         if self.feed:
             self.feed.close()
         self._set_status(state="stopped")

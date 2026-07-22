@@ -1259,6 +1259,106 @@ def test_setup_retry_stop_aborts():
     assert "API down" in (ap.error or "")
 
 
+class _FakeFeed:
+    def __init__(self, mids=None, connected=True):
+        self.connected = connected
+        self._mids = mids or {}
+        self.wait_calls = []
+
+    def wait(self, timeout):
+        self.wait_calls.append(timeout)
+        return False
+
+    def mids(self):
+        return dict(self._mids)
+
+
+class _FakeSprintPaper:
+    def __init__(self, sizes):
+        self._sizes = dict(sizes)
+
+    def sizes(self):
+        return dict(self._sizes)
+
+
+class _FakeSprint:
+    def __init__(self, sizes):
+        self.paper = _FakeSprintPaper(sizes)
+        self.fast_calls = []
+
+    def fast_exit_check(self, prices):
+        self.fast_calls.append(prices)
+
+
+def test_wait_for_next_tick_fast_path_checks_between_full_ticks():
+    """Spiegel-Fund 22.07.: Plus-Lock schoss trotz Floor durch, weil der
+    volle Tick nur alle poll_seconds lief. fast_check_seconds zerlegt die
+    Wartezeit und ruft fast_exit_check zwischendurch mit frischen (kosten-
+    losen) WS-Mids auf - hier: 20s / 5s = 4 Zwischen-Checks."""
+    ap = _autopilot()
+    ap.cfg.copytrade.poll_seconds = 20
+    ap.cfg.sprint.fast_check_seconds = 5
+    ap.sprint = _FakeSprint({"BTC": 1.0})
+    ap.feed = _FakeFeed(mids={"BTC": 101.0})
+    ap._wait_for_next_tick()
+    assert ap.feed.wait_calls == [5, 5, 5, 5]
+    assert len(ap.sprint.fast_calls) == 4
+    assert ap.sprint.fast_calls[0] == {"BTC": 101.0}
+
+
+def test_wait_for_next_tick_merges_ws_mids_over_last_prices():
+    ap = _autopilot()
+    ap.cfg.copytrade.poll_seconds = 10
+    ap.cfg.sprint.fast_check_seconds = 10
+    ap.sprint = _FakeSprint({"BTC": 1.0})
+    ap.feed = _FakeFeed(mids={"BTC": 101.0})
+    ap.copier = type("C", (), {"last_prices": {"BTC": 100.0, "ETH": 1.0}})()
+    ap._wait_for_next_tick()
+    assert ap.sprint.fast_calls == [{"BTC": 101.0, "ETH": 1.0}], \
+        "frische WS-Mids überschreiben last_prices, andere Coins bleiben erhalten"
+
+
+def test_wait_for_next_tick_stays_old_behavior_without_open_rides():
+    """Ohne offene Mess-Ritte gibt es nichts zu schützen - exakt das alte
+    Einzel-Wait-Verhalten, kein zusätzlicher Overhead."""
+    ap = _autopilot()
+    ap.cfg.copytrade.poll_seconds = 20
+    ap.cfg.sprint.fast_check_seconds = 5
+    ap.sprint = _FakeSprint({})
+    ap.feed = _FakeFeed(mids={"BTC": 101.0})
+    ap._wait_for_next_tick()
+    assert ap.feed.wait_calls == [20]
+
+
+def test_wait_for_next_tick_stays_old_behavior_when_disabled():
+    """fast_check_seconds=0 (Default) -> unverändertes altes Verhalten."""
+    ap = _autopilot()
+    ap.cfg.copytrade.poll_seconds = 20
+    ap.cfg.sprint.fast_check_seconds = 0
+    ap.sprint = _FakeSprint({"BTC": 1.0})
+    ap.feed = _FakeFeed(mids={"BTC": 101.0})
+    ap._wait_for_next_tick()
+    assert ap.feed.wait_calls == [20]
+    assert ap.sprint.fast_calls == []
+
+
+def test_wait_for_next_tick_stops_early_on_leader_fill():
+    ap = _autopilot()
+    ap.cfg.copytrade.poll_seconds = 20
+    ap.cfg.sprint.fast_check_seconds = 5
+    ap.sprint = _FakeSprint({"BTC": 1.0})
+
+    class _WokenFeed(_FakeFeed):
+        def wait(self, timeout):
+            self.wait_calls.append(timeout)
+            return len(self.wait_calls) == 2   # 2. Chunk: Fill kommt rein
+
+    ap.feed = _WokenFeed(mids={"BTC": 101.0})
+    ap._wait_for_next_tick()
+    assert len(ap.feed.wait_calls) == 2, \
+        "bricht sofort beim Fill ab, wartet nicht die volle Zeit weiter"
+
+
 def test_analyzer_retries_on_429():
     """429 vom Rate-Limit wird mit Backoff wiederholt statt die Wallet zu verwerfen."""
     from bot.copytrade.analyzer import TraderAnalyzer

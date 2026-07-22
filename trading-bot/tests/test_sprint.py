@@ -1788,6 +1788,47 @@ def test_plus_lock_not_armed_below_threshold():
             "Peak (~+11$) blieb unter arm (30$) - Sicherung nie scharf, Ritt läuft"
 
 
+def test_fast_exit_check_catches_plus_lock_between_full_ticks():
+    """Spiegel-Fund 22.07.: Plus-Lock (Floor 15$) schoss trotzdem bis zu
+    -33.57$ ins Minus durch - der volle Tick lief nur alle poll_seconds
+    (20s), ein 10x-Ritt kann sich in dieser Zeit weiter bewegen als der
+    Floor-Puffer gibt. fast_exit_check() muss denselben Plus-Lock-Exit
+    auch OHNE Leader-Scan (nur Preise) auslösen können."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, plus_lock_arm=30.0, plus_lock_floor=5.0)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)          # Entry 100
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 100.5, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), "~+41$ Peak - armed, läuft weiter"
+        b.fast_exit_check({"BTC": 100.1, "ETH": 100.0})   # kein voller Tick, nur Preise
+        assert b.paper.sizes() == {}, "Plus-Lock feuert auch über den Fast-Path"
+        assert b.won == 1 and b.banked > 0
+        assert b.strikes == {}
+
+
+def test_fast_exit_check_noop_in_single_ride_mode():
+    """Einzel-Ritt hat eigenes Timing/eigene Baseline-Logik - fast_exit_check
+    darf dort NICHT eingreifen (parallel_rides=False -> No-Op)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp, parallel_rides=False)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert "BTC" in b.paper.sizes()
+        b.fast_exit_check({"BTC": 1.0, "ETH": 1.0})   # absurder Preis, würde sonst busten
+        assert "BTC" in b.paper.sizes(), "No-Op im Einzel-Ritt-Modus"
+
+
+def test_fast_exit_check_noop_without_prices():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, plus_lock_arm=30.0, plus_lock_floor=5.0)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        b.fast_exit_check({})
+        assert "BTC" in b.paper.sizes(), "leere Preise -> No-Op, kein falscher Exit"
+
+
 def test_amnesty_clears_strikes_and_bans_keeps_positive_proof():
     with tempfile.TemporaryDirectory() as tmp:
         t = {"now": 1_000_000.0}

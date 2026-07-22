@@ -116,6 +116,34 @@ mit frischer Instanz + leerem RAM-`_known` versorgt einen gerittenen
 Leader trotzdem sofort; eine zu alte Momentaufnahme wird beim Laden
 verworfen.
 
+**NACHTRAG 5 (22.07., "Es gibt neue Daten mach was draus") — Fast-Path
+zwischen den Ticks (Plus-Lock schoss trotz Floor durch).** Spiegel-Zahlen:
+Schatztruhe fiel von +198,61$ (21.07.) auf -365,28$ (22.07., ~19h später),
+39✅/40💥 bei 361 Trades. Ursache im Journal sichtbar: fast die Hälfte
+aller `plus_lock`-Exits im Tail waren NEGATIV (-9.0, -24.45, -0.51, -9.0,
+-33.57$) - ein direkter Bruch des eigenen Versprechens ("sobald wir im
+Plus sind sollten wir nie mit Minus rausgehen"). Kein Logik-Fehler (Peak/
+Floor-Vergleich ist korrekt, siehe `_plus_lock_due`) - ein 10x/10-15k$-Ritt
+kann sich in den `poll_seconds` (20s) zwischen zwei vollen Autopilot-Ticks
+weiter bewegen, als der Floor-Puffer (15$, schon einmal 5→15 erhöht,
+20.07.) abfängt: klassisches Gap-durch-den-Stop, kein Datenfehler.
+Fix: neuer Fast-Path zwischen den vollen Ticks. `SprintBook.
+fast_exit_check(prices)` prüft NUR Ziel/Plus-Lock/Bust/Zeit-Cut (kein
+Leader-Scan) - `_tick_parallel`s Schritt 1 wurde dafür in
+`_check_ride_targets()` ausgelagert, keine doppelte Logik.
+`Autopilot._wait_for_next_tick()` zerlegt die Wartezeit zwischen zwei
+vollen Ticks in `sprint.fast_check_seconds`-Stücke (config.yaml: 5s) und
+ruft dazwischen `fast_exit_check` mit bereits vorhandenen (kostenlosen)
+WS-Mids auf - kein zusätzliches Netzwerk-Budget, reiner Exit-Reflex,
+rührt Entries/Sizing/Edge-Logik nicht an. Ohne offene Mess-Ritte oder mit
+`fast_check_seconds: 0` exakt das alte Verhalten (Default aus in
+config.py, config.yaml schaltet scharf). 8 neue Tests (3x `test_sprint.py`
+für `fast_exit_check`, 5x `test_autopilot.py` für `_wait_for_next_tick`
+inkl. Leader-Fill-Interrupt und Alt-Verhalten ohne offene Ritte/deaktiviert).
+Reduziert das Gap-Risiko (20s → 5s Fenster), eliminiert es aber nicht
+vollständig - echte Kurs-Sprünge kann kein Paper-Floor der Welt abfangen
+(auch live slippen Stops).
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
 abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3 Zyklen bei >= 60%

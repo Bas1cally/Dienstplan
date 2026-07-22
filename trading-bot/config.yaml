@@ -290,6 +290,16 @@ sprint:
                             # slippen Stops). Reason "plus_lock" bleibt
                             # strike-exempt: unsere Sicherungs-Regel, nicht die
                             # Entscheidung des Leaders.
+  fast_check_seconds: 5     # FAST-PATH (Spiegel-Fund 22.07.): trotz 15$-Floor
+                            # schoss Plus-Lock live bis zu -33.57$ ins Minus
+                            # durch - der volle Tick lief nur alle poll_seconds
+                            # (20s), ein 10x/10-15k$-Ritt bewegt sich in dieser
+                            # Zeit weiter als der Floor-Puffer gibt. Zwischen den
+                            # vollen Ticks alle 5s NUR Ziel/Plus-Lock/Bust/
+                            # Zeit-Cut mit bereits vorhandenen (kostenlosen)
+                            # WS-Mids nachschauen - kein Leader-Scan, kein
+                            # zusätzliches Netz-Budget, reiner Exit-Reflex.
+                            # 0 = aus.
   max_rides_per_leader: 2   # 1 -> 2 (18.07., Flow-Runde): das 1er-Limit war der
                             # größte Frequenz-Deckel des Live-Tags - 5 von 9
                             # frischen Signalen starben an "leader_belegt", alle

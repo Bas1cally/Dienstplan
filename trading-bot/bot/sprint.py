@@ -571,9 +571,12 @@ class SprintBook:
 
     # ---------- MESS-MODUS: parallele Ritte, jedes Signal = eigener Zyklus ----------
 
-    def _tick_parallel(self, leaders: list[dict], snapshots: list,
-                       prices: dict[str, float], risk_off: bool) -> None:
-        # 1. Ziel/Bust JE RITT (eigene 1000$-Basis, nicht das Sammelbuch)
+    def _check_ride_targets(self, prices: dict[str, float]) -> None:
+        """Ziel/Bust/Zeit-Cut JE RITT (eigene 1000$-Basis, nicht das
+        Sammelbuch) - Tick-Schritt 1, aber ausgelagert, damit sowohl der
+        volle _tick_parallel-Durchlauf als auch fast_exit_check() (Fast-
+        Path zwischen den Autopilot-Ticks, siehe dort) dieselbe Logik ohne
+        Duplizierung nutzen."""
         for coin in list(self.paper.sizes()):
             pnl = self._ride_pnl(coin, prices)
             if pnl is None:
@@ -595,6 +598,33 @@ class SprintBook:
                 log.warning("Sprint: Mess-Ritt %s >%.1fh im Minus (%.2f) - "
                             "Zeit-Cut, Slot frei", coin, self.cfg.max_ride_hours, pnl)
                 self._settle_one(coin, prices, "zeit_negativ")
+
+    def fast_exit_check(self, prices: dict[str, float]) -> None:
+        """Schneller Zwischen-Check NUR für Ziel/Plus-Lock/Bust/Zeit-Cut,
+        OHNE vollen Leader-Scan - für den Fast-Path zwischen den regulären
+        Autopilot-Ticks (autopilot.py, gedrosselt von copytrade.poll_seconds,
+        typ. 20s).
+
+        Spiegel-Fund 22.07.: Plus-Lock (Floor 15$) schoss trotzdem bis zu
+        -33.57$ ins Minus durch - ein 10x/10-15k$-Ritt kann sich in den 20s
+        zwischen zwei vollen Ticks weiter bewegen, als der Floor Puffer
+        gibt (klassisches Gap-durch-den-Stop, kein Logik-Fehler: der Peak
+        wird korrekt geführt, aber zwischen zwei Preis-SAMPLES ist der Bot
+        blind). Mit bereits vorhandenen (kostenlosen) WS-Mids alle paar
+        Sekunden nachschauen fängt den Rückfall näher am Floor ab - reiner
+        Exit-Reflex, rührt Entries/Sizing/Edge-Logik nicht an, kostet kein
+        zusätzliches Netzwerk-Budget (keine eigenen API-Calls hier).
+
+        Nur im Mess-Modus sinnvoll: Einzel-Ritt hat eigenes Timing/eigene
+        Baseline-Logik, hier bewusst nicht dupliziert."""
+        if not self.cfg.parallel_rides or not prices:
+            return
+        self._check_ride_targets(prices)
+
+    def _tick_parallel(self, leaders: list[dict], snapshots: list,
+                       prices: dict[str, float], risk_off: bool) -> None:
+        # 1. Ziel/Bust JE RITT (eigene 1000$-Basis, nicht das Sammelbuch)
+        self._check_ride_targets(prices)
         # 2. Markt-Schutz: alle Mess-Ritte glattstellen, jeder = eigener Zyklus
         if risk_off:
             if self.paper.sizes():

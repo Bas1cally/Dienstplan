@@ -470,6 +470,14 @@ class SprintConfig:
     # schaltet scharf).
     plus_lock_arm: float = 0.0
     plus_lock_floor: float = 0.0
+    # Fast-Path zwischen den vollen Autopilot-Ticks (Spiegel-Fund 22.07.:
+    # Plus-Lock schoss trotz Floor bis zu -33.57$ durch - ein 10x-Ritt kann
+    # sich in den poll_seconds (typ. 20s) zwischen zwei vollen Ticks weiter
+    # bewegen als der Floor-Puffer gibt). Alle fast_check_seconds Sekunden
+    # wird NUR Ziel/Plus-Lock/Bust/Zeit-Cut mit bereits vorhandenen
+    # (kostenlosen) WS-Mids nachgeschaut - kein Leader-Scan, kein Netz-Call.
+    # 0 heißt aus (Default, config.yaml schaltet scharf).
+    fast_check_seconds: float = 0.0
     # Toxic Flow (Nutzer 20.07.: "unsere gestrikten Leader werden ab sofort
     # counter traded"): frische Signale GEBANNTER Leader werden nicht mehr
     # verworfen (Spiegel: 119x leader_gesperrt = 119 verschenkte Datenpunkte),
