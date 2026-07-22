@@ -290,15 +290,24 @@ sprint:
                             # slippen Stops). Reason "plus_lock" bleibt
                             # strike-exempt: unsere Sicherungs-Regel, nicht die
                             # Entscheidung des Leaders.
-  fast_check_seconds: 5     # FAST-PATH (Spiegel-Fund 22.07.): trotz 15$-Floor
+  fast_check_seconds: 1     # FAST-PATH (Spiegel-Fund 22.07.): trotz 15$-Floor
                             # schoss Plus-Lock live bis zu -33.57$ ins Minus
                             # durch - der volle Tick lief nur alle poll_seconds
                             # (20s), ein 10x/10-15k$-Ritt bewegt sich in dieser
                             # Zeit weiter als der Floor-Puffer gibt. Zwischen den
-                            # vollen Ticks alle 5s NUR Ziel/Plus-Lock/Bust/
-                            # Zeit-Cut mit bereits vorhandenen (kostenlosen)
-                            # WS-Mids nachschauen - kein Leader-Scan, kein
-                            # zusätzliches Netz-Budget, reiner Exit-Reflex.
+                            # vollen Ticks NUR Ziel/Plus-Lock/Bust/Zeit-Cut mit
+                            # bereits vorhandenen (kostenlosen) WS-Mids nach-
+                            # schauen - kein Leader-Scan, kein Netz-Budget, reiner
+                            # Exit-Reflex, praktisch kostenlos (nur Dict-Lookups
+                            # über die paar offenen Ritte). 5 -> 1s (22.07.,
+                            # Nutzer: "wie wär's mit ner Lösung" nach einem
+                            # weiteren -7.24$-Overshoot TROTZ Fast-Path) - 1s
+                            # ist die praktische Untergrenze für sinnvoll engere
+                            # Checks (WS-Mids selbst kommen nicht garantiert
+                            # schneller). Senkt das Gap-Fenster nochmal 5x
+                            # (20s -> 5s -> 1s), eliminiert das physikalische
+                            # Grund-Restrisiko (ein einzelner Preis-Sprung
+                            # INNERHALB eines Checks) aber nicht vollständig.
                             # 0 = aus.
   max_rides_per_leader: 2   # 1 -> 2 (18.07., Flow-Runde): das 1er-Limit war der
                             # größte Frequenz-Deckel des Live-Tags - 5 von 9

@@ -160,6 +160,25 @@ bisherigen Text. Kein Verhalten geändert (weiterhin strike-exempt, keine
 neue Strafe) - nur ehrliche Kommunikation. 2 neue Tests (Overshoot- und
 Normalfall-Text via Notifier-Nachricht geprüft).
 
+**NACHTRAG 7 (22.07., Nutzer: "wie wär's mit ner Lösung statt beheben von
+Rechtschreibfehlern") — Fast-Path von 5s auf 1s verschärft.** Berechtigter
+Einwand: der Text-Fix (NACHTRAG 6) behob nur die Kommunikation, nicht die
+Ursache. Die eigentliche Lösung (Fast-Path zwischen den Ticks) war schon
+in NACHTRAG 5 gebaut, aber mit 5s Intervall noch nicht eng genug (-7.24$
+Overshoot war genau dieses Restrisiko, kein neuer Bug). `fast_check_
+seconds` in config.yaml auf 1s verschärft (5 -> 1): praktisch kostenlos
+(reine In-Memory-Dict-Lookups über die paar offenen Ritte, keine neuen
+Netz-Calls - WS-Mids werden ohnehin kontinuierlich im Hintergrund
+aktualisiert), senkt das Gap-Fenster nochmal 5x. Ehrliche Grenze bleibt
+bestehen (im BACKLOG dokumentiert, nicht schöngeredet): ein tick-basiertes
+Paper-System kann einen Preis-Sprung INNERHALB eines einzelnen Checks
+(jetzt 1s statt 20s) nicht abfangen - dieselbe Physik gilt für echte
+Stop-Orders an einer Börse. Zwei ECHTE weitere Hebel, bisher nicht
+gezogen (Trade-off gegen "Edge", daher Nutzer-Entscheidung statt
+Alleingang): (a) `plus_lock_floor` weiter anheben (mehr Puffer, aber
+sperrt Gewinne früher statt laufen zu lassen), (b) `plus_lock_arm`
+mit anheben (mehr Vorlauf bevor die Sicherung überhaupt scharf wird).
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
 abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3 Zyklen bei >= 60%
