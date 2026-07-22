@@ -1544,6 +1544,16 @@ class SprintBook:
             # Leader neu >= STAR_THRESHOLD rechnen muss.
             "confidence": {a[:18]: n for a, n in self.confidence.items() if n > 0},
             "stars": [a[:18] for a, n in self.confidence.items() if n >= STAR_THRESHOLD],
+            # Elite-Umschaltung-Audit (BACKLOG #2, Nutzer 22.07.: "audit ob
+            # es Zeit wird für Reservat und Einzel-Trades"): leader_record
+            # (won/lost je Identität, amnestie-fest) war bisher NUR intern -
+            # ohne SSH-Zugriff war die Kriterien-Prüfung ("≥5 Leader mit ≥3
+            # Zyklen bei ≥60% Winrate") aus dem Spiegel nicht möglich. Nur
+            # Identitäten mit mindestens einem Zyklus (won+lost > 0) - leere
+            # Einträge sind uninteressant und würden nur aufblähen.
+            "leader_record": {a[:18]: {"won": r.get("won", 0), "lost": r.get("lost", 0)}
+                              for a, r in self.leader_record.items()
+                              if r.get("won", 0) + r.get("lost", 0) > 0},
             # Bestätigungs-Kandidaten (Flip-Flopper-Schutz): laufen gerade,
             # noch nicht promoted/verworfen - sonst wäre "wartet auf frisches
             # Signal" von "Signal wartet auf Bestätigung" ununterscheidbar.

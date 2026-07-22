@@ -370,6 +370,23 @@ def test_stats_exposes_position_details():
         assert p["coin"] == "BTC" and p["entry"] == 100.0 and p["unrealized_pnl"] > 0
 
 
+def test_stats_exposes_leader_record_for_elite_audit():
+    """BACKLOG #2 (Elite-Umschaltung-Kriterien: '>= 5 Leader mit >= 3
+    Zyklen bei >= 60% Winrate'): leader_record war bisher nur intern -
+    ohne SSH-Zugriff lässt sich diese Prüfung nicht aus dem Status-Spiegel
+    fahren. stats() muss won/lost je Identität zeigen, aber nur für
+    Identitäten mit mindestens einem Zyklus (kein Aufblähen mit Nullen)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.leader_record = {
+            "0xgood": {"won": 4, "lost": 1},
+            "0xempty": {"won": 0, "lost": 0},
+        }
+        rec = b.stats(P)["leader_record"]
+        assert rec == {"0xgood": {"won": 4, "lost": 1}}, \
+            "leere Einträge (nie geritten) bleiben draußen, echte Bilanz sichtbar"
+
+
 def test_stats_watch_shows_holding_vs_flat_pool_wallets():
     """Nutzer-Fund 18.07. ('seit gestern Abend keine Signale, egal wie der
     Pool aussieht'): ohne Sichtbarkeit, ob Pool-Wallets gerade Positionen
