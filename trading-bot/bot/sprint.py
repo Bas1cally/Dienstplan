@@ -92,6 +92,15 @@ _CONFIDENCE_EARNING = {"tp", "star_preempt"}
 CONFIDENCE_PER_WIN = 5
 STAR_THRESHOLD = 100
 
+# Spiegel-Anzeige-Kürzung (Nutzer-Fund 20.07.: "counter:0x12345678" kollidierte
+# mit anderen Counter-Identitäten bei 10 Zeichen -> auf 18 angehoben). Spiegel-
+# Fund 23.07. (beim Debuggen des "Signale schwächen ab"-Ticket): 18 reicht für
+# 0x-Adressen (10 Präfix + 8 Hex), aber NICHT für Lighter - "counter:lighter:"
+# ist bereits 16 Zeichen lang, ließ nur 2 Ziffern der eigentlichen ID übrig
+# ("counter:lighter:72" für sowohl ...726314 als auch ...726722 - nicht mehr
+# unterscheidbar). 24 zeigt bei typischen 6-stelligen Lighter-IDs die volle ID.
+_DISPLAY_TRUNC = 24
+
 # Baselines überleben Neustarts nur, wenn die Datei jünger ist: bei kurzen
 # Deploys (~1 min) wollen wir das Blindfenster schließen (ein während des
 # Neustarts eröffnetes Signal ist noch frisch genug zum Reiten). Nach langer
@@ -774,6 +783,23 @@ class SprintBook:
         den Toxic-Pool auf null gesetzt, bis die Strike-Maschine dieselben
         Leader mühsam neu enttarnt."""
         for addr in sorted(self.toxic_addrs()):
+            # Gegenwette dauerhaft enttarnt (Spiegel-Fund 23.07., Nutzer:
+            # "Signale schwächen mal wieder ab"): 162 von 179 fresh_seen
+            # waren counter_gesperrt-Rauschen von GENAU 2 toxischen Lighter-
+            # Adressen, deren Gegenwette längst gebannt ist und es (bis zur
+            # nächsten Amnestie) bleibt - jeder weitere Scan kann NUR wieder
+            # denselben Reject produzieren. Vorher wurde trotzdem jedes Mal
+            # Baseline/Fresh-Signal-Arbeit gemacht UND fresh_seen hochgezählt,
+            # was die Spiegel-Zahlen (und den Eindruck 'viele Signale, aber
+            # keine Trades') komplett verzerrt hat. VOR der teuren Arbeit
+            # prüfen und ohne Baseline/Fresh-Scan/Reject-Rauschen überspringen -
+            # der Zustand ist in self.banned schon sichtbar, muss nicht bei
+            # jedem Tick neu gemeldet werden. Absichtlich NICHT an
+            # toxic_addrs()/_STRIKE_EXEMPT gekoppelt (die bleiben unverändert
+            # für den Pool-Ausschluss) - reine Scan-Optimierung hier.
+            ckey = f"counter:{addr}"
+            if ckey.lower() in self.banned:
+                continue
             snap = by_addr.get(addr)
             if snap is None:
                 continue
@@ -784,13 +810,6 @@ class SprintBook:
             if not fresh:
                 continue
             self._note_fresh(len(fresh), snap.address)
-            ckey = f"counter:{snap.address}"
-            if ckey.lower() in self.banned:
-                # Die Gegenwette selbst wurde enttarnt (Leader hatte doch
-                # recht) - sichtbar verwerfen, nicht still.
-                for coin in fresh:
-                    self._reject(coin, snap.address, "counter_gesperrt")
-                continue
             fresh.sort(key=lambda c: abs(snap.exposure(c)), reverse=True)
             opened = False
             for coin in fresh:
@@ -1491,9 +1510,10 @@ class SprintBook:
             # Jede Zeile bekommt IHREN Leader - sonst ist nicht zuordenbar, ob
             # 7 Ritte von 7 Tradern oder von einem stammen (Nutzer-Befund).
             for p in positions:
-                # [:18] statt [:10]: 'counter:0x12345678' braucht Platz, sonst
-                # sähen alle Gegenwetten im Spiegel identisch aus ('counter:0x')
-                p["leader"] = self.ride_leaders.get(p["coin"], "")[:18]
+                # _DISPLAY_TRUNC statt kurz abgeschnitten: 'counter:0x12345678'
+                # braucht Platz, sonst sähen alle Gegenwetten im Spiegel
+                # identisch aus ('counter:0x')
+                p["leader"] = self.ride_leaders.get(p["coin"], "")[:_DISPLAY_TRUNC]
             ride_pnls = sum(p["unrealized_pnl"] for p in positions)
             eq = self.cfg.equity + ride_pnls
         else:
@@ -1534,16 +1554,18 @@ class SprintBook:
                                           / max(1, cycles_done + 1), 1),
             "leader": leader,
             "leader_is_star": self.is_star(leader) if leader else False,
-            # [:18] statt [:10] (Spiegel-Fund 20.07.): Counter-Identitäten
-            # kollidierten in der Anzeige - "counter:0x8d7d49eb" und
-            # "counter:0x786515c7" zeigten beide als "counter:0x".
-            "strikes": {a[:18]: n for a, n in self.strikes.items() if n > 0},
-            "banned": sorted({a[:18] for a in self.banned}),
+            # _DISPLAY_TRUNC statt kurz abgeschnitten (Spiegel-Fund 20.07. +
+            # 23.07.): Counter-Identitäten kollidierten in der Anzeige - erst
+            # 0x-Adressen ("counter:0x8d7d49eb" vs "counter:0x786515c7" bei
+            # 10 Zeichen), dann Lighter-IDs ("counter:lighter:72" für sowohl
+            # ...726314 als auch ...726722 bei 18 Zeichen).
+            "strikes": {a[:_DISPLAY_TRUNC]: n for a, n in self.strikes.items() if n > 0},
+            "banned": sorted({a[:_DISPLAY_TRUNC] for a in self.banned}),
             # Confidence nur für Leader mit Punkten (0 sind uninteressant);
             # stars separat abgeleitet, damit die Anzeige nicht bei jedem
             # Leader neu >= STAR_THRESHOLD rechnen muss.
-            "confidence": {a[:18]: n for a, n in self.confidence.items() if n > 0},
-            "stars": [a[:18] for a, n in self.confidence.items() if n >= STAR_THRESHOLD],
+            "confidence": {a[:_DISPLAY_TRUNC]: n for a, n in self.confidence.items() if n > 0},
+            "stars": [a[:_DISPLAY_TRUNC] for a, n in self.confidence.items() if n >= STAR_THRESHOLD],
             # Elite-Umschaltung-Audit (BACKLOG #2, Nutzer 22.07.: "audit ob
             # es Zeit wird für Reservat und Einzel-Trades"): leader_record
             # (won/lost je Identität, amnestie-fest) war bisher NUR intern -
@@ -1551,7 +1573,7 @@ class SprintBook:
             # Zyklen bei ≥60% Winrate") aus dem Spiegel nicht möglich. Nur
             # Identitäten mit mindestens einem Zyklus (won+lost > 0) - leere
             # Einträge sind uninteressant und würden nur aufblähen.
-            "leader_record": {a[:18]: {"won": r.get("won", 0), "lost": r.get("lost", 0)}
+            "leader_record": {a[:_DISPLAY_TRUNC]: {"won": r.get("won", 0), "lost": r.get("lost", 0)}
                               for a, r in self.leader_record.items()
                               if r.get("won", 0) + r.get("lost", 0) > 0},
             # Bestätigungs-Kandidaten (Flip-Flopper-Schutz): laufen gerade,

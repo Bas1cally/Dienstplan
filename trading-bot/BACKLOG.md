@@ -179,6 +179,42 @@ Alleingang): (a) `plus_lock_floor` weiter anheben (mehr Puffer, aber
 sperrt Gewinne früher statt laufen zu lassen), (b) `plus_lock_arm`
 mit anheben (mehr Vorlauf bevor die Sicherung überhaupt scharf wird).
 
+**NACHTRAG 8 (22.07., Audit auf Nutzer-Anfrage) — Elite-Umschaltung-
+Kriterien technisch berührt, aber NICHT umgeschaltet.** Stand bei 108
+Zyklen: ≥100 Zyklen ✓, und genau 5 Identitäten mit ≥3 Zyklen bei ≥60%
+Winrate (`lighter:513030` 4/0, `0x985f02b19dbc062e` 3/1, `counter:
+0x28473085` 7/3, `0xa7405ff2687cb83b` 2/1, `0x7f20c6eaa0adc427` 3/2).
+Formal erfüllt, aber bewusst NICHT umgeschaltet: (a) eine der 5 ist eine
+synthetische `counter:`-Identität, keine echte folgbare Wallet - real
+nur 4; (b) winzige Samples (meist n=3-4, außer der Counter-Identität);
+(c) Gesamtbilanz weiterhin tief rot (-515,66$ bei 56✅/52💥). Empfehlung:
+weiter Daten sammeln, bis Kandidaten ≥5-8 Zyklen UND die Gesamtbilanz
+positiv zeigen - sonst wird auf Rauschen konzentriert. `leader_record`
+ist jetzt dauerhaft im Status-Spiegel sichtbar (`SprintBook.stats()`),
+diese Prüfung lässt sich künftig jederzeit ohne neuen Code wiederholen.
+
+**NACHTRAG 9 (23.07., Nutzer: "Signale schwächen mal wieder ab") —
+Toxic-Flow-Scan verschwendete sich an dauerhaft toten Gegenwetten.**
+Spiegel-Zahlen: 162 von 179 `fresh_seen` (~90%!) waren `counter_
+gesperrt`-Rauschen von genau 2 Lighter-Adressen (`lighter:702386`,
+`lighter:726314`/`726722`), deren Gegenwette längst gebannt ist und es
+bis zur nächsten Amnestie bleibt. `_tick_toxic` machte trotzdem bei
+JEDEM Tick erneut volle Baseline-/Fresh-Signal-Arbeit UND zählte
+`fresh_seen` hoch - verzerrte die Spiegel-Zahlen massiv (sah nach viel
+Aktivität aus, aber `last_entry_min: 178.5` zeigte: seit 3h kein echter
+Einstieg). Fix: `_tick_toxic` prüft `counter:<addr>` gebannt JETZT ganz
+am Anfang der Schleife, VOR jeder Baseline-/Fresh-Arbeit - überspringt
+dauerhaft tote Adressen komplett (kein fresh_seen, kein wiederholter
+Reject-Spam, der Zustand steht eh in `banned`). Bewusst NICHT an
+`_STRIKE_EXEMPT`/bestätigte-Flip-Flopper gekoppelt (die bleiben
+unverändert für den Pool-Ausschluss über `toxic_addrs()`) - reine
+Scan-Optimierung, greift auch für record-toxische (nicht formell
+gebannte) Originale mit gebannter Gegenwette wie `lighter:726722`.
+Nebenfund beim Debuggen: Spiegel-Anzeige-Kürzung auf 18 Zeichen (20.07.
+für 0x-Kollisionen gedacht) reichte für Lighter-IDs nicht - "counter:
+lighter:72" zeigte für sowohl ...726314 als auch ...726722 identisch.
+Auf 24 Zeichen angehoben (`_DISPLAY_TRUNC`). 3 neue Tests.
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
 abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3 Zyklen bei >= 60%

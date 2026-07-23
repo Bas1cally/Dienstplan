@@ -1578,7 +1578,11 @@ def test_toxic_counter_exits_via_own_take_profit():
 def test_toxic_counter_identity_self_bans_via_own_exit():
     """Verliert die Gegenwette wiederholt über die EIGENE Mechanik (hier:
     Zeit-Cut), bannt die Strike-Maschine die Counter-Identität - danach
-    keine neuen Gegenwetten, sichtbar als counter_gesperrt."""
+    keine neuen Gegenwetten mehr. Spiegel-Fund 23.07. ('Signale schwächen
+    ab'): eine dauerhaft gebannte Gegenwette wird NICHT mehr bei jedem
+    Tick neu als counter_gesperrt gemeldet (162 von 179 fresh_seen waren
+    genau dieses Rauschen von nur 2 toten Adressen) - der Zustand steht
+    schon in banned, muss nicht wiederholt ins Reject-Log."""
     with tempfile.TemporaryDirectory() as tmp:
         t = {"now": 1_000_000.0}
         b = _edge_book(tmp, t, counter_toxic=True, strike_ban=1, max_ride_hours=2.0)
@@ -1592,10 +1596,35 @@ def test_toxic_counter_identity_self_bans_via_own_exit():
                {"BTC": 100.5, "ETH": 100.0})
         assert b.paper.sizes() == {}, "Zeit-Cut (eigene Mechanik) beendet die Gegenwette"
         assert "counter:0xbad" in b.banned, "Gegenwette enttarnt sich selbst"
-        # Nächstes Toxic-Signal: KEINE neue Gegenwette mehr
+        # Nächstes Toxic-Signal: KEINE neue Gegenwette mehr, aber auch KEIN
+        # wiederholter Reject-Eintrag (dauerhaft tot bis zur nächsten Amnestie)
+        fresh_before = b.stats(P)["scan"]["fresh_seen"]
         b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500, ETH=300)], P)
         assert b.paper.sizes() == {}
-        assert b.stats(P)["scan"]["rejected"].get("counter_gesperrt") == 1
+        assert b.stats(P)["scan"]["rejected"].get("counter_gesperrt") is None
+        assert b.stats(P)["scan"]["fresh_seen"] == fresh_before, \
+            "dauerhaft tote Gegenwette zählt nicht mehr als fresh_seen"
+
+
+def test_toxic_scan_skips_banned_counter_even_without_original_ban():
+    """Spiegel-Fund 23.07.: nicht nur bestätigte Flip-Flopper (BEIDE
+    gebannt) verschwenden Scans - schon eine gebannte Gegenwette ALLEIN
+    reicht (der Pfad ist so oder so für immer tot), egal ob das Original
+    selbst nur record-toxisch ist (kein formeller Bann, z.B. lighter:
+    726722 live: 2W/5L, Defizit 3, aber nie eigene 2 Strikes am Stück)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _edge_book(tmp, {"now": 1_000_000.0}, counter_toxic=True,
+                       toxic_record_deficit=3)
+        b.leader_record["0xbad"] = {"won": 2, "lost": 5}   # Defizit 3, NICHT gebannt
+        b.banned.add("counter:0xbad")   # nur die Gegenwette wurde früher gebannt
+        assert "0xbad" not in b.banned, "Vorbedingung: Original nicht formell gebannt"
+        two = leaders(("0xbest", 80))
+        fresh_before = b.stats(P)["scan"]["fresh_seen"]
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000)], P)
+        b.tick(two, [snap("0xbest", 50_000), snap("0xbad", 50_000, BTC=500)], P)
+        assert b.paper.sizes().get("BTC", 0) == 0, "keine Gegenwette - Pfad ist tot"
+        assert b.stats(P)["scan"]["fresh_seen"] == fresh_before, \
+            "record-toxisch mit gebannter Gegenwette wird trotzdem nicht mehr gescannt"
 
 
 def test_toxic_by_record_counters_without_formal_ban():
