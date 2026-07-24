@@ -1281,7 +1281,8 @@ class Autopilot:
         # Leader-Positionen über ALLE DEXs verfolgen - sie handeln auch TSLA/Gold/Öl.
         # Adressen = Haupt-Leader + breiterer Sprint-Pool (falls Sprint an).
         tracker = LeaderTracker(leader_info, self._tracked_addresses(),
-                                dexs=self.client.dexs)
+                                dexs=self.client.dexs,
+                                dex_reprobe_s=self.cfg.copytrade.dex_reprobe_s)
         weights = {l["address"]: float(l["weight"]) for l in self.leaders}
         convergence = ConvergenceEngine(self.cfg.convergence) if self.cfg.convergence.enabled else None
         validator = None

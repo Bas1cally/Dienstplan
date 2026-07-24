@@ -272,6 +272,39 @@ Verluste aussehen. 7 neue Tests. **Nächster Schritt:** ~24h saubere
 Post-Fix-Daten sammeln, dann `/quest elite` erneut - erst wenn beide
 Haken auf ECHTEN Post-Bug-Zahlen stehen, ist die Umschaltung fällig.
 
+**NACHTRAG 12 (24.07., Nutzer: "haben wir schon ewig keine Signale mehr")
+— Snapshot-Sturm: der Tracker fragte jede Wallet auf JEDEM Builder-DEX ab.**
+Zuerst die Entwarnung zur Wahrnehmung: der Absturz `fresh_seen` 179 → 6 ist
+zu ~90% mein eigener Toxic-Scan-Fix (NACHTRAG 9), der Phantom-Signale nicht
+mehr mitzählt. Die ECHTE Signalrate ist praktisch unverändert: 1,8/h vor dem
+Fix (17 echte von 179 in 9,2h) gegen 2,2/h danach (6 in 2,7h). Es sind also
+nicht plötzlich Signale verschwunden — sie waren vorher nur aufgebläht.
+DAHINTER lag aber ein echter, schwerer Fund: **149 von 150 Log-Zeilen waren
+Snapshot-Fehler**, ALLE 15 HL-Wallets betroffen, 7 von 15 dauerhaft stale,
+Tick-Dauer 86s statt der konfigurierten 20s. Ursache: `market.dexs: auto`
+entdeckt gut ein Dutzend Builder-DEXs, und `LeaderTracker.snapshot()` fragte
+JEDE Wallet auf JEDEM davon ab — bei 25 beobachteten Wallets ~300
+`user_state`-Calls pro Tick, die reihenweise ins Rate-Limit liefen. In den
+echten Daten liefern aber nur ZWEI DEXs je Positionen: der Haupt-DEX
+(Krypto, 282 Vorkommen) und `xyz` (Aktien/Rohstoffe, 167) — der Rest war
+reine Verschwendung. Folge fürs Signal-Problem: eine stale Wallet liefert
+den GECACHTEN Stand, ihre Positionsänderungen werden also erst beim
+nächsten erfolgreichen Snapshot sichtbar (verspätete Signale; kurze
+Leader-Trades innerhalb des Blindfensters sieht man nie).
+Fix: DEX-Sparmodus im Tracker. Je Wallet wird gemerkt, auf welchen DEXs sie
+zuletzt wirklich Positionen hatte; nur die werden abgefragt. Alle
+`copytrade.dex_reprobe_s` (600s) läuft je Wallet wieder ein VOLLER
+Durchlauf, damit ein erstmaliger Ausflug auf einen neuen DEX gefunden wird.
+Sicherheits-Design: übersprungen werden nur DEXs, die beim letzten vollen
+Lauf LEER waren — taucht dort zwischendurch etwas auf, fehlt es zwar bis
+zum nächsten Probe-Lauf im Buch, aber eben AUCH in der Baseline, kann also
+nie einen falschen `leader_exit` auslösen (nur ein verspätetes Signal).
+DEXs mit gehaltener Position werden immer weiter abgefragt, deren
+Schließung sehen wir punktgenau. Ein im Probe-Lauf transient
+ausgefallener DEX bleibt im Gedächtnis (wird nicht als "verlassen"
+missverstanden). `feed.dex_calls` im Spiegel macht die Wirkung messbar.
+5 neue Tests. `dex_reprobe_s: 0` = altes Verhalten.
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien sind seit 24.07. CODIFIZIERT und jederzeit per `/quest elite`
 abrufbar (`SprintBook.elite_audit()`, Schwellen als `ELITE_*`-Konstanten

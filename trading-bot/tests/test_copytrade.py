@@ -340,6 +340,130 @@ def test_tracker_snapshot_all_uses_last_good_cache():
     assert t2.last_fresh == 0 and t2.last_stale == 0
 
 
+class _CountingInfo:
+    """Zählt user_state-Calls je DEX und liefert konfigurierbare Positionen -
+    für die DEX-Sparmodus-Tests (Spiegel-Fund 24.07.)."""
+
+    def __init__(self, books: dict | None = None):
+        # dex -> {coin: size}; fehlt der DEX, ist die Wallet dort flach
+        self.books = books or {}
+        self.calls: list = []
+
+    def user_state(self, address, dex=None):
+        self.calls.append(dex or "")
+        return _state(50_000, **self.books.get(dex or "", {}))
+
+    def dex_calls(self, dex):
+        return sum(1 for d in self.calls if d == dex)
+
+
+def test_tracker_skips_dexs_where_wallet_has_no_positions():
+    """Spiegel-Fund 24.07.: `dexs: auto` entdeckt gut ein Dutzend Builder-DEXs,
+    und der Tracker fragte JEDE Wallet auf JEDEM davon ab (~300 Calls/Tick) -
+    7 von 15 Wallets waren dauerhaft stale, der Tick dauerte 86s statt 20s.
+    Nach dem ersten vollen Durchlauf dürfen leere DEXs übersprungen werden."""
+    from bot.copytrade.tracker import LeaderTracker
+
+    info = _CountingInfo({"": {"ETH": 200}})   # nur Krypto, nichts auf den Builder-DEXs
+    t = LeaderTracker(info, ["0xa"], dexs=["", "xyz", "gold", "oil"], throttle_s=0,
+                      clock=lambda: 1_000.0)
+    t.snapshot_all()
+    assert len(info.calls) == 4, "erste Runde: voller Durchlauf über alle DEXs"
+
+    info.calls.clear()
+    t.snapshot_all()
+    assert info.calls == [""], "danach nur noch der Haupt-DEX - 4 Calls -> 1"
+    assert t.last_dex_calls == 1
+
+
+def test_tracker_keeps_polling_dex_where_wallet_holds():
+    """SICHERHEIT: einen DEX, auf dem die Wallet eine Position HÄLT, muss der
+    Sparmodus weiter abfragen - sonst verschwände sie aus dem Buch und löste
+    einen falschen 'Leader raus'-Exit aus."""
+    from bot.copytrade.tracker import LeaderTracker
+
+    info = _CountingInfo({"": {"ETH": 200}, "xyz": {"xyz:TSLA": 300}})
+    t = LeaderTracker(info, ["0xa"], dexs=["", "xyz", "gold"], throttle_s=0,
+                      clock=lambda: 1_000.0)
+    t.snapshot_all()
+    info.calls.clear()
+    snaps = t.snapshot_all()
+    assert set(info.calls) == {"", "xyz"}, "'gold' gespart, 'xyz' bleibt dran"
+    assert snaps[0].positions.get("xyz:TSLA") is not None, "Position bleibt sichtbar"
+
+    # Schließt sie die Aktien-Position, sehen wir das punktgenau (kein Blindflug)
+    info.books["xyz"] = {}
+    snaps = t.snapshot_all()
+    assert snaps[0].positions.get("xyz:TSLA") is None, "Schließung sofort erkannt"
+
+
+def test_tracker_reprobes_all_dexs_after_interval():
+    """Damit ein ERSTMALIGER Ausflug auf einen neuen DEX gefunden wird, läuft
+    je Wallet alle dex_reprobe_s wieder ein voller Durchlauf."""
+    from bot.copytrade.tracker import LeaderTracker
+
+    now = {"t": 1_000.0}
+    info = _CountingInfo({"": {"ETH": 200}})
+    t = LeaderTracker(info, ["0xa"], dexs=["", "xyz"], throttle_s=0,
+                      dex_reprobe_s=600.0, clock=lambda: now["t"])
+    t.snapshot_all()
+    info.calls.clear()
+    t.snapshot_all()
+    assert info.calls == [""], "innerhalb des Intervalls gespart"
+
+    now["t"] += 601                      # Probe-Intervall abgelaufen
+    info.books["xyz"] = {"xyz:TSLA": 300}   # Wallet handelt erstmals Aktien
+    info.calls.clear()
+    snaps = t.snapshot_all()
+    assert set(info.calls) == {"", "xyz"}, "voller Durchlauf holt den neuen DEX"
+    assert snaps[0].positions.get("xyz:TSLA") is not None
+    info.calls.clear()
+    t.snapshot_all()
+    assert set(info.calls) == {"", "xyz"}, "ab jetzt dauerhaft mit dabei"
+
+
+def test_tracker_reprobe_keeps_unreachable_dex_in_memory():
+    """Ein transient AUSGEFALLENER DEX darf beim Probe-Lauf nicht so wirken,
+    als hätte die Wallet ihn verlassen - sonst fiele er aus dem Sparlauf und
+    eine echte Position dort würde erst beim nächsten Probe-Lauf auffallen."""
+    from bot.copytrade.tracker import LeaderTracker
+
+    now = {"t": 1_000.0}
+
+    class _Flaky(_CountingInfo):
+        down = False
+
+        def user_state(self, address, dex=None):
+            if dex == "xyz" and self.down:
+                raise RuntimeError("429 (Builder-DEX)")
+            return super().user_state(address, dex=dex)
+
+    info = _Flaky({"": {"ETH": 200}, "xyz": {"xyz:TSLA": 300}})
+    t = LeaderTracker(info, ["0xa"], dexs=["", "xyz"], throttle_s=0,
+                      dex_reprobe_s=600.0, clock=lambda: now["t"])
+    t.snapshot_all()
+    assert t._wallet_dexs["0xa"] == {"", "xyz"}
+
+    now["t"] += 601
+    info.down = True                     # xyz fällt genau im Probe-Lauf aus
+    t.snapshot_all()
+    assert "xyz" in t._wallet_dexs["0xa"], \
+        "nicht erreichter DEX bleibt im Gedächtnis, wird nicht stillschweigend gestrichen"
+
+
+def test_tracker_dex_saver_off_keeps_old_behaviour():
+    """dex_reprobe_s=0 -> immer alle DEXs (unverändertes Alt-Verhalten)."""
+    from bot.copytrade.tracker import LeaderTracker
+
+    info = _CountingInfo({"": {"ETH": 200}})
+    t = LeaderTracker(info, ["0xa"], dexs=["", "xyz", "gold"], throttle_s=0,
+                      dex_reprobe_s=0)
+    t.snapshot_all()
+    info.calls.clear()
+    t.snapshot_all()
+    assert set(info.calls) == {"", "xyz", "gold"}
+
+
 class _PartialDexInfo:
     """Haupt-DEX (dex='') liefert immer; ein Builder-DEX (z.B. 'xyz') schlägt
     für konfigurierbare Adressen fehl - simuliert einen transienten Ausfall

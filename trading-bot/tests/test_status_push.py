@@ -300,7 +300,8 @@ def test_build_snapshot_without_sprint_or_journal_omits_sections():
     assert "quest" not in snap
     assert "journal_tail" not in snap
     assert snap["risk_level"] is None
-    assert snap["feed"] == {"snapshot_age_s": None, "fresh": None, "total": None, "stale": None}
+    assert snap["feed"] == {"snapshot_age_s": None, "fresh": None, "total": None,
+                            "stale": None, "dex_calls": None}
     assert snap["tick_health"]["last_tick_ago_s"] is None, "0.0 heißt 'noch nie' -> None, kein Fake-Alter"
 
 

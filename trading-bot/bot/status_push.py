@@ -95,6 +95,10 @@ def build_snapshot(ap) -> dict:
         "fresh": getattr(tracker, "last_fresh", None),
         "total": getattr(tracker, "last_total", None),
         "stale": getattr(tracker, "last_stale", None),
+        # API-Last je Runde (Spiegel-Fund 24.07.): macht den DEX-Sparmodus
+        # messbar - ohne ihn waren es ~alle_dexs x Wallets Calls pro Tick,
+        # was die Snapshots reihenweise ins Rate-Limit laufen ließ.
+        "dex_calls": getattr(tracker, "last_dex_calls", None),
     }
     if ap.sprint:
         quest = ap.sprint.stats(prices)

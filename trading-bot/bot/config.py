@@ -280,6 +280,15 @@ class CopytradeConfig:
     # Discovery. Der Copier snapshottet dann und kehrt sofort zurück, bevor er
     # Targets rechnet oder Orders ausführt - kein eigenes Paper-Trading mehr.
     feed_only: bool = False
+    # DEX-Sparmodus (Spiegel-Fund 24.07.): `market.dexs: auto` entdeckt gut ein
+    # Dutzend Builder-DEXs, und der Tracker fragte JEDE Wallet auf JEDEM davon
+    # ab (~300 user_state-Calls/Tick bei 25 Wallets) - Folge: 7 von 15 Wallets
+    # dauerhaft stale, Tick-Dauer 86s statt 20s. Je Wallet wird gemerkt, auf
+    # welchen DEXs sie zuletzt Positionen hatte; nur die werden abgefragt. Alle
+    # dex_reprobe_s Sekunden läuft je Wallet wieder ein VOLLER Durchlauf, damit
+    # ein erstmaliger Ausflug auf einen neuen DEX gefunden wird. 0 = aus (immer
+    # alle DEXs, altes Verhalten).
+    dex_reprobe_s: float = 600.0
     analysis: AnalysisConfig = None  # type: ignore[assignment]
 
 
