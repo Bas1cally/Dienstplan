@@ -387,6 +387,85 @@ def test_stats_exposes_leader_record_for_elite_audit():
             "leere Einträge (nie geritten) bleiben draußen, echte Bilanz sichtbar"
 
 
+def test_leader_pnl_accumulates_every_cycle_including_exempt():
+    """Nutzer 24.07. (Elite-Audit): Winrate allein reicht als Kriterium
+    nicht - 0xc30c7ea9 erfüllte live 66.7% Winrate, stand aber bei -16.98$.
+    leader_pnl zählt deshalb JEDEN Zyklus mit echtem PnL, auch _STRIKE_
+    EXEMPT-Gründe (fürs Geld ist egal, wer schuld war) - anders als
+    leader_record, das exempte Verluste bewusst nicht anlastet."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b._book_cycle("0xa", 50.0, "tp")
+        b._book_cycle("0xa", -20.0, "leader_exit")
+        b._book_cycle("0xa", -9.0, "plus_lock")     # strike-exempt, zählt aber fürs Geld
+        assert b.leader_pnl["0xa"] == 21.0
+        assert b.leader_record["0xa"] == {"won": 1, "lost": 1}, \
+            "der exempte Verlust bleibt aus der Winrate raus (unverändert)"
+        assert b.stats(P)["leader_pnl"]["0xa"] == 21.0, "im Spiegel sichtbar"
+
+
+def test_leader_pnl_survives_restart_and_amnesty():
+    """Wie leader_record: der reale Kontostand, den ein Leader gebracht hat,
+    verfällt weder durch einen Neustart noch durch einen Regelwechsel."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b._book_cycle("0xa", 42.5, "tp")
+        b.banned.add("0xa")
+        b.amnesty()
+        assert b.leader_pnl["0xa"] == 42.5, "Amnestie löscht keine PnL-Historie"
+        b2 = book(tmp)   # Neustart auf demselben runtime_dir
+        assert b2.leader_pnl["0xa"] == 42.5, "über Neustart persistiert"
+
+
+def test_elite_audit_requires_winrate_and_profit():
+    """Kernpunkt des 24.07.-Audits: ein Leader mit guter Winrate, der aber
+    Geld verloren hat, darf NICHT elite-fähig sein - im Einzel-Ritt-Modus
+    bekäme genau der die ganze Bank."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.leader_record = {
+            "0xverdiener": {"won": 3, "lost": 1},    # 75%, +100$
+            "0xschoenwetter": {"won": 2, "lost": 1},  # 67%, aber -17$
+            "0xflop": {"won": 1, "lost": 3},          # 25%, +5$
+        }
+        b.leader_pnl = {"0xverdiener": 100.0, "0xschoenwetter": -17.0, "0xflop": 5.0}
+        a = b.elite_audit()
+        passt = {c["addr"] for c in a["qualifiziert"]}
+        assert passt == {"0xverdiener"}, \
+            "nur wer BEIDES erfüllt (Winrate UND netto positiv) qualifiziert sich"
+
+
+def test_elite_audit_separates_unknown_pnl_from_losses():
+    """leader_pnl wird erst seit 24.07. mitgeschrieben, leader_record ist
+    viel älter - ein Leader ohne PnL-Historie hat NICHT null verdient, wir
+    wissen es nur noch nicht. Beides blockiert die Zulassung, muss aber
+    unterscheidbar bleiben (sonst liest sich 'noch keine Daten' wie 'hat
+    Geld verloren')."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.leader_record = {"0xalt": {"won": 3, "lost": 1}}   # gute Winrate, keine PnL
+        a = b.elite_audit()
+        c = next(x for x in a["kandidaten"] if x["addr"] == "0xalt")
+        assert c["pnl_bekannt"] is False and c["pnl"] is None
+        assert c["passt"] is False, "ohne Beweis keine Elite-Zulassung"
+
+
+def test_elite_audit_counter_identities_do_not_count_as_leaders():
+    """counter:-Identitäten sind synthetische Gegenwetten, keine folgbaren
+    Wallets - im Einzel-Ritt-Modus (der EINEN Leader reitet) kann man ihnen
+    nicht folgen, sie dürfen die Mindestzahl nicht auffüllen."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.leader_record = {f"counter:0x{i}": {"won": 3, "lost": 0} for i in range(6)}
+        b.leader_pnl = {f"counter:0x{i}": 50.0 for i in range(6)}
+        b.won, b.busted = 120, 30    # Zyklus-Kriterium klar erfüllt
+        a = b.elite_audit()
+        assert len(a["qualifiziert"]) == 6, "als Kandidaten sichtbar"
+        assert a["qualifiziert_echt"] == [], "aber keine echten Wallets"
+        assert a["cycles_ok"] is True and a["leaders_ok"] is False
+        assert a["bereit"] is False
+
+
 def test_stats_watch_shows_holding_vs_flat_pool_wallets():
     """Nutzer-Fund 18.07. ('seit gestern Abend keine Signale, egal wie der
     Pool aussieht'): ohne Sichtbarkeit, ob Pool-Wallets gerade Positionen

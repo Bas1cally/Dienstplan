@@ -589,6 +589,8 @@ class Autopilot:
             return self._cmd_quest_funnel()
         if arg.lower().strip() in ("cohorts", "kohorten"):
             return self._cmd_quest_cohorts()
+        if arg.lower().strip() == "elite":
+            return self._cmd_quest_elite()
         s = self.sprint.stats(prices)
         lead = (f"<code>{s['leader'][:10]}…</code>" + (" ⭐" if s.get("leader_is_star") else "")
                 if s.get("leader") else "n/a")
@@ -684,8 +686,64 @@ class Autopilot:
                 f"\n"
                 f"<i>/quest close = schließen | /quest pool = Pool-Liste | "
                 f"/quest cohorts = Kohorten (Quelle/Grund/Asset) | "
+                f"/quest elite = Umschalt-Reife | "
                 f"/quest assets = Krypto vs. Aktien | /quest funnel = Trichter-Diagnose | "
                 f"/quest reset = Bilanz auf 0 | /quest amnestie = Strikes/Bans löschen</i>")
+
+    def _cmd_quest_elite(self) -> str:
+        """Elite-Umschaltungs-Reife (BACKLOG #2): sind genug Zyklen gelaufen
+        UND haben sich genug ECHTE Wallets als Verdiener bewiesen (Winrate
+        UND netto positiv)? Reine Auswertung - der Moduswechsel bleibt eine
+        bewusste Nutzer-Entscheidung."""
+        if not self.sprint:
+            return "Quest-Bot nicht aktiv."
+        from .sprint import (ELITE_MIN_CYCLES, ELITE_MIN_LEADER_CYCLES,
+                             ELITE_MIN_LEADERS, ELITE_MIN_WINRATE)
+
+        a = self.sprint.elite_audit()
+        tick = lambda ok: "✅" if ok else "❌"   # noqa: E731
+        lines = [
+            f"<b>Elite-Reife</b> {'✅ BEREIT' if a['bereit'] else '⏳ noch nicht'}",
+            "",
+            f"{tick(a['cycles_ok'])} Zyklen: {a['cycles']}/{ELITE_MIN_CYCLES}",
+            f"{tick(a['leaders_ok'])} Bewiesene Wallets: "
+            f"{len(a['qualifiziert_echt'])}/{ELITE_MIN_LEADERS}",
+            f"   <i>(≥{ELITE_MIN_LEADER_CYCLES} Zyklen, ≥{ELITE_MIN_WINRATE * 100:.0f}% "
+            f"Winrate UND netto positiv)</i>",
+            "",
+            f"Schatztruhe gesamt: {a['banked']:+,.2f} $",
+        ]
+        if a["qualifiziert"]:
+            lines.append("\n<b>Qualifiziert:</b>")
+            for c in a["qualifiziert"]:
+                tag = " <i>(Gegenwette, nicht folgbar)</i>" if c["counter"] else ""
+                lines.append(f"⭐ <code>{c['addr'][:24]}</code> {c['won']}W/{c['lost']}L "
+                             f"{c['winrate'] * 100:.0f}% {c['pnl']:+,.2f} ${tag}")
+        # Knapp Gescheiterte sichtbar machen: zeigt, ob wir kurz davor sind
+        # oder ob die Kandidaten strukturell durchfallen. Dabei 'Winrate ok,
+        # aber Geld verloren' (der 24.07. gefundene blinde Fleck) strikt von
+        # 'PnL noch unbekannt' trennen - leader_pnl wird erst seit dem 24.07.
+        # mitgeschrieben, ein Leader ohne Historie hat nicht null verdient,
+        # wir wissen es nur noch nicht.
+        fast = [c for c in a["kandidaten"]
+                if not c["passt"] and c["winrate"] >= ELITE_MIN_WINRATE]
+        verlierer = [c for c in fast if c["pnl_bekannt"]]
+        unbekannt = [c for c in fast if not c["pnl_bekannt"]]
+        if verlierer:
+            lines.append("\n<b>Winrate ok, aber Geld verloren:</b>")
+            for c in verlierer[:5]:
+                lines.append(f"⚠️ <code>{c['addr'][:24]}</code> {c['won']}W/{c['lost']}L "
+                             f"{c['winrate'] * 100:.0f}% {c['pnl']:+,.2f} $")
+        if unbekannt:
+            lines.append(f"\n<b>Winrate ok, PnL noch unbekannt</b> "
+                         f"<i>({len(unbekannt)}, erst ab 24.07. gemessen):</i>")
+            for c in unbekannt[:5]:
+                lines.append(f"❔ <code>{c['addr'][:24]}</code> {c['won']}W/{c['lost']}L "
+                             f"{c['winrate'] * 100:.0f}%")
+        if not a["bereit"]:
+            lines.append("\n<i>Umschalten würde die ganze Bank auf EINEN Ritt "
+                         "konzentrieren - erst wenn beide Haken stehen.</i>")
+        return "\n".join(lines)
 
     def _sprint_asset_breakdown(self) -> str:
         """Krypto vs. Aktien-Perps NUR für die aktuelle Ära (seit dem letzten

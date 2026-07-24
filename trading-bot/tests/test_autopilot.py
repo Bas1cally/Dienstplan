@@ -1086,6 +1086,49 @@ def test_cmd_quest_cohorts_groups_source_reason_asset():
     assert "-999" not in out, "alte Ära bleibt draußen"
 
 
+def test_cmd_quest_elite_reports_readiness_and_blind_spot():
+    """Nutzer 24.07.: /quest elite muss die Umschalt-Entscheidung ohne SSH
+    beantworten - und dabei die drei Fälle sichtbar trennen: qualifiziert,
+    'Winrate ok aber Geld verloren' (der gefundene blinde Fleck) und
+    'PnL noch unbekannt' (leader_pnl erst ab 24.07.)."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.sprint.won, ap.sprint.busted = 120, 30
+        ap.sprint.leader_record = {
+            "0xverdiener": {"won": 3, "lost": 1},
+            "0xschoenwetter": {"won": 2, "lost": 1},
+            "0xaltohnepnl": {"won": 3, "lost": 1},
+            "counter:0xgegen": {"won": 4, "lost": 1},
+        }
+        ap.sprint.leader_pnl = {"0xverdiener": 100.0, "0xschoenwetter": -17.0,
+                                "counter:0xgegen": 60.0}
+        out = ap._cmd_quest_elite()
+
+    assert "Zyklen: 150/100" in out
+    assert "Bewiesene Wallets: 1/5" in out, "counter zählt nicht als echte Wallet"
+    assert "noch nicht" in out
+    assert "0xverdiener" in out and "+100.00 $" in out
+    assert "Geld verloren" in out and "0xschoenwetter" in out
+    assert "PnL noch unbekannt" in out and "0xaltohnepnl" in out
+    assert "Gegenwette, nicht folgbar" in out
+
+
+def test_cmd_quest_elite_signals_ready_when_all_criteria_met():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap = _autopilot_with_sprint(tmp)
+        ap.sprint.won, ap.sprint.busted = 120, 30
+        ap.sprint.leader_record = {f"0x{i}": {"won": 3, "lost": 1} for i in range(5)}
+        ap.sprint.leader_pnl = {f"0x{i}": 80.0 for i in range(5)}
+        out = ap._cmd_quest_elite()
+
+    assert "BEREIT" in out
+    assert "Bewiesene Wallets: 5/5" in out
+
+
 def test_sprint_asset_breakdown_scoped_to_current_era():
     """Krypto vs. Aktien NUR für die aktuelle Ära (letzte won+busted Zyklen).
     Alte Mess-Woche-Zyklen davor werden ausgeschlossen - genau das 'Krypto/

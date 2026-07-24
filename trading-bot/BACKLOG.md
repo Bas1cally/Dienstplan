@@ -242,11 +242,43 @@ Verluste beheben, da echte, funktionierende Mechanik jetzt nicht mehr
 durch Datenlücken sabotiert wird - nächster Spiegel-Check zeigt, ob die
 Bilanz sich stabilisiert.
 
+**NACHTRAG 11 (24.07., Nutzer: "Wie weit sind wir vom Elite-Modus" →
+"Baue") — Elite-Kriterium um Profitabilität ergänzt + `/quest elite`.**
+Der Audit bei 149 Zyklen zeigte beide BACKLOG-Kriterien formal erfüllt
+(149 ≥ 100 Zyklen; 7 Qualifizierte, davon 5 echte Wallets ≥ 5). ABER
+zwei Befunde sprachen gegen die Umschaltung:
+(a) **Blinder Fleck im Kriterium:** Winrate misst Häufigkeit, nicht
+Größe. `0xc30c7ea9` erfüllte mit 2W/1L die 60%-Schwelle, stand über
+dieselben 3 Zyklen aber bei **-16,98$** (viele kleine Plus-Lock-Siege,
+ein großer Verlust) - im Elite-Modus hätte genau der die ganze Bank
+bekommen. Umgekehrt war `counter:0x28473085` (+26,20$, 10W/4L) der
+stärkste Verdiener, aber als synthetische Gegenwette gar nicht folgbar.
+(b) **Datenbasis war vom -9$-Bug verunreinigt** (NACHTRAG 10): Plus-Lock
+ist strike-exempt, die Falsch-Exits wurden also NICHT als Niederlage in
+`leader_record` verbucht (Winrates blieben sauber) - aber die abgewürgten
+Ritte konnten auch nie zum SIEG werden, die Siege sind also zu niedrig
+gezählt.
+Gebaut: neues `SprintBook.leader_pnl` (Netto-PnL je Identität, persistiert
+und amnestie-fest wie `leader_record`; zählt anders als dieses JEDEN
+Zyklus inkl. `_STRIKE_EXEMPT` - fürs Geld ist egal, wer schuld war), im
+Spiegel sichtbar, plus `elite_audit()` + Telegram-Befehl `/quest elite`.
+Neue Schwelle `ELITE_MIN_PNL` (netto positiv). `counter:`-Identitäten
+werden separat ausgewiesen und zählen NICHT gegen die Mindestzahl echter
+Wallets. Wichtig für die Übergangszeit: 'PnL noch unbekannt' (leader_pnl
+startet leer, leader_record ist viel älter) wird strikt von 'PnL bekannt
+und nicht positiv' getrennt - beides blockiert die Zulassung, liest sich
+in `/quest elite` aber unterschiedlich, damit fehlende Daten nicht wie
+Verluste aussehen. 7 neue Tests. **Nächster Schritt:** ~24h saubere
+Post-Fix-Daten sammeln, dann `/quest elite` erneut - erst wenn beide
+Haken auf ECHTEN Post-Bug-Zahlen stehen, ist die Umschaltung fällig.
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
-Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
-abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3 Zyklen bei >= 60%
-Zyklus-Winrate im EIGENEN Buch (`leader_record` existiert seit der
-Edge-Runde) -> Elite-Pool für den Einzel-Ritt. Dazu Confidence-
+Kriterien sind seit 24.07. CODIFIZIERT und jederzeit per `/quest elite`
+abrufbar (`SprintBook.elite_audit()`, Schwellen als `ELITE_*`-Konstanten
+in `bot/sprint.py`): >= 100 abgeschlossene Mess-Zyklen UND >= 5 ECHTE
+Wallets mit >= 3 Zyklen bei >= 60% Winrate UND netto positiver PnL im
+eigenen Buch. Der Moduswechsel selbst (`parallel_rides: false`) bleibt
+bewusst manuell — der Audit wertet nur aus, schaltet nie um. Dazu Confidence-
 Kalibrierung: STAR_THRESHOLD 100 ist mit +5/Gewinn praktisch unerreichbar
 (20 TP-Zyklen EINES Leaders) - runter auf ~25-30 ODER Vergabe anheben,
 sonst bleibt das Star-System toter Code. Absorbiert auch die alte offene

@@ -106,6 +106,20 @@ STAR_THRESHOLD = 100
 # unterscheidbar). 24 zeigt bei typischen 6-stelligen Lighter-IDs die volle ID.
 _DISPLAY_TRUNC = 24
 
+# Elite-Umschaltung (BACKLOG #2 / Masterplan Phase D): ab wann lohnt der Wechsel
+# vom Mess-Modus (viele parallele 1000$-Ritte) auf den EINEN konzentrierten
+# Einzel-Ritt? Die ersten drei Schwellen stehen so im BACKLOG; ELITE_MIN_PNL kam
+# am 24.07. dazu, nachdem der erste Audit den blinden Fleck zeigte: 0xc30c7ea9
+# erfüllte mit 2W/1L die 60%-Winrate, stand über dieselben 3 Zyklen aber bei
+# -16.98$ (viele kleine Plus-Lock-Siege, ein großer Verlust) - im Elite-Modus
+# hätte genau der die ganze Bank bekommen. Winrate misst Häufigkeit, nicht
+# Größe; erst beides zusammen beweist einen Verdiener.
+ELITE_MIN_CYCLES = 100        # abgeschlossene Mess-Zyklen insgesamt
+ELITE_MIN_LEADERS = 5         # so viele Kandidaten müssen ALLE Filter bestehen
+ELITE_MIN_LEADER_CYCLES = 3   # Mindest-Stichprobe je Kandidat
+ELITE_MIN_WINRATE = 0.6
+ELITE_MIN_PNL = 0.0           # netto positiv im eigenen Buch
+
 # Baselines überleben Neustarts nur, wenn die Datei jünger ist: bei kurzen
 # Deploys (~1 min) wollen wir das Blindfenster schließen (ein während des
 # Neustarts eröffnetes Signal ist noch frisch genug zum Reiten). Nach langer
@@ -202,6 +216,16 @@ class SprintBook:
         # (risk_off/markt_zu = erzwungene Schließungen) zählen nicht gegen ihn,
         # konsistent zur Strike-Philosophie. Persistiert wie strikes/confidence.
         self.leader_record: dict[str, dict] = {}
+        # Netto-PnL JE LEADER über alle seine abgeschlossenen Zyklen (Nutzer
+        # 24.07., Elite-Audit): die Winrate allein reicht als Elite-Kriterium
+        # NICHT - im Live-Tail erfüllte 0xc30c7ea9 mit 2W/1L (66.7%) die
+        # Schwelle, stand über dieselben 3 Zyklen aber bei -16.98$ (viele
+        # kleine Plus-Lock-Siege, ein großer Verlust). Genau so einen Leader
+        # würde der Elite-Modus mit der GANZEN Bank reiten. Anders als
+        # leader_record zählt hier JEDER Zyklus mit seinem echten PnL, auch
+        # _STRIKE_EXEMPT-Gründe: fürs Geld ist egal, WER schuld war.
+        # Persistiert wie leader_record, überlebt Amnestien bewusst.
+        self.leader_pnl: dict[str, float] = {}
         # Peak-PnL je laufendem Ritt (Trailing-TP): coin -> höchster gesehener
         # Ritt-PnL; Einzel-Ritt-Modus nutzt den Schlüssel "__single__".
         # Persistiert, damit ein Deploy den Peak eines laufenden Ritts nicht
@@ -894,6 +918,57 @@ class SprintBook:
                     out.add(addr)
         return out
 
+    def elite_audit(self) -> dict:
+        """Prüft die Elite-Umschaltungs-Kriterien (BACKLOG #2) gegen die
+        echten Zyklus-Daten - Entscheidungshilfe für 'ist es Zeit für den
+        konzentrierten Einzel-Ritt?'. Wertet NUR aus, schaltet NICHTS um:
+        der Moduswechsel bleibt eine bewusste Nutzer-Entscheidung
+        (config.yaml `parallel_rides`), kein Automatismus.
+
+        Ein Kandidat muss ALLE Filter bestehen: Mindest-Stichprobe, Winrate
+        UND netto positive PnL (siehe ELITE_MIN_PNL - der 24.07. gefundene
+        blinde Fleck). counter:-Identitäten werden separat ausgewiesen: sie
+        sind synthetische Gegenwetten, keine folgbaren Wallets - im
+        Einzel-Ritt-Modus (der EINEN Leader reitet) kann man ihnen nicht
+        folgen, sie zählen also nicht gegen die Leader-Mindestzahl."""
+        cycles = self.won + self.busted
+        cands = []
+        for addr, rec in self.leader_record.items():
+            n = rec.get("won", 0) + rec.get("lost", 0)
+            if n < ELITE_MIN_LEADER_CYCLES:
+                continue
+            winrate = rec.get("won", 0) / n
+            # 'PnL unbekannt' sauber von 'PnL bekannt und nicht positiv'
+            # trennen: leader_pnl wird erst seit dem 24.07. mitgeschrieben,
+            # leader_record ist viel älter. Ein Leader ohne PnL-Historie hat
+            # NICHT null verdient - wir wissen es schlicht noch nicht. Beides
+            # blockiert die Elite-Zulassung (ohne Beweis kein Vertrauen), darf
+            # in der Anzeige aber nicht als "hat Geld verloren" erscheinen.
+            pnl = self.leader_pnl.get(addr)
+            cands.append({
+                "addr": addr, "won": rec.get("won", 0), "lost": rec.get("lost", 0),
+                "cycles": n, "winrate": winrate,
+                "pnl": round(pnl, 2) if pnl is not None else None,
+                "pnl_bekannt": pnl is not None,
+                "counter": addr.startswith("counter:"),
+                "passt": (winrate >= ELITE_MIN_WINRATE
+                          and pnl is not None and pnl > ELITE_MIN_PNL),
+            })
+        cands.sort(key=lambda c: (-(c["pnl"] if c["pnl"] is not None else 0.0),
+                                  -c["winrate"]))
+        qualified = [c for c in cands if c["passt"]]
+        real = [c for c in qualified if not c["counter"]]
+        return {
+            "cycles": cycles,
+            "cycles_ok": cycles >= ELITE_MIN_CYCLES,
+            "kandidaten": cands,
+            "qualifiziert": qualified,
+            "qualifiziert_echt": real,
+            "leaders_ok": len(real) >= ELITE_MIN_LEADERS,
+            "bereit": cycles >= ELITE_MIN_CYCLES and len(real) >= ELITE_MIN_LEADERS,
+            "banked": round(self.banked, 2),
+        }
+
     def _proven(self, addr: str, min_wins: int) -> bool:
         """Hot-Hand-Kriterium (nachgeschärft, Spiegel-Fund 20.07.): Siege
         allein reichten NICHT - lighter:366058 bekam mit 2 Siegen bei 5+
@@ -1439,6 +1514,12 @@ class SprintBook:
                 rec["won"] += 1
             elif reason not in _STRIKE_EXEMPT:
                 rec["lost"] += 1
+            # Netto-PnL dagegen IMMER und ungefiltert (siehe self.leader_pnl):
+            # ob ein Verlust "seine Schuld" war, ändert nichts am Kontostand -
+            # und genau der entscheidet, ob wir ihm im Elite-Modus die ganze
+            # Bank anvertrauen.
+            self.leader_pnl[leader.lower()] = round(
+                self.leader_pnl.get(leader.lower(), 0.0) + pnl, 2)
 
         if leader and reason not in _STRIKE_EXEMPT:
             key = leader.lower()
@@ -1618,6 +1699,11 @@ class SprintBook:
             "leader_record": {a[:_DISPLAY_TRUNC]: {"won": r.get("won", 0), "lost": r.get("lost", 0)}
                               for a, r in self.leader_record.items()
                               if r.get("won", 0) + r.get("lost", 0) > 0},
+            # Netto-PnL je Leader (Nutzer 24.07.): die zweite Hälfte des
+            # Elite-Kriteriums - Winrate allein reicht nicht (0xc30c7ea9 live:
+            # 66.7% Winrate, aber -16.98$ über dieselben 3 Zyklen).
+            "leader_pnl": {a[:_DISPLAY_TRUNC]: round(v, 2)
+                           for a, v in self.leader_pnl.items()},
             # Bestätigungs-Kandidaten (Flip-Flopper-Schutz): laufen gerade,
             # noch nicht promoted/verworfen - sonst wäre "wartet auf frisches
             # Signal" von "Signal wartet auf Bestätigung" ununterscheidbar.
@@ -1697,6 +1783,10 @@ class SprintBook:
             self.leader_record = {str(a): {"won": int((r or {}).get("won", 0)),
                                            "lost": int((r or {}).get("lost", 0))}
                                   for a, r in (raw.get("leader_record") or {}).items()}
+            # Alt-States ohne das Feld starten leer - die PnL-Historie wächst
+            # ab jetzt mit; leader_record (Winrate) bleibt derweil vollständig.
+            self.leader_pnl = {str(a): float(v)
+                               for a, v in (raw.get("leader_pnl") or {}).items()}
             # Ausstehender Bilanz-Reset über Neustarts halten (Deep-Dive-Fund):
             # ohne das geht der Reset verloren, wenn ein Neustart mitten in den
             # Mode-Switch-Drain fällt (der Drain hat parallel_rides=false schon
@@ -1749,7 +1839,8 @@ class SprintBook:
         unter dem alten Exit-Regime (fixes TP, kein Trail, keine Plus-
         Sicherung): Ritte standen im Plus und wurden trotzdem im Minus
         beendet, der Strike traf den Leader für UNSER Exit-Timing.
-        Confidence und leader_record bleiben - positive Beweise verfallen
+        Confidence, leader_record und leader_pnl bleiben - positive Beweise
+        (und der reale Kontostand, den ein Leader uns gebracht hat) verfallen
         nicht durch einen Regelwechsel. Gibt (gelöschte Strikes, gelöschte
         Bans) zurück."""
         n_strikes = sum(1 for v in self.strikes.values() if v > 0)
@@ -1786,6 +1877,7 @@ class SprintBook:
                 "ride_start_ts": self._ride_start_ts,
                 "ride_peak": self._ride_peak,
                 "leader_record": self.leader_record,
+                "leader_pnl": self.leader_pnl,
                 "bilanz_reset_pending": self._bilanz_reset_pending,
                 "strikes": self.strikes, "banned": sorted(self.banned),
                 "confidence": self.confidence,
