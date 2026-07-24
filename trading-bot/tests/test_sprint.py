@@ -1926,6 +1926,63 @@ def test_fast_exit_check_noop_without_prices():
         assert "BTC" in b.paper.sizes(), "leere Preise -> No-Op, kein falscher Exit"
 
 
+def test_ride_pnl_returns_none_when_coin_price_missing():
+    """Spiegel-Fund 24.07.: fehlte der Preis EINES Coins im prices-Dict,
+    nahm _ride_pnl früher 'keine Bewegung' an (Fallback auf Entry-Preis) -
+    das ergibt IMMER exakt raw_pnl=0 minus Fee, unabhängig vom echten Kurs.
+    Jetzt: None statt Rate-raten, ETH bleibt unberührt."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = _entered(tmp)   # long BTC ~100 Einstieg
+        assert b._ride_pnl("BTC", {"ETH": 100.0}) is None, \
+            "BTC-Preis fehlt im Dict -> None, nicht 'wie Entry angenommen'"
+        assert b._ride_pnl("BTC", {"BTC": 0.0, "ETH": 100.0}) is None, \
+            "Preis 0 ist genauso unbrauchbar wie fehlend"
+        assert b._ride_pnl("BTC", {"BTC": 105.0, "ETH": 100.0}) is not None, \
+            "echter Preis -> normale Berechnung"
+
+
+def test_fast_exit_check_does_not_false_positive_when_price_missing():
+    """Spiegel-Fund 24.07. (7 von 14 Plus-Lock-Exits im Live-Tail exakt
+    -9.00$ - auffällig identisch statt zufällig verteilt): der Fast-Path
+    nutzt WS-Mids, die 'xyz:'/Lighter-Coins lückenhaft liefern können. Ein
+    fehlender Preis darf einen armed Ritt NICHT fälschlich als Plus-Lock
+    (pnl~0-Fee <= floor) schließen - der Ritt muss unberührt bleiben, bis
+    wieder ein echter Preis da ist."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, plus_lock_arm=30.0, plus_lock_floor=15.0)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)          # Entry 100
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 100.5, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), "~+41$ Peak - armed"
+        b.fast_exit_check({"ETH": 100.0})   # BTC-Preis fehlt in diesem Fast-Path-Sample
+        assert "BTC" in b.paper.sizes(), \
+            "fehlender Preis darf keinen Plus-Lock-Exit auslösen (früher: falscher -9$-Exit)"
+        assert b.banked == 0.0 and b.busted == 0
+
+
+def test_missing_price_drains_ride_after_max_age_not_forever():
+    """Gegenstück zum vorigen Test: fehlt der Preis wirklich DAUERHAFT
+    (Audit-Präzedenzfall: 'xyz:'-Perp fehlt am Wochenende dauerhaft in
+    all_mids()), darf der Ritt-Slot nicht für immer blockiert bleiben -
+    nach _DRAIN_MAX_AGE_S wird zum Einstand zwangsabgerechnet, strike-frei
+    (reine Datenlücke, keine Leader-Schuld)."""
+    from bot.sprint import _DRAIN_MAX_AGE_S
+
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        assert "BTC" in b.paper.sizes()
+        b.fast_exit_check({"ETH": 100.0})   # Preis fehlt - erster Blick, Timer startet
+        assert "BTC" in b.paper.sizes(), "noch innerhalb der Toleranz"
+        t["now"] += _DRAIN_MAX_AGE_S + 1
+        b.fast_exit_check({"ETH": 100.0})   # immer noch kein Preis
+        assert b.paper.sizes() == {}, "nach der Frist zum Einstand zwangsabgerechnet"
+        assert b.strikes == {}, "kein_preis ist strike-exempt (unsere Datenlücke)"
+
+
 def test_amnesty_clears_strikes_and_bans_keeps_positive_proof():
     with tempfile.TemporaryDirectory() as tmp:
         t = {"now": 1_000_000.0}

@@ -215,6 +215,33 @@ für 0x-Kollisionen gedacht) reichte für Lighter-IDs nicht - "counter:
 lighter:72" zeigte für sowohl ...726314 als auch ...726722 identisch.
 Auf 24 Zeichen angehoben (`_DISPLAY_TRUNC`). 3 neue Tests.
 
+**NACHTRAG 10 (24.07., "Massig Daten, schau dir den Stand an und
+verbessere") — Fehlender Preis löste falsche Plus-Lock-Exits aus (der
+eigentliche Grund für den Bilanz-Rutsch).** Spiegel-Zahlen: Schatztruhe
+weiter auf -860,43$ gefallen (von -515,66$ am 22.07.), 65✅/77💥, avg
+Trades/Zyklus auf 3.4 gesunken. Im 50er-Journal-Tail: 10 von 14 `plus_
+lock`-Exits negativ, davon 7x EXAKT -9.00$ (kein Zufall - für 10.000$
+Notional ist das exakt Open+Close-Fee bei 0 Kursbewegung). Root Cause:
+`_ride_pnl()` fiel bei fehlendem Coin-Preis im `prices`-Dict still auf
+den Entry-Preis zurück ("keine Bewegung" angenommen) - das ergibt IMMER
+exakt `raw_pnl=0 - Fee`, unabhängig vom echten Kurs. Kombiniert mit
+Plus-Lock (`pnl <= floor`) triggerte das einen FALSCH-POSITIVEN Exit für
+jeden armed Ritt, sobald der Preis auch nur einmal fehlte - der neue
+`fast_exit_check`-Pfad (1s-Fenster, WS-Mids liefern 'xyz:'/Lighter-Coins
+lückenhaft) traf das viel häufiger als der alte volle Tick, der über
+`all_mids()` fast immer vollständig war. Fix: `_ride_pnl()` gibt jetzt
+`None` zurück statt zu raten, wenn der Preis fehlt oder 0 ist - alle
+Aufrufer behandelten `None` bereits korrekt als "diesen Tick nicht
+beurteilbar". Gegenstück (Audit-Präzedenzfall vom Mode-Switch-Drain:
+'xyz:'-Perp fehlt am Wochenende DAUERHAFT in `all_mids()`): neuer
+`_price_missing_since`-Tracker pro Coin, nach `_DRAIN_MAX_AGE_S` (120s)
+ohne Preis wird zum Einstand zwangsabgerechnet (neuer Reason `kein_
+preis`, strike-exempt) statt den Ritt-Slot für immer zu blockieren.
+4 neue Tests. Erwartung: sollte einen spürbaren Teil der Plus-Lock-
+Verluste beheben, da echte, funktionierende Mechanik jetzt nicht mehr
+durch Datenlücken sabotiert wird - nächster Spiegel-Check zeigt, ob die
+Bilanz sich stabilisiert.
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien DEFINIEREN, wann `parallel_rides: false` kommt: z.B. >= 100
 abgeschlossene Mess-Zyklen UND >= 5 Leader mit >= 3 Zyklen bei >= 60%

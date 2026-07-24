@@ -53,6 +53,7 @@ _REASON_TXT = {
     "zeit_negativ": "zu lange im Minus (Zeit-Cut)",
     "markt_zu": "Börsen-Schluss (Gewinn gesichert)",
     "plus_lock": "Plus gesichert (war im Plus - kein Minus-Exit)",
+    "kein_preis": "kein Preis verfügbar (zum Einstand abgerechnet)",
 }
 # Nutzer-Fund 22.07.: die Meldung oben behauptete "kein Minus-Exit", obwohl
 # der gemeldete PnL negativ war (-7.24$, HYPE) - Plus-Lock kann trotz
@@ -72,7 +73,11 @@ _PLUS_LOCK_OVERSHOOT_TXT = ("Plus-Sicherung zu spät ausgelöst (Kurs fiel "
 # das soll wie jeder andere Verlust-Ritt einen Strike geben (pnl<0 in
 # _book_cycle heilt/striked wie gehabt, ein GEWINN-Manual-Close striked
 # also weiterhin nicht).
-_STRIKE_EXEMPT = {"risk_off", "markt_zu", "plus_lock"}
+_STRIKE_EXEMPT = {"risk_off", "markt_zu", "plus_lock", "kein_preis"}
+# 'kein_preis' (Spiegel-Fund 24.07.): derselbe Drain-Grundsatz wie beim
+# Mode-Switch (_DRAIN_MAX_AGE_S) für laufende Mess-Ritte - fehlt einem Coin
+# der Preis dauerhaft (> _DRAIN_MAX_AGE_S), zwangsabgerechnet zum Einstand
+# statt für immer blind zu warten. Reine Datenlücke, keine Leader-Schuld.
 # 'plus_lock' (Nutzer 19.07.: "sobald wir im Plus sind sollten wir nie mit
 # Minus rausgehen") ist UNSERE Gewinn-Sicherungs-Regel, nicht die Entscheidung
 # des Leaders - beabsichtigt landet der Exit um breakeven-positiv, kann aber
@@ -159,6 +164,12 @@ class SprintBook:
         # Wann der Mode-Switch-Drain zum ersten Mal an unpreisbaren Alt-Ritt-
         # Coins hängenblieb (Freeze-Sicherung, siehe _DRAIN_MAX_AGE_S).
         self._drain_since: float | None = None
+        # Dasselbe Prinzip für laufende Mess-Ritte (Spiegel-Fund 24.07.):
+        # coin -> seit wann sein Preis im aktuellen prices-Dict fehlt. Nicht
+        # persistiert (self-healing, ein Neustart startet den Timer neu -
+        # kein Korrektheitsproblem, nur im schlimmsten Fall etwas später
+        # erkannt) - siehe _check_ride_targets.
+        self._price_missing_since: dict[str, float] = {}
         self.strikes: dict[str, int] = {}   # addr -> aktive Strikes (LARP-Enttarnung)
         self.banned: set[str] = set()       # fürs Sprint-Buch gesperrte Leader
         # addr -> Confidence-Punkte (verdiente Anerkennung, siehe
@@ -599,7 +610,20 @@ class SprintBook:
         for coin in list(self.paper.sizes()):
             pnl = self._ride_pnl(coin, prices)
             if pnl is None:
+                # Preis fehlt (Spiegel-Fund 24.07.) - nicht raten (siehe
+                # _ride_pnl), aber auch nicht für immer blind warten (Audit-
+                # Fund, gleiches Prinzip wie beim Mode-Switch-Drain: 'xyz:'-
+                # Perps fehlen z.B. am Wochenende dauerhaft in all_mids()).
+                # Nach _DRAIN_MAX_AGE_S ohne Preis zum Einstand zwangs-
+                # abrechnen, statt den Ritt-Slot für immer zu blockieren.
+                since = self._price_missing_since.setdefault(coin, self.clock())
+                if self.clock() - since > _DRAIN_MAX_AGE_S:
+                    log.warning("Sprint: %s seit %.0fs ohne Preis - "
+                                "zwangsabrechnen zum Einstand, Slot frei",
+                                coin, _DRAIN_MAX_AGE_S)
+                    self._settle_one(coin, prices, "kein_preis")
                 continue
+            self._price_missing_since.pop(coin, None)
             if self._take_profit_due(coin, pnl):
                 self._settle_one(coin, prices, "tp")
             elif self._plus_lock_due(coin, pnl):
@@ -940,12 +964,29 @@ class SprintBook:
 
     def _ride_pnl(self, coin: str, prices: dict[str, float]) -> float | None:
         """PnL eines Mess-Ritts auf seiner eigenen 1000$-Basis, konservativ
-        inkl. Eröffnungs- UND (hypothetischer) Schließungs-Fee."""
+        inkl. Eröffnungs- UND (hypothetischer) Schließungs-Fee.
+
+        Spiegel-Fund 24.07. (7 von 14 Plus-Lock-Exits im Tail exakt -9.00$ -
+        auffällig identisch statt zufällig verteilt): fehlt der Coin-Preis
+        im übergebenen `prices`-Dict, fiel dieser Helfer früher still auf
+        den Entry-Preis zurück ('keine Bewegung' angenommen) - das ergibt
+        IMMER exakt raw_pnl=0 minus Fee (für 10.000$ Notional exakt -9.00$),
+        UNABHÄNGIG vom echten Kurs. Kombiniert mit Plus-Lock (pnl <= floor)
+        triggerte das einen FALSCH-POSITIVEN Exit für jeden armed Ritt,
+        sobald der Preis auch nur EINEN Tick fehlte - besonders der neue
+        fast_exit_check-Pfad (1s-Fenster, WS-Mids können 'xyz:'-Coins/
+        Lighter-Coins lückenhaft liefern) traf das viel häufiger als der
+        alte volle Tick. None statt Rate-raten: alle Aufrufer behandeln
+        None bereits als 'diesen Tick nicht beurteilbar, nächstes Mal mit
+        echten Daten neu versuchen' (siehe _check_ride_targets) - derselbe
+        'stale ist ehrlicher als falsch' Grundsatz wie beim HL-Tracker."""
         row = next((r for r in self.paper.position_rows(prices)
                     if r["coin"] == coin), None)
         if row is None:
             return None
-        px = prices.get(coin, row["entry"]) or row["entry"]
+        px = prices.get(coin)
+        if not px:
+            return None
         fees = abs(row["size"]) * (row["entry"] + px) * self.fee_rate
         return row["size"] * (px - row["entry"]) - fees
 
@@ -964,6 +1005,7 @@ class SprintBook:
         self._ride_entry_sizes.pop(coin, None)
         self._ride_start_ts.pop(coin, None)
         self._ride_peak.pop(coin, None)
+        self._price_missing_since.pop(coin, None)
         self._book_cycle(leader, pnl if pnl is not None else 0.0, reason, coin=coin)
 
     # ---------- IM RITT: halten, nur dem Ride-Leader folgen ----------
