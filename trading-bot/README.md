@@ -73,11 +73,16 @@ versucht es (falls die Unit doch als root läuft, ist danach alles weg) und
 nennt sonst den letzten Schritt. Zum vollständigen Entfernen einmal per SSH:
 
 ```bash
-sudo systemctl disable --now trading-bot
-sudo rm /etc/systemd/system/trading-bot.service
-sudo systemctl daemon-reload
-rm -rf ~/Dienstplan/trading-bot      # nur den Bot-Ordner
+sudo systemctl disable --now trading-bot && sudo rm -f /etc/systemd/system/trading-bot.service && sudo systemctl daemon-reload && rm -rf ~/Dienstplan/trading-bot
 ```
+
+**Warum geht das nicht per Telegram?** Die Unit läuft als `trader` mit
+`NoNewPrivileges=true` — der Kernel blockiert dort jede Rechte-Eskalation,
+`sudo` scheitert selbst mit passendem sudoers-Eintrag; `ProtectSystem=strict`
+macht `/etc` zusätzlich read-only. Man könnte das umbauen (Root-Helferdienst auf
+Trigger-Datei), aber dafür braucht man wieder root — und man hätte eine
+Remote-Root-Hintertür: wer den Telegram-Token hat, hätte root auf dem VPS.
+Eine einmalige SSH-Sitzung ist der bessere Tausch.
 
 Danach den `STATUS_PUSH_TOKEN` auf GitHub widerrufen (Settings → Developer
 settings → Tokens) — er hat Schreibrecht auf den `status-feed`-Branch.

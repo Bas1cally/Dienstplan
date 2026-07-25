@@ -1203,11 +1203,21 @@ class Autopilot:
             "ohne root-Rechte)",
             "",
             "Der Bot handelt ab sofort nicht mehr und bleibt auch nach einem "
-            "Neustart still. Um ihn ganz vom Server zu nehmen, einmal per SSH:",
-            "<code>sudo systemctl disable --now trading-bot\n"
-            "sudo rm /etc/systemd/system/trading-bot.service\n"
-            "sudo systemctl daemon-reload\n"
-            "rm -rf ~/Dienstplan/trading-bot</code>",
+            "Neustart still. Um ihn ganz vom Server zu nehmen, einmal per SSH "
+            "(eine Zeile, zum Kopieren):",
+            # Bewusst EINE Zeile statt vier: der Nutzer ist mobil unterwegs,
+            # ein einzelner Copy-Paste-Block spart das fehleranfällige
+            # Abtippen im SSH-App-Fenster. && statt ; damit ein Fehlschlag
+            # nicht stillschweigend zum nächsten Schritt weiterläuft.
+            "<code>sudo systemctl disable --now trading-bot "
+            "&amp;&amp; sudo rm -f /etc/systemd/system/trading-bot.service "
+            "&amp;&amp; sudo systemctl daemon-reload "
+            "&amp;&amp; rm -rf ~/Dienstplan/trading-bot</code>",
+            "",
+            "<i>Warum nicht als Telegram-Befehl: die Unit läuft mit "
+            "NoNewPrivileges=true als 'trader' - der Kernel blockiert dort "
+            "jede Rechte-Eskalation. Das per Telegram auslösbar zu machen "
+            "hieße, eine Remote-Root-Hintertür einzubauen.</i>",
             "",
             "Danach noch den <code>STATUS_PUSH_TOKEN</code> auf GitHub "
             "widerrufen (Settings → Developer settings → Tokens).",
