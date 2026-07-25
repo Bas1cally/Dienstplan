@@ -375,6 +375,36 @@ dass der Elite-Umstieg die Bilanz nullt, die Messhistorie
 (`cycles_total`/`leader_record`/`leader_pnl`) aber überlebt — sonst hätte
 sich das Elite-Gate im Moment des Umschaltens selbst wieder ausgesperrt.
 
+**NACHTRAG 15 (25.07., Nutzer: "Wir beenden das Projekt") — /kill:
+Stilllegung per Telegram.** Nutzer wollte das Repo "vom Server" löschen.
+Zwei Klarstellungen vorweg: (a) ich hatte in diesem Projekt NIE
+SSH-Zugriff — Serverseitiges kann nur der Nutzer selbst; (b) das Repo
+`Bas1cally/Dienstplan` IST nicht der Bot: im Wurzelverzeichnis liegt die
+echte Dienstplan-Arbeit (4 Excel-Dateien, PDF, `generate.py`,
+`mitarbeiter.json`), der Bot nur in `trading-bot/`. Ein Repo-Löschen hätte
+also genau das getroffen, was laut Nutzer unangetastet bleiben soll.
+Nutzer-Entscheidung daraufhin: stattdessen einen `/kill`-Telegram-Befehl,
+"Hauptsache er läuft nicht mehr auf dem Server".
+
+*Zwei harte Randbedingungen bestimmten das Design* (aus
+`deploy/trading-bot.service`): `Restart=always` + `RestartSec=10` — ein
+reiner Prozess-Exit bringt den Bot nach 10s zurück; und `User=trader` +
+`NoNewPrivileges=true` — der Bot kann seinen eigenen systemd-Dienst NICHT
+abschalten, `systemctl disable` braucht root.
+*Deshalb:* `/kill JETZT` (zweistufig, `/kill` erklärt nur) schließt alle
+Positionen, schreibt den Marker `runtime/KILLED` (bewusst eine Datei statt
+Config-Flag, damit `/update`/`git pull` die Stilllegung nicht aufhebt),
+stoppt die Autopilot-Schleife und VERSUCHT `systemctl disable --now`
+(klappt, falls die Unit doch als root läuft). Scheitert das, nennt die
+Antwort die exakten SSH-Befehle plus den Hinweis, den
+`STATUS_PUSH_TOKEN` auf GitHub zu widerrufen.
+*Wichtigste Design-Entscheidung:* bei gesetztem Marker beendet sich der
+Prozess NICHT (das gäbe wegen `Restart=always` eine Neustart-Schleife alle
+10s) — stattdessen startet nur die Telegram-Fernsteuerung, der Autopilot
+bleibt aus. Kein Trading, keine API-Calls, keine Status-Pushes, aber
+`/revive` bleibt erreichbar (Sicherheitsventil bei Fehlbedienung).
+5 neue Tests. README um einen Abschnitt "Projekt beenden" ergänzt.
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien sind seit 24.07. CODIFIZIERT und jederzeit per `/quest elite`
 abrufbar (`SprintBook.elite_audit()`, Schwellen als `ELITE_*`-Konstanten

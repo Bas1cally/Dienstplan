@@ -44,6 +44,26 @@ log = logging.getLogger(__name__)
 RUNTIME = Path(__file__).resolve().parent.parent / "runtime"
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
+# Stilllegungs-Marker (Nutzer 25.07., Projekt-Ende per Telegram): existiert die
+# Datei, fährt der Autopilot NICHT mehr hoch - auch nicht nach einem Neustart.
+# Nötig, weil die systemd-Unit Restart=always hat: ein reiner Prozess-Exit
+# brächte den Bot nach 10s zurück. Bewusst eine Datei statt eines Config-Flags,
+# damit ein `git pull`/`/update` die Stilllegung nicht versehentlich aufhebt.
+KILL_FILE = RUNTIME / "KILLED"
+
+
+def kill_marker_set() -> bool:
+    return KILL_FILE.exists()
+
+
+def set_kill_marker() -> None:
+    KILL_FILE.parent.mkdir(exist_ok=True)
+    KILL_FILE.write_text(f"stillgelegt per /kill am {datetime.now(timezone.utc).isoformat()}\n")
+
+
+def clear_kill_marker() -> None:
+    KILL_FILE.unlink(missing_ok=True)
+
 
 def set_env_var(key: str, value: str, env_path: Path = ENV_FILE) -> None:
     """Setzt/ersetzt EINE Zeile `key=value` in der .env, andere Zeilen bleiben.
@@ -278,6 +298,8 @@ class Autopilot:
             "/setstatuspush": self._cmd_set_status_push,
             "/statuspush": self._cmd_status_push,
             "/analyze": self._cmd_analyze,
+            "/kill": self._cmd_kill,
+            "/revive": self._cmd_revive,
             "/help": self._cmd_help,
         })
 
@@ -303,6 +325,8 @@ class Autopilot:
                 "/analyze – Leader-Analyse sofort anstoßen\n"
                 "/fullreport [offline] – kompletter Quest-Report zum Copy-Paste\n"
                 "/stop /start /resume – Autopilot/Halt steuern\n"
+                "/kill – Projekt beenden: Positionen zu, dauerhaft stilllegen "
+                "(/revive hebt es auf)\n"
                 "<i>(/sprint funktioniert weiter als Alt-Name für /quest)</i>")
 
     def _cmd_status(self) -> str:
@@ -1101,8 +1125,106 @@ class Autopilot:
     def _cmd_start(self) -> str:
         if self.running:
             return "Autopilot läuft bereits."
+        if kill_marker_set():
+            return ("🛑 Bot ist stillgelegt (/kill). Zum Reaktivieren erst "
+                    "<code>/revive</code>.")
         self.start()
         return "▶️ Autopilot wird gestartet."
+
+    def _cmd_kill(self, arg: str = "") -> str:
+        """Projekt-Ende per Telegram (Nutzer 25.07.: 'Mach ein telegram Befehl
+        mit /kill ... Hauptsache er läuft nicht mehr auf dem Server').
+
+        Was der Bot SELBST kann: Positionen schließen, sich dauerhaft
+        stilllegen (Marker überlebt Neustarts -> auch nach einem systemd-
+        Restart fährt der Autopilot nicht mehr hoch, keine API-Calls, keine
+        Status-Pushes, kein Trading).
+
+        Was er NICHT kann: seinen eigenen systemd-Dienst abschalten - die Unit
+        läuft als User 'trader' mit NoNewPrivileges=true, `systemctl disable`
+        braucht root. Versucht wird es trotzdem (falls die Unit doch als root
+        läuft, ist danach wirklich alles weg); scheitert es, nennt die Antwort
+        die exakten Befehle für den letzten Schritt.
+
+        Zweistufig, weil unumkehrbar-teuer: `/kill` erklärt nur, erst
+        `/kill JETZT` führt aus."""
+        if arg.strip().upper() != "JETZT":
+            offen = len(self.sprint.paper.sizes()) if self.sprint else 0
+            return ("🛑 <b>/kill – Projekt beenden</b>\n\n"
+                    "Das macht der Bot dann:\n"
+                    f"• {offen} offene Position(en) schließen und verbuchen\n"
+                    "• sich dauerhaft stilllegen (überlebt Neustarts)\n"
+                    "• kein Trading, keine API-Calls, keine Status-Pushes mehr\n"
+                    "• versuchen, den systemd-Dienst abzuschalten\n\n"
+                    "Rückgängig mit <code>/revive</code>.\n\n"
+                    "Bestätigen mit: <code>/kill JETZT</code>")
+
+        lines = ["🛑 <b>Bot stillgelegt</b>"]
+        # 1. Positionen sauber verbuchen, solange der Bot noch Preise hat
+        try:
+            if self.sprint:
+                prices = self.copier.last_prices if self.copier else {}
+                n = self.sprint.close(prices)
+                st = self.sprint.stats(prices)
+                lines.append(f"• {n} Position(en) geschlossen")
+                lines.append(f"• Schatztruhe final: {st['banked']:+,.2f} $ "
+                             f"({st['won']}✅ {st['busted']}💥, "
+                             f"{st.get('cycles_total', 0)} Zyklen gesamt)")
+        except Exception as e:
+            lines.append(f"• ⚠️ Positionen schließen fehlgeschlagen: {str(e)[:100]}")
+        # 2. Marker VOR dem Stoppen setzen - ein Neustart darf nie wieder
+        #    hochfahren, auch wenn der Prozess gleich hart wegfällt.
+        try:
+            set_kill_marker()
+            lines.append("• Stilllegung dauerhaft gesetzt (übersteht Neustarts)")
+        except OSError as e:
+            lines.append(f"• ⚠️ Marker nicht schreibbar: {str(e)[:100]}")
+        # 3. Autopilot-Schleife anhalten (keine Ticks, keine Pushes mehr)
+        try:
+            self.stop()
+        except Exception:
+            log.exception("/kill: stop() fehlgeschlagen")
+        # 4. systemd-Dienst abschalten - klappt nur als root
+        disabled = False
+        try:
+            r = subprocess.run(["systemctl", "disable", "--now", "trading-bot"],
+                               capture_output=True, text=True, timeout=20)
+            disabled = r.returncode == 0
+            if not disabled:
+                log.warning("/kill: systemctl disable fehlgeschlagen: %s",
+                            (r.stderr or "").strip()[:200])
+        except Exception as e:
+            log.warning("/kill: systemctl nicht ausführbar: %s", str(e)[:120])
+        if disabled:
+            lines.append("• systemd-Dienst abgeschaltet – der Bot ist weg. 👋")
+            return "\n".join(lines)
+        lines += [
+            "• systemd-Dienst NICHT abschaltbar (läuft als <code>trader</code> "
+            "ohne root-Rechte)",
+            "",
+            "Der Bot handelt ab sofort nicht mehr und bleibt auch nach einem "
+            "Neustart still. Um ihn ganz vom Server zu nehmen, einmal per SSH:",
+            "<code>sudo systemctl disable --now trading-bot\n"
+            "sudo rm /etc/systemd/system/trading-bot.service\n"
+            "sudo systemctl daemon-reload\n"
+            "rm -rf ~/Dienstplan/trading-bot</code>",
+            "",
+            "Danach noch den <code>STATUS_PUSH_TOKEN</code> auf GitHub "
+            "widerrufen (Settings → Developer settings → Tokens).",
+        ]
+        return "\n".join(lines)
+
+    def _cmd_revive(self) -> str:
+        """Stilllegung zurücknehmen - Sicherheitsventil, falls /kill JETZT
+        versehentlich kam."""
+        if not kill_marker_set():
+            return "Bot ist nicht stillgelegt."
+        try:
+            clear_kill_marker()
+        except OSError as e:
+            return f"⚠️ Marker nicht löschbar: {str(e)[:120]}"
+        self.start()
+        return "▶️ Stilllegung aufgehoben, Autopilot startet wieder."
 
     # ---------- Lebenszyklus ----------
 
@@ -1115,6 +1237,13 @@ class Autopilot:
         # das Setup gerade in der Retry-Schleife hängt.
         self.commander.start()
         if self.running:
+            return
+        # Stillgelegt (/kill): NICHT hochfahren. Die Fernsteuerung oben läuft
+        # bewusst weiter, damit /revive und /status per Telegram erreichbar
+        # bleiben - aber kein Trading, keine API-Calls, keine Status-Pushes.
+        if kill_marker_set():
+            log.warning("Autopilot stillgelegt (%s) - Start übersprungen. "
+                        "Aufheben mit /revive.", KILL_FILE)
             return
         if account_address:
             self.account_address = account_address

@@ -1555,9 +1555,106 @@ def test_llm_merge_takes_maximum():
     assert any(m.startswith("claude:") for m in scored[1].matched)
 
 
+# ---------- /kill: Projekt-Ende per Telegram (Nutzer 25.07.) ----------
+
+def _kill_autopilot(tmp, monkey_marker=True):
+    """Autopilot mit Kill-Marker in einem Temp-Verzeichnis (nie im echten
+    runtime/ herumschreiben)."""
+    from bot import autopilot as ap_mod
+    ap = _autopilot()
+    ap_mod.KILL_FILE = Path(tmp) / "KILLED"
+    return ap, ap_mod
+
+
+def test_kill_requires_explicit_confirmation():
+    """Unumkehrbar-teuer -> zweistufig: /kill erklärt nur, erst /kill JETZT
+    führt aus. Ein Vertipper darf das Projekt nicht beenden."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap, ap_mod = _kill_autopilot(tmp)
+        out = ap._cmd_kill()
+        assert "JETZT" in out and "Projekt beenden" in out
+        assert not ap_mod.kill_marker_set(), "ohne Bestätigung passiert NICHTS"
+        out = ap._cmd_kill("vielleicht")
+        assert not ap_mod.kill_marker_set(), "falsches Argument zählt nicht als Bestätigung"
+
+
+def test_kill_sets_marker_and_stops_autopilot():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap, ap_mod = _kill_autopilot(tmp)
+        stopped = {"n": 0}
+        ap.stop = lambda: stopped.__setitem__("n", stopped["n"] + 1)
+        ap.sprint = None
+        out = ap._cmd_kill("JETZT")
+        assert ap_mod.kill_marker_set(), "Stilllegung persistiert"
+        assert stopped["n"] == 1, "Autopilot-Schleife angehalten"
+        assert "stillgelegt" in out.lower()
+
+
+def test_kill_marker_blocks_start_but_keeps_telegram_reachable():
+    """Kern des Designs: systemd (Restart=always) bringt den Prozess zurück -
+    der Autopilot darf dann NICHT wieder hochfahren. Die Fernsteuerung muss
+    aber erreichbar bleiben, sonst käme man nie mehr an /revive."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap, ap_mod = _kill_autopilot(tmp)
+        started = {"commander": 0}
+        ap.commander = type("C", (), {"start": lambda self: started.__setitem__(
+            "commander", started["commander"] + 1)})()
+        ap_mod.set_kill_marker()
+        ap.start()
+        assert ap.running is False, "Autopilot bleibt aus"
+        assert started["commander"] == 1, "Telegram-Fernsteuerung läuft weiter"
+        assert "/revive" in ap._cmd_start()
+
+
+def test_revive_clears_marker():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap, ap_mod = _kill_autopilot(tmp)
+        ap_mod.set_kill_marker()
+        started = {"n": 0}
+        ap.start = lambda: started.__setitem__("n", 1)
+        out = ap._cmd_revive()
+        assert not ap_mod.kill_marker_set() and started["n"] == 1
+        assert "aufgehoben" in out.lower()
+        assert "nicht stillgelegt" in ap._cmd_revive().lower(), "zweites /revive ist ein No-Op"
+
+
+def test_kill_reports_manual_step_when_systemctl_denied():
+    """Die Unit läuft als User 'trader' mit NoNewPrivileges - systemctl disable
+    scheitert also. Dann MUSS die Antwort die exakten SSH-Befehle nennen,
+    sonst bliebe der Nutzer mit einem halb erledigten Job zurück."""
+    import subprocess as _sp
+    import tempfile
+
+    from bot import autopilot as ap_mod
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ap, ap_mod = _kill_autopilot(tmp)
+        orig = ap_mod.subprocess.run
+        ap_mod.subprocess.run = lambda *a, **k: _sp.CompletedProcess(
+            a[0] if a else [], 1, "", "Access denied")
+        try:
+            ap.sprint = None
+            ap.stop = lambda: None
+            out = ap._cmd_kill("JETZT")
+        finally:
+            ap_mod.subprocess.run = orig
+        assert "systemctl disable --now trading-bot" in out
+        assert "STATUS_PUSH_TOKEN" in out, "Token-Widerruf nicht vergessen"
+        assert ap_mod.kill_marker_set(), "trotzdem stillgelegt"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
         fn()
         print(f"  OK  {fn.__name__}")
     print(f"\n{len(fns)} Tests bestanden.")
+

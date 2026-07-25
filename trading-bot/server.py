@@ -282,7 +282,20 @@ def _write_env(agent_key: str, address: str) -> None:
 
 
 if __name__ == "__main__":
-    if cfg.autopilot.autostart:
+    from bot.autopilot import KILL_FILE, kill_marker_set
+
+    if kill_marker_set():
+        # Stillgelegt per /kill (Nutzer 25.07., Projekt-Ende). systemd hat
+        # Restart=always, der Prozess kommt also zwangsläufig zurück - er darf
+        # dann aber nichts mehr tun. Bewusst NICHT sofort beenden: das gäbe
+        # eine Neustart-Schleife alle 10s (RestartSec). Stattdessen nur den
+        # Webserver/die Telegram-Fernsteuerung halten, damit /revive erreichbar
+        # bleibt - kein Trading, keine API-Calls, keine Status-Pushes.
+        log.warning("Bot ist stillgelegt (%s) - Autopilot startet NICHT. "
+                    "Aufheben mit /revive, ganz entfernen mit "
+                    "'sudo systemctl disable --now trading-bot'.", KILL_FILE)
+        autopilot.commander.start()
+    elif cfg.autopilot.autostart:
         # 24/7-Betrieb (VPS/systemd): nach jedem (Neu-)Start sofort weitermachen,
         # ohne dass jemand im Dashboard auf "Start" klicken muss.
         log.info("Autostart aktiv - Autopilot startet sofort")

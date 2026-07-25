@@ -58,6 +58,30 @@ Handy installieren → `http://<vps-name>:8000` (Token-geschützt).
 
 Logs: `journalctl -u trading-bot -f` | Stopp: `systemctl stop trading-bot`
 
+#### Projekt beenden (`/kill`)
+
+`/kill` per Telegram legt den Bot **dauerhaft** still: offene Positionen werden
+geschlossen und verbucht, danach fährt der Autopilot auch nach einem
+systemd-Neustart nicht mehr hoch (Marker `runtime/KILLED`) — kein Trading,
+keine API-Calls, keine Status-Pushes. Erreichbar bleibt nur die
+Telegram-Fernsteuerung, damit `/revive` die Stilllegung zurücknehmen kann.
+Bestätigung nötig: `/kill JETZT`.
+
+Der Bot **kann sich nicht selbst deinstallieren** — die Unit läuft als
+`trader` mit `NoNewPrivileges=true`, `systemctl disable` braucht root. Er
+versucht es (falls die Unit doch als root läuft, ist danach alles weg) und
+nennt sonst den letzten Schritt. Zum vollständigen Entfernen einmal per SSH:
+
+```bash
+sudo systemctl disable --now trading-bot
+sudo rm /etc/systemd/system/trading-bot.service
+sudo systemctl daemon-reload
+rm -rf ~/Dienstplan/trading-bot      # nur den Bot-Ordner
+```
+
+Danach den `STATUS_PUSH_TOKEN` auf GitHub widerrufen (Settings → Developer
+settings → Tokens) — er hat Schreibrecht auf den `status-feed`-Branch.
+
 ### Fernzugriff: Dashboard von unterwegs (nur für dich)
 
 **Warum nicht GitHub Pages?** Pages hostet nur statische Dateien und ist
