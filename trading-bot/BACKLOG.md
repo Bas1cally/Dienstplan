@@ -365,6 +365,16 @@ die 197 bereits gemessenen Zyklen nicht verloren. Auch im Spiegel
 sichtbar (`cycles_total` neben `cycle`). 3 neue Tests (übersteht
 Bilanz-Reset + Neustart, Seed aus Alt-State, Amnestie-fest).
 
+*Anschlussfrage Nutzer ("Wenn wir Elite anstellen Schatztruhe auch
+reseten"): war bereits gebaut* — `reset_bilanz()` läuft beim ersten Laden
+unter `parallel_rides: false` (Flag `_bilanz_reset_pending`, wartet
+korrekt auf den Alt-Ritt-Drain) und nullt Zyklus-Zähler, Schatztruhe und
+total_trades; Strikes/Bans/Confidence bleiben. NICHT abgedeckt war die
+Wechselwirkung mit dem neuen `cycles_total`: ein Test sichert jetzt ab,
+dass der Elite-Umstieg die Bilanz nullt, die Messhistorie
+(`cycles_total`/`leader_record`/`leader_pnl`) aber überlebt — sonst hätte
+sich das Elite-Gate im Moment des Umschaltens selbst wieder ausgesperrt.
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien sind seit 24.07. CODIFIZIERT und jederzeit per `/quest elite`
 abrufbar (`SprintBook.elite_audit()`, Schwellen als `ELITE_*`-Konstanten

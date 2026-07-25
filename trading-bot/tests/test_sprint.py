@@ -2729,6 +2729,34 @@ def test_bilanz_resets_when_loading_after_mess_modus_switch():
         assert fresh.confidence.get("0xbest") == 55, "Confidence bleibt"
 
 
+def test_elite_switch_resets_schatztruhe_but_keeps_messhistorie():
+    """Nutzer 25.07.: "Wenn wir Elite anstellen Schatztruhe auch reseten" -
+    beim Umstieg auf den Einzel-Ritt startet die Bilanz bei 0 (die Mess-Modus-
+    Zahlen entstanden unter anderen Regeln). Gegenprobe zur cycles_total-
+    Einführung: der Elite-Umstieg darf die MESSHISTORIE nicht mitnullen,
+    sonst sperrt sich das Elite-Gate im Moment des Umschaltens selbst aus
+    (Zyklen fielen wieder unter die Schwelle) - und leader_record/leader_pnl,
+    die Grundlage der Elite-Zulassung, müssen ebenfalls überleben."""
+    with tempfile.TemporaryDirectory() as tmp:
+        old = book(tmp, parallel_rides=True)
+        old.won, old.busted, old.banked, old.total_trades = 68, 81, -835.31, 400
+        old.cycles_total = 197
+        old.leader_record["0xgut"] = {"won": 4, "lost": 1}
+        old.leader_pnl["0xgut"] = 120.5
+        old._save_state()
+
+        elite = book(tmp)   # Default parallel_rides=False -> Elite-Umstieg
+        assert elite.banked == 0.0, "Schatztruhe frisch bei 0 (Nutzer-Wunsch)"
+        assert elite.won == 0 and elite.busted == 0 and elite.total_trades == 0
+        assert elite.cycles_total == 197, "Messhistorie überlebt den Umstieg"
+        assert elite.leader_record["0xgut"] == {"won": 4, "lost": 1}
+        assert elite.leader_pnl["0xgut"] == 120.5
+        a = elite.elite_audit()
+        assert a["cycles"] == 197 and a["cycles_ok"] is True, \
+            "Elite-Gate sperrt sich nicht selbst aus, sobald Elite aktiv ist"
+        assert a["banked"] == 0.0, "Audit zeigt die frische Bilanz"
+
+
 def test_bilanz_reset_waits_for_leftover_ride_drain():
     """Live-Bug (Nutzer-Befund): der Reset lief bisher schon beim Laden - vor
     dem ersten Tick, der noch offene Alt-Mess-Ritte über die Mode-Switch-
