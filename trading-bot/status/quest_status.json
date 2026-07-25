@@ -1,6 +1,6 @@
 {
   "autopilot": {
-    "updated": "2026-07-17T18:27:31.812242+00:00",
+    "updated": "2026-07-25T19:48:16.087932+00:00",
     "state": "running",
     "mode": "dry_run",
     "network": "testnet",
@@ -12,89 +12,7 @@
     "twap": [],
     "polymarket": [],
     "labs": null,
-    "sprint": {
-      "equity": 1000.0,
-      "cycle": 2,
-      "cycle_pnl": 0.0,
-      "positions": [],
-      "target": 1100,
-      "progress_pct": 0.0,
-      "state": "wartet auf frisches Signal",
-      "held": [],
-      "parallel": false,
-      "banked": -20.84,
-      "won": 0,
-      "busted": 1,
-      "trades": 0,
-      "avg_trades_per_cycle": 1.0,
-      "leader": "",
-      "leader_is_star": false,
-      "strikes": {
-        "0xfd688aed": 2,
-        "0xda744273": 1,
-        "0x8cc9fb94": 3,
-        "0x7d0c5969": 2,
-        "0x10b4c1fb": 2,
-        "0x5f94a519": 1,
-        "0xcf7c4feb": 2,
-        "0x60d97552": 1,
-        "0xd68dfb48": 2,
-        "0x362ad620": 1,
-        "0x920fa683": 1,
-        "0xd246c4a0": 1,
-        "0xcaaacd1e": 1,
-        "0x8d7d49eb": 1
-      },
-      "banned": [
-        "0x8cc9fb94",
-        "0x10b4c1fb",
-        "0xd68dfb48",
-        "0xfd688aed",
-        "0x7d0c5969",
-        "0xcf7c4feb"
-      ],
-      "confidence": {
-        "0x051c2e6d": 5,
-        "0xc9c78160": 5
-      },
-      "stars": [],
-      "pending": [],
-      "baseline_status": "warm \u00fcbernommen (24s alt beim Start)",
-      "scan": {
-        "fresh_seen": 4,
-        "rejected": {
-          "unbestaetigt_negativ": 4
-        },
-        "last_rejected": [
-          {
-            "t": 1784310607,
-            "coin": "LIT",
-            "leader": "0x8d7d49eb",
-            "grund": "unbestaetigt_negativ"
-          },
-          {
-            "t": 1784311404,
-            "coin": "MET",
-            "leader": "0x8d7d49eb",
-            "grund": "unbestaetigt_negativ"
-          },
-          {
-            "t": 1784311624,
-            "coin": "ARB",
-            "leader": "0x8d7d49eb",
-            "grund": "unbestaetigt_negativ"
-          },
-          {
-            "t": 1784312589,
-            "coin": "GALA",
-            "leader": "0xc9c78160",
-            "grund": "unbestaetigt_negativ"
-          }
-        ],
-        "last_fresh_min": 4.4,
-        "last_entry_min": null
-      }
-    },
+    "sprint": null,
     "lighter": null,
     "equity": null,
     "positions": [],
@@ -106,811 +24,1317 @@
     "shadows": null,
     "leaders": [
       {
-        "address": "0xd68dfb480e643f0c1a78b24d04de7cce7dfbbdfc",
-        "weight": 1.0,
-        "score": 66.4,
-        "roi_pct": 72.13,
-        "profit_factor": 2.21,
-        "max_drawdown_pct": 24.97,
-        "closed_trades": 710,
-        "roi_since_copy_pct": -34.7
+        "address": "0xdd796428615297833e8740ef68286f283abfde25",
+        "weight": 0.5054,
+        "score": 97.9,
+        "roi_pct": 111.66,
+        "profit_factor": 999,
+        "max_drawdown_pct": 0.48,
+        "closed_trades": 360,
+        "roi_since_copy_pct": -19.14
+      },
+      {
+        "address": "0x56eba1945e165db7371add702f7c32eb342845fc",
+        "weight": 0.4946,
+        "score": 95.8,
+        "roi_pct": 116.41,
+        "profit_factor": 999,
+        "max_drawdown_pct": 0.4,
+        "closed_trades": 118,
+        "roi_since_copy_pct": -38.77
       }
     ],
     "account": null,
-    "next_analysis_in_h": 5.4
+    "next_analysis_in_h": 2.4
   },
   "wallet": null,
   "deploy": {
-    "sha": "b2776bf",
-    "committed_at": "2026-07-17T17:45:54Z"
+    "sha": "8ea5d65",
+    "committed_at": "2026-07-25T08:37:34Z"
   },
-  "started_at": "2026-07-17T17:46:42.554610+00:00",
-  "uptime_s": 2493.0,
+  "started_at": "2026-07-25T08:47:46.844155+00:00",
+  "uptime_s": 39658.0,
   "risk_level": "NORMAL",
-  "analysis_note": "41 Kandidaten (CMM 0 + HL 40) \u2192 0 Haupt(\u226535) / 7 Sprint-tauglich (Gate-K.O. 9, Richtung unter 10: 0, Schl\u00e4fer: 23)\nAussortiert: 2 zu aktiv, 39 LARP (netto unprofitabel\u00d725, \u00fcberhebelt\u00d72), 0 Fehler | Top-Scores: -",
+  "analysis_note": "110 Kandidaten (CMM 227 + HL 56) \u2192 2 Haupt(\u226535) / 16 Sprint-tauglich (Gate-K.O. 23, Richtung unter 10: 0, Schl\u00e4fer: 44, Sitzer-Deckel: 15)\nAussortiert: 4 zu aktiv, 96 LARP (netto unprofitabel\u00d773, nur 0 Round-Trips\u00d78), 8 Fehler | Top-Scores: 98/96",
   "tick_health": {
-    "last_tick_ago_s": 44.0,
+    "last_tick_ago_s": 29.0,
     "error_count": 0,
     "last_error": null
   },
   "feed": {
     "snapshot_age_s": 0.0,
     "fresh": 8,
-    "total": 8,
-    "stale": 0
+    "total": 18,
+    "stale": 10,
+    "dex_calls": 12
   },
   "quest": {
-    "equity": 1000.0,
-    "cycle": 2,
-    "cycle_pnl": 0.0,
-    "positions": [],
+    "equity": 1030.91,
+    "cycle": 31,
+    "cycles_total": 218,
+    "cycle_pnl": 30.91,
+    "positions": [
+      {
+        "coin": "HYPE",
+        "size": -171.53688471863663,
+        "entry": 58.2965,
+        "unrealized_pnl": 61.75,
+        "leader": "counter:lighter:28147497"
+      },
+      {
+        "coin": "AVAX",
+        "size": -1499.2278976327193,
+        "entry": 6.6701,
+        "unrealized_pnl": -34.63,
+        "leader": "counter:lighter:28147497"
+      },
+      {
+        "coin": "SUI",
+        "size": 14033.118158854897,
+        "entry": 0.7126,
+        "unrealized_pnl": 3.79,
+        "leader": "counter:0xdf83170d313813"
+      }
+    ],
     "target": 1100,
-    "progress_pct": 0.0,
-    "state": "wartet auf frisches Signal",
-    "held": [],
-    "parallel": false,
-    "banked": -20.84,
-    "won": 0,
-    "busted": 1,
-    "trades": 0,
-    "avg_trades_per_cycle": 1.0,
+    "progress_pct": 30.9,
+    "state": "3 Mess-Ritte laufen",
+    "held": [
+      "HYPE SHORT",
+      "AVAX SHORT",
+      "SUI LONG"
+    ],
+    "parallel": true,
+    "banked": -548.91,
+    "won": 8,
+    "busted": 22,
+    "trades": 569,
+    "avg_trades_per_cycle": 18.4,
     "leader": "",
     "leader_is_star": false,
     "strikes": {
-      "0xfd688aed": 2,
-      "0xda744273": 1,
-      "0x8cc9fb94": 3,
-      "0x7d0c5969": 2,
-      "0x10b4c1fb": 2,
-      "0x5f94a519": 1,
-      "0xcf7c4feb": 2,
-      "0x60d97552": 1,
-      "0xd68dfb48": 2,
-      "0x362ad620": 1,
-      "0x920fa683": 1,
-      "0xd246c4a0": 1,
-      "0xcaaacd1e": 1,
-      "0x8d7d49eb": 1
+      "0x28473085ba4aa761eb5419": 2,
+      "0x7f20c6eaa0adc427819e23": 1,
+      "lighter:388044": 1,
+      "0x8d7d49eb9715a93eef4843": 3,
+      "lighter:268927": 1,
+      "counter:lighter:726722": 3,
+      "counter:0x28473085ba4aa7": 1,
+      "lighter:702386": 2,
+      "counter:lighter:702386": 2,
+      "counter:0x8d7d49eb9715a9": 1,
+      "lighter:726314": 2,
+      "lighter:314233": 2,
+      "0x7ea426064bd21095d35c7c": 1,
+      "lighter:68785": 1,
+      "0xdab7903e85d53c63f45236": 1,
+      "counter:lighter:68785": 2,
+      "counter:lighter:726314": 2,
+      "0xa7405ff2687cb83b8a8a08": 1,
+      "lighter:366058": 2,
+      "lighter:102394": 1,
+      "counter:lighter:366058": 2,
+      "counter:lighter:314233": 2,
+      "lighter:277239": 1,
+      "0xe2e147a42768d53bc14bb8": 1,
+      "0x8362907bc2368f43d23d25": 2,
+      "lighter:433673": 1,
+      "lighter:702389": 2,
+      "counter:0x8362907bc2368f": 2,
+      "lighter:281474976692249": 1,
+      "0xc30c7ea910a71ce06ae840": 1,
+      "lighter:724009": 1,
+      "lighter:90364": 2,
+      "0xdbd1bac81ad581c7198c9d": 1,
+      "0xf224d1b2152213e4377a57": 1,
+      "counter:lighter:90364": 2,
+      "0xdf83170d313813a71fd6b5": 2,
+      "0x72774e2fe1992d5da8c6e9": 2,
+      "lighter:731201": 1,
+      "lighter:281474976627963": 3,
+      "counter:0xdf83170d313813": 1
     },
     "banned": [
-      "0x8cc9fb94",
-      "0x10b4c1fb",
-      "0xd68dfb48",
-      "0xfd688aed",
-      "0x7d0c5969",
-      "0xcf7c4feb"
+      "0x28473085ba4aa761eb5419",
+      "0x72774e2fe1992d5da8c6e9",
+      "0x8362907bc2368f43d23d25",
+      "0x8d7d49eb9715a93eef4843",
+      "0xdf83170d313813a71fd6b5",
+      "counter:0x8362907bc2368f",
+      "counter:0x8d7d49eb9715a9",
+      "counter:lighter:314233",
+      "counter:lighter:366058",
+      "counter:lighter:68785",
+      "counter:lighter:702386",
+      "counter:lighter:726314",
+      "counter:lighter:726722",
+      "counter:lighter:90364",
+      "lighter:281474976627963",
+      "lighter:314233",
+      "lighter:366058",
+      "lighter:702386",
+      "lighter:702389",
+      "lighter:726314",
+      "lighter:90364"
     ],
     "confidence": {
-      "0x051c2e6d": 5,
-      "0xc9c78160": 5
+      "0x051c2e6d49cf82ebc47f08": 5,
+      "0xc9c78160120cd6ecf3dea8": 10,
+      "0xb037adc3ca8b5f601a9392": 5,
+      "counter:0xc9c78160120cd6": 10,
+      "counter:lighter:726722": 10,
+      "counter:0x28473085ba4aa7": 25,
+      "counter:0x8d7d49eb9715a9": 5,
+      "lighter:726314": 5,
+      "lighter:366058": 5,
+      "counter:lighter:726314": 5,
+      "0x985f02b19dbc062e565c98": 10,
+      "counter:lighter:366058": 5,
+      "counter:0x8362907bc2368f": 5,
+      "0x45855f715af1045a71d83e": 5,
+      "counter:lighter:28147497": 5
     },
     "stars": [],
+    "leader_record": {
+      "0x8d7d49eb9715a93eef4843": {
+        "won": 3,
+        "lost": 5
+      },
+      "lighter:702386": {
+        "won": 2,
+        "lost": 5
+      },
+      "lighter:68785": {
+        "won": 0,
+        "lost": 3
+      },
+      "lighter:314236": {
+        "won": 0,
+        "lost": 1
+      },
+      "0xc9c78160120cd6ecf3dea8": {
+        "won": 0,
+        "lost": 2
+      },
+      "lighter:281474976688087": {
+        "won": 1,
+        "lost": 2
+      },
+      "lighter:366058": {
+        "won": 6,
+        "lost": 5
+      },
+      "0x786515c7862ce168becb5b": {
+        "won": 0,
+        "lost": 2
+      },
+      "lighter:281474976627963": {
+        "won": 1,
+        "lost": 5
+      },
+      "0xb037adc3ca8b5f601a9392": {
+        "won": 0,
+        "lost": 1
+      },
+      "0x3bfadaec294d1a7fcaf443": {
+        "won": 1,
+        "lost": 0
+      },
+      "lighter:102394": {
+        "won": 4,
+        "lost": 3
+      },
+      "lighter:726722": {
+        "won": 2,
+        "lost": 5
+      },
+      "lighter:281474976710654": {
+        "won": 2,
+        "lost": 2
+      },
+      "counter:0x8d7d49eb9715a9": {
+        "won": 4,
+        "lost": 4
+      },
+      "counter:lighter:726722": {
+        "won": 10,
+        "lost": 8
+      },
+      "counter:lighter:28147497": {
+        "won": 2,
+        "lost": 3
+      },
+      "counter:lighter:702386": {
+        "won": 4,
+        "lost": 5
+      },
+      "counter:0x786515c7862ce1": {
+        "won": 1,
+        "lost": 1
+      },
+      "counter:lighter:102394": {
+        "won": 0,
+        "lost": 1
+      },
+      "0xb7e0b9fbc9479330d70bcc": {
+        "won": 1,
+        "lost": 0
+      },
+      "counter:0xc9c78160120cd6": {
+        "won": 2,
+        "lost": 0
+      },
+      "counter:lighter:366058": {
+        "won": 3,
+        "lost": 4
+      },
+      "counter:lighter:68785": {
+        "won": 2,
+        "lost": 2
+      },
+      "0x28473085ba4aa761eb5419": {
+        "won": 0,
+        "lost": 3
+      },
+      "0x7f20c6eaa0adc427819e23": {
+        "won": 3,
+        "lost": 2
+      },
+      "lighter:513030": {
+        "won": 4,
+        "lost": 0
+      },
+      "lighter:388044": {
+        "won": 0,
+        "lost": 1
+      },
+      "lighter:268927": {
+        "won": 0,
+        "lost": 1
+      },
+      "counter:0x28473085ba4aa7": {
+        "won": 11,
+        "lost": 5
+      },
+      "lighter:726314": {
+        "won": 3,
+        "lost": 3
+      },
+      "lighter:314233": {
+        "won": 0,
+        "lost": 2
+      },
+      "0x7ea426064bd21095d35c7c": {
+        "won": 0,
+        "lost": 1
+      },
+      "lighter:30323": {
+        "won": 1,
+        "lost": 0
+      },
+      "counter:lighter:314233": {
+        "won": 2,
+        "lost": 2
+      },
+      "0xa7405ff2687cb83b8a8a08": {
+        "won": 2,
+        "lost": 1
+      },
+      "0xdab7903e85d53c63f45236": {
+        "won": 1,
+        "lost": 1
+      },
+      "lighter:363200": {
+        "won": 2,
+        "lost": 0
+      },
+      "0x985f02b19dbc062e565c98": {
+        "won": 3,
+        "lost": 1
+      },
+      "counter:lighter:726314": {
+        "won": 2,
+        "lost": 2
+      },
+      "lighter:363838": {
+        "won": 1,
+        "lost": 0
+      },
+      "lighter:277239": {
+        "won": 0,
+        "lost": 1
+      },
+      "0xe2e147a42768d53bc14bb8": {
+        "won": 0,
+        "lost": 1
+      },
+      "0x8362907bc2368f43d23d25": {
+        "won": 0,
+        "lost": 2
+      },
+      "counter:0x8362907bc2368f": {
+        "won": 1,
+        "lost": 2
+      },
+      "lighter:90364": {
+        "won": 1,
+        "lost": 2
+      },
+      "lighter:433673": {
+        "won": 0,
+        "lost": 1
+      },
+      "lighter:702389": {
+        "won": 0,
+        "lost": 2
+      },
+      "lighter:281474976692249": {
+        "won": 0,
+        "lost": 1
+      },
+      "lighter:281474976708492": {
+        "won": 1,
+        "lost": 0
+      },
+      "0xc30c7ea910a71ce06ae840": {
+        "won": 2,
+        "lost": 1
+      },
+      "lighter:724009": {
+        "won": 1,
+        "lost": 2
+      },
+      "0x6bb971430554e3af58fbd4": {
+        "won": 1,
+        "lost": 0
+      },
+      "0x72774e2fe1992d5da8c6e9": {
+        "won": 1,
+        "lost": 2
+      },
+      "0xdbd1bac81ad581c7198c9d": {
+        "won": 0,
+        "lost": 1
+      },
+      "0x45855f715af1045a71d83e": {
+        "won": 1,
+        "lost": 0
+      },
+      "0xf224d1b2152213e4377a57": {
+        "won": 0,
+        "lost": 1
+      },
+      "counter:lighter:90364": {
+        "won": 0,
+        "lost": 2
+      },
+      "0xdf83170d313813a71fd6b5": {
+        "won": 0,
+        "lost": 2
+      },
+      "lighter:731201": {
+        "won": 0,
+        "lost": 1
+      },
+      "counter:0xdf83170d313813": {
+        "won": 0,
+        "lost": 1
+      }
+    },
+    "leader_pnl": {
+      "lighter:724009": -10.58,
+      "counter:0x28473085ba4aa7": -38.43,
+      "counter:lighter:68785": -55.97,
+      "0x6bb971430554e3af58fbd4": 3.89,
+      "0x72774e2fe1992d5da8c6e9": -10.6,
+      "lighter:102394": 20.45,
+      "lighter:90364": -40.54,
+      "0xdbd1bac81ad581c7198c9d": -21.18,
+      "0x45855f715af1045a71d83e": 69.8,
+      "0xf224d1b2152213e4377a57": -270.78,
+      "counter:lighter:90364": -4.26,
+      "0xdf83170d313813a71fd6b5": -83.05,
+      "lighter:281474976688087": 14.2,
+      "lighter:702389": -0.38,
+      "lighter:731201": -52.34,
+      "lighter:281474976627963": -50.99,
+      "counter:lighter:28147497": 14.01,
+      "counter:0xdf83170d313813": -54.03
+    },
     "pending": [],
-    "baseline_status": "warm \u00fcbernommen (24s alt beim Start)",
+    "baseline_status": "warm \u00fcbernommen (94s alt beim Start)",
+    "watch": {
+      "tracked": 31,
+      "holding_now": 29,
+      "flat_now": 2,
+      "sample": [
+        {
+          "addr": "0xdd796428",
+          "coins": [
+            "BTC"
+          ]
+        },
+        {
+          "addr": "lighter:72",
+          "coins": [
+            "BTC",
+            "ETH",
+            "HYPE",
+            "SOL"
+          ]
+        },
+        {
+          "addr": "0x28473085",
+          "coins": [
+            "LIT",
+            "ZEC",
+            "kPEPE",
+            "xyz:BABA",
+            "xyz:BE",
+            "xyz:CRCL",
+            "xyz:HOOD",
+            "xyz:INTC",
+            "xyz:MINIMAX",
+            "xyz:MRVL",
+            "xyz:NBIS",
+            "xyz:QCOM",
+            "xyz:SNDK"
+          ]
+        },
+        {
+          "addr": "lighter:68",
+          "coins": [
+            "ARB",
+            "AVAX",
+            "BTC",
+            "DOGE",
+            "ETH",
+            "HYPE",
+            "LINK",
+            "SOL"
+          ]
+        },
+        {
+          "addr": "lighter:70",
+          "coins": [
+            "DOGE",
+            "HYPE",
+            "SOL"
+          ]
+        },
+        {
+          "addr": "lighter:31",
+          "coins": [
+            "ARB",
+            "BTC",
+            "DOGE",
+            "SOL"
+          ]
+        },
+        {
+          "addr": "lighter:72",
+          "coins": [
+            "BTC",
+            "DOGE",
+            "ETH",
+            "HYPE",
+            "SOL"
+          ]
+        },
+        {
+          "addr": "lighter:36",
+          "coins": [
+            "ARB",
+            "AVAX",
+            "DOGE",
+            "HYPE",
+            "LINK",
+            "SOL"
+          ]
+        },
+        {
+          "addr": "0x8362907b",
+          "coins": [
+            "ONDO",
+            "xyz:CL"
+          ]
+        }
+      ]
+    },
     "scan": {
-      "fresh_seen": 4,
+      "fresh_seen": 57,
       "rejected": {
-        "unbestaetigt_negativ": 4
+        "coin_belegt": 18,
+        "unbestaetigt_negativ": 2,
+        "coin_ausgeschlossen": 9,
+        "korb_begrenzt": 5,
+        "leader_belegt": 6
       },
       "last_rejected": [
         {
-          "t": 1784310607,
-          "coin": "LIT",
-          "leader": "0x8d7d49eb",
-          "grund": "unbestaetigt_negativ"
+          "t": 1785005753,
+          "coin": "BTC",
+          "leader": "lighter:70",
+          "grund": "coin_ausgeschlossen"
         },
         {
-          "t": 1784311404,
-          "coin": "MET",
-          "leader": "0x8d7d49eb",
-          "grund": "unbestaetigt_negativ"
+          "t": 1785006091,
+          "coin": "BTC",
+          "leader": "lighter:70",
+          "grund": "coin_ausgeschlossen"
         },
         {
-          "t": 1784311624,
-          "coin": "ARB",
-          "leader": "0x8d7d49eb",
-          "grund": "unbestaetigt_negativ"
+          "t": 1785006357,
+          "coin": "BTC",
+          "leader": "lighter:28",
+          "grund": "coin_ausgeschlossen"
         },
         {
-          "t": 1784312589,
-          "coin": "GALA",
-          "leader": "0xc9c78160",
-          "grund": "unbestaetigt_negativ"
+          "t": 1785007922,
+          "coin": "HYPE",
+          "leader": "lighter:28",
+          "grund": "korb_begrenzt"
+        },
+        {
+          "t": 1785008541,
+          "coin": "HYPE",
+          "leader": "lighter:28",
+          "grund": "leader_belegt"
         }
       ],
-      "last_fresh_min": 5.1,
-      "last_entry_min": null
+      "last_fresh_min": 6.4,
+      "last_entry_min": 16.2
     },
     "analysis_funnel": {
-      "candidates": 41,
-      "source": "CMM 0 + HL 40",
-      "main_ranked": 0,
+      "candidates": 110,
+      "source": "CMM 227 + HL 56",
+      "main_ranked": 2,
       "min_score": 35,
-      "sprint_gate_ko": 9,
+      "sprint_gate_ko": 23,
       "sprint_score_ko": 0,
-      "sprint_idle_ko": 23,
-      "sprint_ok": 7,
+      "sprint_idle_ko": 44,
+      "sprint_path_b_ko": 15,
+      "sprint_ok": 16,
       "pool_min_score": 10,
-      "truncated": 2,
-      "larp_ko": 39,
+      "truncated": 4,
+      "larp_ko": 96,
       "larp_reasons": {
-        "\u00fcberhebelt": 2,
-        "netto unprofitabel": 25,
-        "nur 8 Round-Trips": 1,
-        "nur 12 Round-Trips": 1,
-        "nur 29 Round-Trips": 1,
-        "nur 26 Round-Trips": 1,
+        "netto unprofitabel": 73,
+        "nur 5 aktive Tage": 1,
+        "nur 0 Round-Trips": 8,
         "nur 10 Round-Trips": 1,
-        "nur 3 Round-Trips": 1,
-        "nur 2 Round-Trips": 2,
-        "nur 2 aktive Tage": 2,
-        "nur 8 aktive Tage": 1,
-        "nur 6 Round-Trips": 1
+        "nur 15 Round-Trips": 2,
+        "nur 13 Round-Trips": 1,
+        "nur 4 Round-Trips": 2,
+        "nur 1 Round-Trips": 4,
+        "nur 6 aktive Tage": 1,
+        "nur 16 Round-Trips": 1,
+        "nur 2 Round-Trips": 1,
+        "nur 11 Round-Trips": 1
       },
-      "errors": 0
+      "errors": 8
     },
     "pool_funnel": {
-      "sprint_ok_in": 7,
-      "banned_out": 0,
+      "sprint_ok_in": 16,
+      "banned_out": 1,
       "regime_out": 0,
       "crypto_only": false,
-      "cands_after_filters": 7,
-      "idle_total": 54,
-      "idle_in_pool": 5,
+      "cands_after_filters": 15,
+      "idle_total": 182,
+      "idle_in_pool": 9,
       "truncated_by_size": 0,
-      "pool_size_target": 20,
+      "pool_size_target": 25,
       "forced_main": 0,
-      "final_pool": 7
+      "final_pool": 15
     },
     "pool": [
       {
-        "address": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
-        "score": 100.0
+        "address": "0x56eba1945e165db7371add702f7c32eb342845fc",
+        "score": 89.9
       },
       {
-        "address": "0x786515c7862ce168becb5b9b3da55a5e0d486e42",
-        "score": 86.8
+        "address": "0xb4476ce7ee9b8143af0b5d0cd1ee9874d9da2c8e",
+        "score": 77.5
       },
       {
-        "address": "0xc9c78160120cd6ecf3dea892e9ae5af4115bf5f8",
-        "score": 87.8
+        "address": "0x0daf132c5554fd7d5eb422585426af557d8847e0",
+        "score": 84.2
+      },
+      {
+        "address": "0xb981a0c739dddb86a40c576aa1fd75f491184e0e",
+        "score": 77.5
+      },
+      {
+        "address": "0xe6c7b3e0d89dd56a0677bc23a023bd47d39fb921",
+        "score": 77.5
+      },
+      {
+        "address": "0x1bbfb3a33600338d5a948618189649a4588d5fc4",
+        "score": 77.5
+      },
+      {
+        "address": "0xdd796428615297833e8740ef68286f283abfde25",
+        "score": 86.5
+      },
+      {
+        "address": "0xcaaacd1e5f394da3e5006edc7c05fd7bfdc5764b",
+        "score": 85.0
+      },
+      {
+        "address": "0x45855f715af1045a71d83e3ea16cbb5edf89549a",
+        "score": 84.1
       },
       {
         "address": "0x7f20c6eaa0adc427819e239fee0089d36dc3b679",
-        "score": 85.8
-      },
-      {
-        "address": "0x35b5d0398429785e5071560252e8a33d0bd57248",
         "score": 77.5
       },
       {
-        "address": "0x7ea426064bd21095d35c7c87c8a8c8fdc81cffda",
-        "score": 77.5
+        "address": "0x39d60548ec0f5be5613b249c3ce4269418c45e64",
+        "score": 77.4
       },
       {
-        "address": "0xa7f03c8247b696b2fe2dea7b890d09965992f88c",
+        "address": "0x4f7634c03ec4e87e14725c84913ade523c6fad5a",
+        "score": 92.5
+      },
+      {
+        "address": "0xbe19541903f64af97bcf8436f4d15bf3a56b8bd1",
+        "score": 85.4
+      },
+      {
+        "address": "0x0c4a3a7ac74d43732f9b5ea507f01ab72a381b19",
+        "score": 85.0
+      },
+      {
+        "address": "0x874226b22939904f436ff0434e1fd0ab257c8427",
         "score": 77.5
       }
     ]
   },
   "journal_tail": [
     {
-      "t": 1784309990,
-      "kind": "sprint_cycle_end",
-      "cycle": 1,
-      "pnl": -20.84,
-      "reason": "leader_exit",
-      "banked": -20.84,
-      "leader": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
-      "coin": "PUMP"
-    },
-    {
-      "t": 1784309989,
-      "kind": "sprint_strike",
-      "leader": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
-      "strikes": 1,
-      "ride_pnl": -20.84
-    },
-    {
-      "t": 1784309989,
-      "kind": "sprint_exit",
-      "coin": "PUMP",
-      "reason": "leader_exit",
-      "cycle_pnl": -20.84
-    },
-    {
-      "t": 1784309637,
+      "t": 1785007952,
       "kind": "sprint_entry",
-      "coin": "PUMP",
+      "coin": "SUI",
+      "side": "LONG",
+      "notional": 10000.0,
+      "leader": "counter:0xdf83170d313813a71fd6b50fb981198833b73cff",
+      "cycle": 31,
+      "leverage": 10,
+      "hl_max_leverage": 10,
+      "counter": true
+    },
+    {
+      "t": 1785007922,
+      "kind": "sprint_entry",
+      "coin": "AVAX",
       "side": "SHORT",
       "notional": 10000.0,
-      "leader": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
-      "cycle": 1,
+      "leader": "counter:lighter:281474976627963",
+      "cycle": 31,
+      "leverage": 10,
+      "hl_max_leverage": 10,
+      "counter": true
+    },
+    {
+      "t": 1785007596,
+      "kind": "sprint_entry",
+      "coin": "HYPE",
+      "side": "SHORT",
+      "notional": 10000.0,
+      "leader": "counter:lighter:281474976627963",
+      "cycle": 31,
+      "leverage": 10,
+      "hl_max_leverage": 10,
+      "counter": true
+    },
+    {
+      "t": 1785006657,
+      "kind": "sprint_cycle_end",
+      "cycle": 30,
+      "pnl": 0.0,
+      "reason": "kein_preis",
+      "banked": -548.91,
+      "leader": "counter:0xdf83170d313813a71fd6b50fb981198833b73cff",
+      "coin": "SUI"
+    },
+    {
+      "t": 1785006657,
+      "kind": "sprint_cycle_end",
+      "cycle": 29,
+      "pnl": 0.0,
+      "reason": "kein_preis",
+      "banked": -548.91,
+      "leader": "counter:lighter:281474976627963",
+      "coin": "SOL"
+    },
+    {
+      "t": 1785005811,
+      "kind": "sprint_entry",
+      "coin": "SUI",
+      "side": "LONG",
+      "notional": 10000.0,
+      "leader": "counter:0xdf83170d313813a71fd6b50fb981198833b73cff",
+      "cycle": 29,
+      "leverage": 10,
+      "hl_max_leverage": 10,
+      "counter": true
+    },
+    {
+      "t": 1785004458,
+      "kind": "sprint_cycle_end",
+      "cycle": 28,
+      "pnl": -54.03,
+      "reason": "falschrichtung",
+      "banked": -548.91,
+      "leader": "counter:0xdf83170d313813a71fd6b50fb981198833b73cff",
+      "coin": "SUI"
+    },
+    {
+      "t": 1785004458,
+      "kind": "sprint_strike",
+      "leader": "counter:0xdf83170d313813a71fd6b50fb981198833b73cff",
+      "strikes": 1,
+      "ride_pnl": -54.03
+    },
+    {
+      "t": 1785002789,
+      "kind": "sprint_entry",
+      "coin": "SOL",
+      "side": "SHORT",
+      "notional": 10000.0,
+      "leader": "counter:lighter:281474976627963",
+      "cycle": 28,
+      "leverage": 10,
+      "hl_max_leverage": 20,
+      "counter": true
+    },
+    {
+      "t": 1785001094,
+      "kind": "sprint_tp",
+      "cycle": 27,
+      "pnl": 64.57,
+      "reason": "tp",
+      "banked": -494.89,
+      "leader": "counter:lighter:281474976627963",
+      "coin": "HYPE"
+    },
+    {
+      "t": 1785000383,
+      "kind": "sprint_cycle_end",
+      "cycle": 26,
+      "pnl": -50.56,
+      "reason": "falschrichtung",
+      "banked": -559.45,
+      "leader": "counter:lighter:281474976627963",
+      "coin": "SOL"
+    },
+    {
+      "t": 1785000383,
+      "kind": "sprint_strike",
+      "leader": "counter:lighter:281474976627963",
+      "strikes": 1,
+      "ride_pnl": -50.56
+    },
+    {
+      "t": 1784999125,
+      "kind": "sprint_entry",
+      "coin": "SUI",
+      "side": "SHORT",
+      "notional": 10000.0,
+      "leader": "counter:0xdf83170d313813a71fd6b50fb981198833b73cff",
+      "cycle": 26,
+      "leverage": 10,
+      "hl_max_leverage": 10,
+      "counter": true
+    },
+    {
+      "t": 1784999125,
+      "kind": "sprint_cycle_end",
+      "cycle": 25,
+      "pnl": -30.37,
+      "reason": "leader_flip",
+      "banked": -508.9,
+      "leader": "0xdf83170d313813a71fd6b50fb981198833b73cff",
+      "coin": "SUI"
+    },
+    {
+      "t": 1784999125,
+      "kind": "sprint_ban",
+      "leader": "0xdf83170d313813a71fd6b50fb981198833b73cff"
+    },
+    {
+      "t": 1784999125,
+      "kind": "sprint_strike",
+      "leader": "0xdf83170d313813a71fd6b50fb981198833b73cff",
+      "strikes": 2,
+      "ride_pnl": -30.37
+    },
+    {
+      "t": 1784998547,
+      "kind": "sprint_cycle_end",
+      "cycle": 24,
+      "pnl": 6.27,
+      "reason": "plus_lock",
+      "banked": -478.53,
+      "leader": "lighter:102394",
+      "coin": "LINK"
+    },
+    {
+      "t": 1784997285,
+      "kind": "sprint_cycle_end",
+      "cycle": 23,
+      "pnl": -53.23,
+      "reason": "falschrichtung",
+      "banked": -484.8,
+      "leader": "counter:0x28473085ba4aa761eb541914f50a75dd685cd47b",
+      "coin": "xyz:SNDK"
+    },
+    {
+      "t": 1784997285,
+      "kind": "sprint_strike",
+      "leader": "counter:0x28473085ba4aa761eb541914f50a75dd685cd47b",
+      "strikes": 1,
+      "ride_pnl": -53.23
+    },
+    {
+      "t": 1784995569,
+      "kind": "sprint_entry",
+      "coin": "SUI",
+      "side": "SHORT",
+      "notional": 10000.0,
+      "leader": "0xdf83170d313813a71fd6b50fb981198833b73cff",
+      "cycle": 23,
       "leverage": 10,
       "hl_max_leverage": 10
     },
     {
-      "t": 1784309078,
+      "t": 1784995540,
       "kind": "sprint_cycle_end",
-      "cycle": 1,
-      "pnl": -167.98,
-      "reason": "manual",
-      "banked": -167.98,
-      "leader": "0xcaaacd1e5f394da3e5006edc7c05fd7bfdc5764b",
-      "coin": "BTC"
-    },
-    {
-      "t": 1784309078,
-      "kind": "sprint_strike",
-      "leader": "0xcaaacd1e5f394da3e5006edc7c05fd7bfdc5764b",
-      "strikes": 1,
-      "ride_pnl": -167.98
-    },
-    {
-      "t": 1784309078,
-      "kind": "sprint_exit",
-      "coin": "BTC",
-      "reason": "manual",
-      "cycle_pnl": -167.98
-    },
-    {
-      "t": 1784304751,
-      "kind": "sprint_entry",
-      "coin": "BTC",
-      "side": "SHORT",
-      "notional": 20000.0,
-      "leader": "0xcaaacd1e5f394da3e5006edc7c05fd7bfdc5764b",
-      "cycle": 1,
-      "leverage": 20,
-      "hl_max_leverage": 40
-    },
-    {
-      "t": 1784301364,
-      "kind": "sprint_cycle_end",
-      "cycle": 4,
-      "pnl": -206.75,
-      "reason": "manual",
-      "banked": 120.29,
-      "leader": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
-      "coin": "PENGU"
-    },
-    {
-      "t": 1784301364,
-      "kind": "sprint_exit",
-      "coin": "PENGU",
-      "reason": "manual",
-      "cycle_pnl": -206.75
-    },
-    {
-      "t": 1784298736,
-      "kind": "sprint_entry",
-      "coin": "PENGU",
-      "side": "LONG",
-      "notional": 10000.0,
-      "leader": "0x8d7d49eb9715a93eef4843b357cad5f5b9be7bda",
-      "cycle": 4
-    },
-    {
-      "t": 1784262006,
-      "kind": "sprint_cycle_end",
-      "cycle": 3,
-      "pnl": -5.21,
+      "cycle": 22,
+      "pnl": -1.49,
       "reason": "zeit_negativ",
-      "banked": 327.04,
-      "leader": "0xd68dfb480e643f0c1a78b24d04de7cce7dfbbdfc",
-      "coin": "ETH"
-    },
-    {
-      "t": 1784261996,
-      "kind": "sprint_ban",
-      "leader": "0xd68dfb480e643f0c1a78b24d04de7cce7dfbbdfc"
-    },
-    {
-      "t": 1784261996,
-      "kind": "sprint_strike",
-      "leader": "0xd68dfb480e643f0c1a78b24d04de7cce7dfbbdfc",
-      "strikes": 2,
-      "ride_pnl": -5.21
-    },
-    {
-      "t": 1784261996,
-      "kind": "sprint_exit",
-      "coin": "ETH",
-      "reason": "zeit_negativ",
-      "cycle_pnl": -5.21
-    },
-    {
-      "t": 1784254326,
-      "kind": "sprint_entry",
-      "coin": "ETH",
-      "side": "LONG",
-      "notional": 10000.0,
-      "leader": "0xd68dfb480e643f0c1a78b24d04de7cce7dfbbdfc",
-      "cycle": 3
-    },
-    {
-      "t": 1784232429,
-      "kind": "sprint_tp",
-      "cycle": 2,
-      "pnl": 111.33,
-      "reason": "tp",
-      "banked": 332.25,
-      "leader": "0xc9c78160120cd6ecf3dea892e9ae5af4115bf5f8",
-      "coin": "PUMP"
-    },
-    {
-      "t": 1784231780,
-      "kind": "sprint_entry",
-      "coin": "PUMP",
-      "side": "SHORT",
-      "notional": 10000.0,
-      "leader": "0xc9c78160120cd6ecf3dea892e9ae5af4115bf5f8",
-      "cycle": 2
-    },
-    {
-      "t": 1784227226,
-      "kind": "sprint_tp",
-      "cycle": 1,
-      "pnl": 220.92,
-      "reason": "tp",
-      "banked": 220.92,
-      "leader": "0x051c2e6d49cf82ebc47f08f9b85800f94fc9693c",
-      "coin": "CASHCAT"
-    },
-    {
-      "t": 1784226989,
-      "kind": "sprint_entry",
-      "coin": "CASHCAT",
-      "side": "LONG",
-      "notional": 10000.0,
-      "leader": "0x051c2e6d49cf82ebc47f08f9b85800f94fc9693c",
-      "cycle": 1
-    },
-    {
-      "t": 1784217862,
-      "kind": "sprint_cycle_end",
-      "cycle": 2,
-      "pnl": 45.12,
-      "reason": "manual",
-      "banked": 24.51,
-      "leader": "0xda744273f80b22412417f7cfe0503f3d721f987d",
-      "coin": "xyz:MU"
-    },
-    {
-      "t": 1784217862,
-      "kind": "sprint_exit",
-      "coin": "xyz:MU",
-      "reason": "manual",
-      "cycle_pnl": 45.12
-    },
-    {
-      "t": 1784209186,
-      "kind": "sprint_entry",
-      "coin": "xyz:MU",
-      "side": "SHORT",
-      "notional": 1621.0,
-      "leader": "0xda744273f80b22412417f7cfe0503f3d721f987d",
-      "cycle": 2
-    },
-    {
-      "t": 1784198164,
-      "kind": "sprint_cycle_end",
-      "cycle": 1,
-      "pnl": -20.61,
-      "reason": "zeit_negativ",
-      "banked": -20.61,
-      "leader": "0xd246c4a039508379cd70ce624cdb7c8b1c991f37",
-      "coin": "ETH"
-    },
-    {
-      "t": 1784198164,
-      "kind": "sprint_strike",
-      "leader": "0xd246c4a039508379cd70ce624cdb7c8b1c991f37",
-      "strikes": 1,
-      "ride_pnl": -20.61
-    },
-    {
-      "t": 1784198164,
-      "kind": "sprint_exit",
-      "coin": "ETH",
-      "reason": "zeit_negativ",
-      "cycle_pnl": -20.61
-    },
-    {
-      "t": 1784190924,
-      "kind": "sprint_entry",
-      "coin": "ETH",
-      "side": "LONG",
-      "notional": 10000.0,
-      "leader": "0xd246c4a039508379cd70ce624cdb7c8b1c991f37",
-      "cycle": 1
-    },
-    {
-      "t": 1784181246,
-      "kind": "sprint_cycle_end",
-      "cycle": 1,
-      "pnl": -12.68,
-      "reason": "manual",
-      "banked": -12.68,
-      "leader": "0xda744273f80b22412417f7cfe0503f3d721f987d"
-    },
-    {
-      "t": 1784181246,
-      "kind": "sprint_exit",
-      "coin": "xyz:MU",
-      "reason": "manual",
-      "cycle_pnl": -12.68
-    },
-    {
-      "t": 1784176843,
-      "kind": "sprint_entry",
-      "coin": "xyz:MU",
-      "side": "SHORT",
-      "notional": 1627.0,
-      "leader": "0xda744273f80b22412417f7cfe0503f3d721f987d",
-      "cycle": 1
-    },
-    {
-      "t": 1784172806,
-      "kind": "sprint_cycle_end",
-      "cycle": 2,
-      "pnl": -9.0,
-      "reason": "manual",
-      "banked": -239.73,
-      "leader": "0xd487e26c62ed8c28ce3cc70b5791e501c2934982",
+      "banked": -431.57,
+      "leader": "0x72774e2fe1992d5da8c6e9cef73fd2ab980c0b98",
       "coin": "xyz:SKHX"
     },
     {
-      "t": 1784172806,
-      "kind": "sprint_exit",
-      "coin": "xyz:SKHX",
-      "reason": "manual",
-      "cycle_pnl": -9.0
+      "t": 1784995540,
+      "kind": "sprint_ban",
+      "leader": "0x72774e2fe1992d5da8c6e9cef73fd2ab980c0b98"
     },
     {
-      "t": 1784172779,
-      "kind": "sprint_entry",
-      "coin": "xyz:SKHX",
-      "side": "SHORT",
-      "notional": 10000.0,
-      "leader": "0xd487e26c62ed8c28ce3cc70b5791e501c2934982",
-      "cycle": 2
-    },
-    {
-      "t": 1784169933,
-      "kind": "sprint_cycle_end",
-      "cycle": 1,
-      "pnl": -230.73,
-      "reason": "leader_rotated",
-      "banked": -230.73,
-      "leader": "0x920fa68300c8aa95c4563e0daf79a0b0e51f0cfe",
-      "coin": "ZEC"
-    },
-    {
-      "t": 1784169923,
+      "t": 1784995540,
       "kind": "sprint_strike",
-      "leader": "0x920fa68300c8aa95c4563e0daf79a0b0e51f0cfe",
-      "strikes": 1,
-      "ride_pnl": -230.73
+      "leader": "0x72774e2fe1992d5da8c6e9cef73fd2ab980c0b98",
+      "strikes": 2,
+      "ride_pnl": -1.49
     },
     {
-      "t": 1784169923,
-      "kind": "sprint_exit",
-      "coin": "ZEC",
-      "reason": "leader_rotated",
-      "cycle_pnl": -230.73
+      "t": 1784994897,
+      "kind": "sprint_cycle_end",
+      "cycle": 21,
+      "pnl": -0.97,
+      "reason": "zeit_negativ",
+      "banked": -430.08,
+      "leader": "lighter:281474976627963",
+      "coin": "ETH"
     },
     {
-      "t": 1784153626,
+      "t": 1784994897,
+      "kind": "sprint_strike",
+      "leader": "lighter:281474976627963",
+      "strikes": 3,
+      "ride_pnl": -0.97
+    },
+    {
+      "t": 1784994543,
       "kind": "sprint_entry",
-      "coin": "ZEC",
+      "coin": "HYPE",
       "side": "LONG",
       "notional": 10000.0,
-      "leader": "0x920fa68300c8aa95c4563e0daf79a0b0e51f0cfe",
-      "cycle": 1
+      "leader": "counter:lighter:281474976627963",
+      "cycle": 21,
+      "leverage": 10,
+      "hl_max_leverage": 10,
+      "counter": true
     },
     {
-      "t": 1784144999,
-      "kind": "sprint_cycle_end",
-      "cycle": 1,
-      "pnl": -66.07,
-      "reason": "manual",
-      "banked": -66.07,
-      "leader": "0xa870c44f7e6e2e15d104185d3bbe5a54f9e2b52d"
-    },
-    {
-      "t": 1784144989,
-      "kind": "sprint_exit",
-      "coin": "ADA",
-      "reason": "manual",
-      "cycle_pnl": -66.07
-    },
-    {
-      "t": 1784134032,
-      "kind": "veto",
-      "coin": "ETH",
-      "side": "SHORT",
-      "target": -2376.4,
-      "price": 1910.75,
-      "reasons": [
-        "15m-Trend (auf) gegen Short",
-        "1h-Trend (auf) gegen Short",
-        "Momentum passt"
-      ]
-    },
-    {
-      "t": 1784129413,
+      "t": 1784994074,
       "kind": "sprint_entry",
-      "coin": "ADA",
+      "coin": "xyz:SNDK",
+      "side": "SHORT",
+      "notional": 15000.0,
+      "leader": "counter:0x28473085ba4aa761eb541914f50a75dd685cd47b",
+      "cycle": 21,
+      "leverage": 10,
+      "hl_max_leverage": 10,
+      "counter": true
+    },
+    {
+      "t": 1784993310,
+      "kind": "sprint_entry",
+      "coin": "SOL",
+      "side": "SHORT",
+      "notional": 10000.0,
+      "leader": "counter:lighter:281474976627963",
+      "cycle": 21,
+      "leverage": 10,
+      "hl_max_leverage": 20,
+      "counter": true
+    },
+    {
+      "t": 1784993038,
+      "kind": "sprint_entry",
+      "coin": "LINK",
       "side": "LONG",
-      "notional": 4393.0,
-      "leader": "0xa870c44f7e6e2e15d104185d3bbe5a54f9e2b52d",
-      "cycle": 1
+      "notional": 10000.0,
+      "leader": "lighter:102394",
+      "cycle": 21,
+      "leverage": 10,
+      "hl_max_leverage": 10
     },
     {
-      "t": 1784128945,
-      "kind": "veto",
-      "coin": "ETH",
-      "side": "SHORT",
-      "target": -2376.4,
-      "price": 1930.65,
-      "reasons": [
-        "15m-Trend (auf) gegen Short",
-        "1h-Trend (auf) gegen Short",
-        "Preis auf falscher Seite der EMA20"
-      ]
+      "t": 1784992222,
+      "kind": "sprint_cycle_end",
+      "cycle": 20,
+      "pnl": -51.21,
+      "reason": "falschrichtung",
+      "banked": -429.11,
+      "leader": "lighter:281474976627963",
+      "coin": "AVAX"
     },
     {
-      "t": 1784128792,
-      "kind": "veto",
-      "coin": "ETH",
-      "side": "SHORT",
-      "target": -2376.4,
-      "price": 1932.15,
-      "reasons": [
-        "Validator nicht verf\u00fcgbar - konservativ abgelehnt"
-      ]
+      "t": 1784992222,
+      "kind": "sprint_ban",
+      "leader": "lighter:281474976627963"
     },
     {
-      "t": 1784128648,
-      "kind": "veto",
-      "coin": "ETH",
-      "side": "SHORT",
-      "target": -2376.4,
-      "price": 1929.25,
-      "reasons": [
-        "15m-Trend (auf) gegen Short",
-        "1h-Trend (auf) gegen Short",
-        "Preis auf falscher Seite der EMA20"
-      ]
+      "t": 1784992222,
+      "kind": "sprint_strike",
+      "leader": "lighter:281474976627963",
+      "strikes": 2,
+      "ride_pnl": -51.21
     },
     {
-      "t": 1784125783,
-      "kind": "veto",
-      "coin": "ETH",
-      "side": "SHORT",
-      "target": -2376.4,
-      "price": 1928.45,
-      "reasons": [
-        "15m-Trend (auf) gegen Short",
-        "1h-Trend (auf) gegen Short",
-        "Preis auf falscher Seite der EMA20"
-      ]
+      "t": 1784991747,
+      "kind": "sprint_entry",
+      "coin": "AVAX",
+      "side": "LONG",
+      "notional": 10000.0,
+      "leader": "lighter:281474976627963",
+      "cycle": 20,
+      "leverage": 10,
+      "hl_max_leverage": 10
     },
     {
-      "t": 1784125149,
-      "kind": "veto",
-      "coin": "ETH",
-      "side": "SHORT",
-      "target": -2376.4,
-      "price": 1930.45,
-      "reasons": [
-        "15m-Trend (auf) gegen Short",
-        "1h-Trend (auf) gegen Short",
-        "Preis auf falscher Seite der EMA20"
-      ]
+      "t": 1784991261,
+      "kind": "sprint_cycle_end",
+      "cycle": 19,
+      "pnl": -50.05,
+      "reason": "falschrichtung",
+      "banked": -377.89,
+      "leader": "lighter:281474976627963",
+      "coin": "HYPE"
     },
     {
-      "t": 1784124055,
-      "kind": "veto",
-      "coin": "ETH",
-      "side": "SHORT",
-      "target": -2376.4,
-      "price": 1927.05,
-      "reasons": [
-        "15m-Trend (auf) gegen Short",
-        "1h-Trend (auf) gegen Short",
-        "Preis auf falscher Seite der EMA20"
-      ]
+      "t": 1784991261,
+      "kind": "sprint_strike",
+      "leader": "lighter:281474976627963",
+      "strikes": 1,
+      "ride_pnl": -50.05
     },
     {
-      "t": 1784123914,
-      "kind": "veto",
-      "coin": "ETH",
+      "t": 1784988217,
+      "kind": "sprint_entry",
+      "coin": "HYPE",
       "side": "SHORT",
-      "target": -2376.4,
-      "price": 1923.35,
-      "reasons": [
-        "Validator nicht verf\u00fcgbar - konservativ abgelehnt"
-      ]
+      "notional": 10000.0,
+      "leader": "lighter:281474976627963",
+      "cycle": 19,
+      "leverage": 10,
+      "hl_max_leverage": 10
     },
     {
-      "t": 1784123593,
-      "kind": "veto",
+      "t": 1784987564,
+      "kind": "sprint_entry",
       "coin": "ETH",
       "side": "SHORT",
-      "target": -2376.4,
-      "price": 1920.55,
-      "reasons": [
-        "15m-Trend (auf) gegen Short",
-        "1h-Trend (auf) gegen Short",
-        "Preis auf falscher Seite der EMA20"
-      ]
+      "notional": 10000.0,
+      "leader": "lighter:281474976627963",
+      "cycle": 19,
+      "leverage": 10,
+      "hl_max_leverage": 25
     },
     {
-      "t": 1784122055,
-      "kind": "veto",
-      "coin": "ETH",
+      "t": 1784987563,
+      "kind": "sprint_cycle_end",
+      "cycle": 18,
+      "pnl": 51.24,
+      "reason": "leader_flip",
+      "banked": -327.85,
+      "leader": "lighter:281474976627963",
+      "coin": "ETH"
+    },
+    {
+      "t": 1784986732,
+      "kind": "sprint_entry",
+      "coin": "xyz:SKHX",
       "side": "SHORT",
-      "target": -2376.4,
-      "price": 1934.25,
-      "reasons": [
-        "15m-Trend (auf) gegen Short",
-        "1h-Trend (auf) gegen Short",
-        "Preis auf falscher Seite der EMA20"
-      ]
+      "notional": 10000.0,
+      "leader": "0x72774e2fe1992d5da8c6e9cef73fd2ab980c0b98",
+      "cycle": 18,
+      "leverage": 10,
+      "hl_max_leverage": 10
+    },
+    {
+      "t": 1784986333,
+      "kind": "sprint_cycle_end",
+      "cycle": 17,
+      "pnl": -52.34,
+      "reason": "falschrichtung",
+      "banked": -379.09,
+      "leader": "lighter:731201",
+      "coin": "HYPE"
+    },
+    {
+      "t": 1784986333,
+      "kind": "sprint_strike",
+      "leader": "lighter:731201",
+      "strikes": 1,
+      "ride_pnl": -52.34
+    },
+    {
+      "t": 1784984893,
+      "kind": "sprint_cycle_end",
+      "cycle": 16,
+      "pnl": 1.39,
+      "reason": "plus_lock",
+      "banked": -326.75,
+      "leader": "0x72774e2fe1992d5da8c6e9cef73fd2ab980c0b98",
+      "coin": "xyz:SNDK"
+    },
+    {
+      "t": 1784983392,
+      "kind": "sprint_entry",
+      "coin": "HYPE",
+      "side": "SHORT",
+      "notional": 10000.0,
+      "leader": "lighter:731201",
+      "cycle": 16,
+      "leverage": 10,
+      "hl_max_leverage": 10
+    },
+    {
+      "t": 1784977830,
+      "kind": "sprint_cycle_end",
+      "cycle": 15,
+      "pnl": -10.5,
+      "reason": "zeit_negativ",
+      "banked": -328.14,
+      "leader": "0x72774e2fe1992d5da8c6e9cef73fd2ab980c0b98",
+      "coin": "xyz:CXMT"
+    },
+    {
+      "t": 1784977830,
+      "kind": "sprint_strike",
+      "leader": "0x72774e2fe1992d5da8c6e9cef73fd2ab980c0b98",
+      "strikes": 1,
+      "ride_pnl": -10.5
+    },
+    {
+      "t": 1784977744,
+      "kind": "sprint_entry",
+      "coin": "ETH",
+      "side": "LONG",
+      "notional": 10000.0,
+      "leader": "lighter:281474976627963",
+      "cycle": 15,
+      "leverage": 10,
+      "hl_max_leverage": 25
+    },
+    {
+      "t": 1784975734,
+      "kind": "sprint_cycle_end",
+      "cycle": 14,
+      "pnl": -0.38,
+      "reason": "zeit_negativ",
+      "banked": -317.64,
+      "leader": "lighter:702389",
+      "coin": "ETH"
+    },
+    {
+      "t": 1784975734,
+      "kind": "sprint_ban",
+      "leader": "lighter:702389"
+    },
+    {
+      "t": 1784975734,
+      "kind": "sprint_strike",
+      "leader": "lighter:702389",
+      "strikes": 2,
+      "ride_pnl": -0.38
+    },
+    {
+      "t": 1784971893,
+      "kind": "sprint_cycle_end",
+      "cycle": 13,
+      "pnl": 14.2,
+      "reason": "plus_lock",
+      "banked": -317.27,
+      "leader": "lighter:281474976688087",
+      "coin": "LINK"
     }
   ],
   "log_tail": [
-    "2026-07-17 17:26:14,701 INFO Analysiert 0xc9c78160: score=97.3 sprint=87.8 wr=100% roi=68.1% pf=inf trips=31 dd=0.1% hold=918min",
-    "2026-07-17 17:26:14,701 INFO   LARP-Filter K.O. f\u00fcr 0xc9c78160: nur 8 aktive Tage (< 10); Swing-Trader: mediane Haltedauer 15.3h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:26:17,732 INFO Analysiert 0x341892ca: score=0.0 sprint=77.5 wr=0% roi=-50.9% pf=0.00 trips=0 dd=50.9% hold=0min",
-    "2026-07-17 17:26:17,732 INFO   LARP-Filter K.O. f\u00fcr 0x341892ca: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 1 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%); \u00fcberhebelt: 51% Drawdown (> 25%)",
-    "2026-07-17 17:26:19,714 INFO Analysiert 0xbab5ccf8: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:26:19,714 INFO   LARP-Filter K.O. f\u00fcr 0xbab5ccf8: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:26:23,374 INFO Analysiert 0xbf2a1200: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:26:23,374 INFO   LARP-Filter K.O. f\u00fcr 0xbf2a1200: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:26:30,056 INFO Analysiert 0x549de4f0: score=68.1 sprint=77.5 wr=56% roi=13.0% pf=1.28 trips=13 dd=13.8% hold=70min [Fills-Fenster VOLL]",
-    "2026-07-17 17:26:31,778 INFO Analysiert 0xec7f509c: score=67.9 sprint=71.5 wr=94% roi=4906.5% pf=36.32 trips=6 dd=98.9% hold=2742min",
-    "2026-07-17 17:26:31,778 INFO   LARP-Filter K.O. f\u00fcr 0xec7f509c: nur 6 Round-Trips (< 30); Lucky Punch: gr\u00f6\u00dfter Trade = 81% des Gewinns (> 40%); \u00fcberhebelt: 99% Drawdown (> 25%); Swing-Trader: mediane Haltedauer 45.7h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:26:38,563 INFO Analysiert 0x117a7c34: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:26:38,563 INFO   LARP-Filter K.O. f\u00fcr 0x117a7c34: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:26:41,897 INFO Analysiert 0x604be8b3: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:26:41,897 INFO   LARP-Filter K.O. f\u00fcr 0x604be8b3: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:26:44,644 INFO Analysiert 0xcaaacd1e: score=68.3 sprint=88.1 wr=90% roi=116.8% pf=2.86 trips=53 dd=61.2% hold=271min",
-    "2026-07-17 17:26:44,645 INFO   LARP-Filter K.O. f\u00fcr 0xcaaacd1e: \u00fcberhebelt: 61% Drawdown (> 25%)",
-    "2026-07-17 17:26:46,848 INFO Analysiert 0xb215c5a6: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:26:46,848 INFO   LARP-Filter K.O. f\u00fcr 0xb215c5a6: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:26:48,081 WARNING Rate-Limit (429) - warte 2s und versuche erneut",
-    "2026-07-17 17:26:51,234 WARNING Rate-Limit (429) - warte 2s und versuche erneut",
-    "2026-07-17 17:26:53,709 INFO Analysiert 0xa7f03c82: score=0.0 sprint=77.5 wr=42% roi=-5.5% pf=0.34 trips=1 dd=8.0% hold=5354min",
-    "2026-07-17 17:26:53,710 INFO   LARP-Filter K.O. f\u00fcr 0xa7f03c82: netto unprofitabel (nach Fees); nur 1 Round-Trips (< 30); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 33% der Wochen profitabel (< 60%); Swing-Trader: mediane Haltedauer 89.2h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:26:53,710 INFO Analyse-Trichter: 41 Kandidaten (CMM 0 + HL 40) \u2192 0 Haupt(\u226535) / 7 Sprint-tauglich (Gate-K.O. 9, Richtung unter 10: 0, Schl\u00e4fer: 23) | Aussortiert: 2 zu aktiv, 39 LARP (netto unprofitabel\u00d725, \u00fcberhebelt\u00d72), 0 Fehler | Top-Scores: -",
-    "2026-07-17 17:26:53,711 WARNING Analyse fand keine geeigneten Leader - behalte bisherige",
-    "2026-07-17 17:33:57,931 INFO Sprint: SHORT PUMP $10000 (frisches Signal von 0x8d7d49eb, Zyklus 1)",
-    "2026-07-17 17:35:25,506 INFO Sprint: frisches Signal LIT von 0x8d7d49eb VERWORFEN (korb_begrenzt)",
-    "2026-07-17 17:39:49,812 INFO Sprint: Exit PUMP (Leader raus), Zyklus-PnL -20.84",
-    "2026-07-17 17:39:49,925 WARNING Sprint: Verlust-Ritt -20.84 -> Strike 1 f\u00fcr 0x8d7d49eb",
-    "2026-07-17 17:39:50,004 WARNING Sprint-Zyklus 1 (PUMP) verloren (Leader raus): PnL -20.84 (banked gesamt -20.84)",
-    "2026-07-17 17:39:50,083 INFO Paper-Konto zur\u00fcckgesetzt (Start-Equity 1000.00)",
-    "2026-07-17 17:46:42,554 INFO Telegram-Benachrichtigungen aktiv",
-    "2026-07-17 17:46:42,568 INFO Autostart aktiv - Autopilot startet sofort",
-    "2026-07-17 17:46:42,569 INFO Telegram-Fernsteuerung aktiv (23 Befehle)",
-    "2026-07-17 17:46:46,014 INFO Perp-DEXs entdeckt: Haupt-DEX + ['xyz', 'flx', 'vntl', 'hyna', 'km', 'abcd', 'cash', 'para', 'mkts']",
-    "2026-07-17 17:46:50,283 INFO Leaders aus leaders.json geladen (1)",
-    "2026-07-17 17:46:51,065 INFO Paper-Konto geladen: 428 Trades, PnL -494.39, 0 offene Positionen",
-    "2026-07-17 17:46:51,324 INFO Websocket connected",
-    "2026-07-17 17:46:52,254 INFO Echtzeit-Feed verbunden (WebSocket)",
-    "2026-07-17 17:46:52,254 INFO Echtzeit-Feed: 1 Leader abonniert",
-    "2026-07-17 17:46:52,256 INFO Sprint: 7 Baselines \u00fcbernommen (24s alt) - kein Blindfenster nach Neustart",
-    "2026-07-17 17:46:52,256 INFO Sprint-Buch aktiv: 1000$ x10 (BTC x20, ETH x15) auf den besten Leader, Ziel +100$/Zyklus",
-    "2026-07-17 17:46:52,257 INFO Sprint: 1 gebannte Leader aus dem Pool geworfen - fordere frische Analyse an (neue Wallets r\u00fccken auf die freien Slots)",
-    "2026-07-17 17:46:52,344 INFO Starte Leaderboard-Analyse (Funnel + LARP-Filter) ...",
-    "2026-07-17 17:46:52,509 WARNING CMM: Token #1 Tageslimit erreicht - keine weiteren Tokens konfiguriert (siehe /setcmm)",
-    "2026-07-17 17:46:52,509 WARNING CMM-Discovery fehlgeschlagen (429: alle 1 Token(s) ausgesch\u00f6pft (Free-Tier: 100 Requests/Tag je Token)) - nur HL-Funnel",
-    "2026-07-17 17:46:52,511 INFO Lade Leaderboard von https://stats-data.hyperliquid.xyz/Mainnet/leaderboard ...",
-    "2026-07-17 17:46:52,977 INFO 40424 Trader im Leaderboard",
-    "2026-07-17 17:46:53,012 INFO 2005 Kandidaten nach Basisfiltern -> Top 2.0% = 40 -> Tiefenanalyse f\u00fcr 40",
-    "2026-07-17 17:46:55,967 INFO Analysiert 0xd68dfb48: score=57.5 sprint=52.2 wr=57% roi=34.7% pf=1.32 trips=30 dd=86.5% hold=1009min",
-    "2026-07-17 17:46:55,967 INFO   LARP-Filter K.O. f\u00fcr 0xd68dfb48: \u00fcberhebelt: 87% Drawdown (> 25%); Swing-Trader: mediane Haltedauer 16.8h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:46:57,980 INFO Analysiert 0xaf92bd13: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:46:57,980 INFO   LARP-Filter K.O. f\u00fcr 0xaf92bd13: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:00,505 INFO Analysiert 0xa9573153: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:00,506 INFO   LARP-Filter K.O. f\u00fcr 0xa9573153: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:02,460 INFO Analysiert 0xd83989ae: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:02,460 INFO   LARP-Filter K.O. f\u00fcr 0xd83989ae: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:08,416 INFO Analysiert 0x6807f127: score=99.3 sprint=85.4 wr=95% roi=12.3% pf=82.48 trips=4 dd=0.4% hold=64min [Fills-Fenster VOLL]",
-    "2026-07-17 17:47:09,944 INFO Analysiert 0xfae1d8c6: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:09,944 INFO   LARP-Filter K.O. f\u00fcr 0xfae1d8c6: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:11,424 INFO Analysiert 0x14b315b9: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:11,425 INFO   LARP-Filter K.O. f\u00fcr 0x14b315b9: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:16,462 INFO Analysiert 0x8da9e2e9: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:16,462 INFO   LARP-Filter K.O. f\u00fcr 0x8da9e2e9: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:18,426 INFO Analysiert 0xdc91d29f: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:18,426 INFO   LARP-Filter K.O. f\u00fcr 0xdc91d29f: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:22,274 INFO Analysiert 0xb981a0c7: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:22,274 INFO   LARP-Filter K.O. f\u00fcr 0xb981a0c7: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:26,171 INFO Analysiert 0xfe8f98ea: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:26,172 INFO   LARP-Filter K.O. f\u00fcr 0xfe8f98ea: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:28,187 INFO Analysiert 0x0351606c: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:28,187 INFO   LARP-Filter K.O. f\u00fcr 0x0351606c: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:29,880 INFO Analysiert 0x35b5d039: score=65.3 sprint=77.5 wr=84% roi=47.7% pf=5.25 trips=8 dd=4.7% hold=1684min",
-    "2026-07-17 17:47:29,880 INFO   LARP-Filter K.O. f\u00fcr 0x35b5d039: nur 8 Round-Trips (< 30); nur 8 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 83% des Gewinns (> 40%); inkonsistent: nur 33% der Wochen profitabel (< 60%); Swing-Trader: mediane Haltedauer 28.1h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:47:31,422 INFO Analysiert 0xf138b360: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:31,422 INFO   LARP-Filter K.O. f\u00fcr 0xf138b360: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:33,379 INFO Analysiert 0xd26ca9ae: score=57.5 sprint=77.5 wr=63% roi=72.6% pf=1.70 trips=12 dd=108.2% hold=1508min",
-    "2026-07-17 17:47:33,379 INFO   LARP-Filter K.O. f\u00fcr 0xd26ca9ae: nur 12 Round-Trips (< 30); Lucky Punch: gr\u00f6\u00dfter Trade = 44% des Gewinns (> 40%); inkonsistent: nur 50% der Wochen profitabel (< 60%); \u00fcberhebelt: 108% Drawdown (> 25%); Swing-Trader: mediane Haltedauer 25.1h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:47:35,590 INFO Analysiert 0xc0de1b88: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:35,591 INFO   LARP-Filter K.O. f\u00fcr 0xc0de1b88: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:37,927 INFO Analysiert 0x786515c7: score=72.1 sprint=86.8 wr=93% roi=188.3% pf=5.79 trips=29 dd=39.4% hold=110min",
-    "2026-07-17 17:47:37,927 INFO   LARP-Filter K.O. f\u00fcr 0x786515c7: nur 29 Round-Trips (< 30); nur 7 aktive Tage (< 10); inkonsistent: nur 50% der Wochen profitabel (< 60%); \u00fcberhebelt: 39% Drawdown (> 25%)",
-    "2026-07-17 17:47:40,540 INFO Analysiert 0x5b236d19: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:40,540 INFO   LARP-Filter K.O. f\u00fcr 0x5b236d19: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:43,021 WARNING Rate-Limit (429) - warte 2s und versuche erneut",
-    "2026-07-17 17:47:43,276 WARNING Snapshot 0xd68dfb48 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
-    "2026-07-17 17:47:45,914 WARNING Snapshot 0x8d7d49eb teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
-    "2026-07-17 17:47:47,010 INFO Analysiert 0xcd87ea21: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:47:47,010 INFO   LARP-Filter K.O. f\u00fcr 0xcd87ea21: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:47:48,578 WARNING Snapshot 0x786515c7 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
-    "2026-07-17 17:47:49,629 WARNING Rate-Limit (429) - warte 2s und versuche erneut",
-    "2026-07-17 17:47:51,216 WARNING Snapshot 0xc9c78160 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
-    "2026-07-17 17:47:53,051 INFO Analysiert 0x7f20c6ea: score=85.9 sprint=85.8 wr=86% roi=45.7% pf=7.94 trips=26 dd=6.8% hold=191min",
-    "2026-07-17 17:47:53,052 INFO   LARP-Filter K.O. f\u00fcr 0x7f20c6ea: nur 26 Round-Trips (< 30); nur 7 aktive Tage (< 10)",
-    "2026-07-17 17:47:53,709 WARNING Snapshot 0x7f20c6ea teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
-    "2026-07-17 17:47:53,993 WARNING Snapshot 0x35b5d039 fehlgeschlagen - nutze letzten guten Stand",
-    "2026-07-17 17:47:55,275 INFO Analysiert 0x7ea42606: score=64.2 sprint=77.5 wr=51% roi=101.8% pf=4.48 trips=10 dd=12.5% hold=3868min",
-    "2026-07-17 17:47:55,275 INFO   LARP-Filter K.O. f\u00fcr 0x7ea42606: nur 10 Round-Trips (< 30); Lucky Punch: gr\u00f6\u00dfter Trade = 46% des Gewinns (> 40%); inkonsistent: nur 50% der Wochen profitabel (< 60%); Swing-Trader: mediane Haltedauer 64.5h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:47:56,786 WARNING Snapshot 0x7ea42606 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
-    "2026-07-17 17:47:57,103 WARNING Snapshot 0xa7f03c82 fehlgeschlagen - nutze letzten guten Stand",
-    "2026-07-17 17:47:57,275 WARNING Rate-Limit (429) - warte 2s und versuche erneut",
-    "2026-07-17 17:47:59,524 WARNING Rate-Limit (429) - warte 4s und versuche erneut",
-    "2026-07-17 17:48:04,741 INFO Analysiert 0x5f2f7e8e: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:48:04,742 INFO   LARP-Filter K.O. f\u00fcr 0x5f2f7e8e: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:48:07,932 INFO Analysiert 0x5e611235: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:48:07,932 INFO   LARP-Filter K.O. f\u00fcr 0x5e611235: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:48:11,814 INFO Analysiert 0x8787e15b: score=96.5 sprint=0.0 wr=85% roi=28.7% pf=54.33 trips=3 dd=0.4% hold=4277min",
-    "2026-07-17 17:48:11,814 INFO   LARP-Filter K.O. f\u00fcr 0x8787e15b: nur 3 Round-Trips (< 30); nur 7 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 99% des Gewinns (> 40%); Swing-Trader: mediane Haltedauer 71.3h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:48:13,743 INFO Analysiert 0x39d60548: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:48:13,743 INFO   LARP-Filter K.O. f\u00fcr 0x39d60548: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:48:19,379 INFO Analysiert 0xb7e0b9fb: score=86.5 sprint=0.0 wr=100% roi=5.5% pf=inf trips=2 dd=0.0% hold=231min",
-    "2026-07-17 17:48:19,380 INFO   LARP-Filter K.O. f\u00fcr 0xb7e0b9fb: nur 2 Round-Trips (< 30); nur 2 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 66% des Gewinns (> 40%)",
-    "2026-07-17 17:48:21,910 INFO Analysiert 0x45354959: score=69.5 sprint=0.0 wr=77% roi=77.9% pf=4.10 trips=2 dd=10.5% hold=2770min",
-    "2026-07-17 17:48:21,911 INFO   LARP-Filter K.O. f\u00fcr 0x45354959: nur 2 Round-Trips (< 30); Lucky Punch: gr\u00f6\u00dfter Trade = 65% des Gewinns (> 40%); Swing-Trader: mediane Haltedauer 46.2h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:48:26,742 INFO Analysiert 0x8d7d49eb: score=76.3 sprint=100.0 wr=63% roi=43.7% pf=2.24 trips=50 dd=14.2% hold=15min",
-    "2026-07-17 17:48:26,742 INFO   LARP-Filter K.O. f\u00fcr 0x8d7d49eb: nur 2 aktive Tage (< 10); Scalper: mediane Haltedauer 15min (< 30min) - Copy-Lag frisst den Edge",
-    "2026-07-17 17:48:32,438 INFO Analysiert 0x12203316: score=74.8 sprint=100.0 wr=85% roi=1.6% pf=33.47 trips=198 dd=0.0% hold=0min",
-    "2026-07-17 17:48:32,439 INFO   LARP-Filter K.O. f\u00fcr 0x12203316: nur 2 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 48% des Gewinns (> 40%); Scalper: mediane Haltedauer 0min (< 30min) - Copy-Lag frisst den Edge",
-    "2026-07-17 17:48:33,920 INFO Analysiert 0xe1b8ebfc: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:48:33,920 INFO   LARP-Filter K.O. f\u00fcr 0xe1b8ebfc: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:48:36,847 INFO Analysiert 0xc9c78160: score=97.3 sprint=87.8 wr=100% roi=68.6% pf=inf trips=31 dd=0.1% hold=918min",
-    "2026-07-17 17:48:36,848 INFO   LARP-Filter K.O. f\u00fcr 0xc9c78160: nur 8 aktive Tage (< 10); Swing-Trader: mediane Haltedauer 15.3h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:48:39,498 INFO Analysiert 0x341892ca: score=0.0 sprint=77.5 wr=0% roi=-53.2% pf=0.00 trips=0 dd=53.2% hold=0min",
-    "2026-07-17 17:48:39,498 INFO   LARP-Filter K.O. f\u00fcr 0x341892ca: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 1 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%); \u00fcberhebelt: 53% Drawdown (> 25%)",
-    "2026-07-17 17:48:41,467 INFO Analysiert 0xbab5ccf8: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:48:41,467 INFO   LARP-Filter K.O. f\u00fcr 0xbab5ccf8: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:48:44,408 INFO Analysiert 0xbf2a1200: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:48:44,408 INFO   LARP-Filter K.O. f\u00fcr 0xbf2a1200: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:48:49,641 INFO Analysiert 0x549de4f0: score=68.5 sprint=77.5 wr=56% roi=12.8% pf=1.28 trips=13 dd=13.6% hold=70min [Fills-Fenster VOLL]",
-    "2026-07-17 17:48:50,889 WARNING Rate-Limit (429) - warte 2s und versuche erneut",
-    "2026-07-17 17:48:53,625 WARNING Rate-Limit (429) - warte 2s und versuche erneut",
-    "2026-07-17 17:48:55,886 INFO Analysiert 0xec7f509c: score=81.1 sprint=71.1 wr=94% roi=325.7% pf=36.32 trips=6 dd=6.6% hold=2742min",
-    "2026-07-17 17:48:55,886 INFO   LARP-Filter K.O. f\u00fcr 0xec7f509c: nur 6 Round-Trips (< 30); Lucky Punch: gr\u00f6\u00dfter Trade = 81% des Gewinns (> 40%); Swing-Trader: mediane Haltedauer 45.7h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:48:58,533 WARNING Rate-Limit (429) - warte 2s und versuche erneut",
-    "2026-07-17 17:49:05,093 INFO Analysiert 0x117a7c34: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:49:05,093 INFO   LARP-Filter K.O. f\u00fcr 0x117a7c34: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:49:08,459 INFO Analysiert 0x604be8b3: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:49:08,459 INFO   LARP-Filter K.O. f\u00fcr 0x604be8b3: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:49:10,895 INFO Analysiert 0xcaaacd1e: score=68.3 sprint=88.1 wr=90% roi=117.1% pf=2.86 trips=53 dd=61.4% hold=271min",
-    "2026-07-17 17:49:10,896 INFO   LARP-Filter K.O. f\u00fcr 0xcaaacd1e: \u00fcberhebelt: 61% Drawdown (> 25%)",
-    "2026-07-17 17:49:15,034 INFO Analysiert 0xb215c5a6: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
-    "2026-07-17 17:49:15,034 INFO   LARP-Filter K.O. f\u00fcr 0xb215c5a6: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
-    "2026-07-17 17:49:17,268 INFO Analysiert 0xa7f03c82: score=0.0 sprint=77.5 wr=42% roi=-5.4% pf=0.34 trips=1 dd=7.9% hold=5354min",
-    "2026-07-17 17:49:17,268 INFO   LARP-Filter K.O. f\u00fcr 0xa7f03c82: netto unprofitabel (nach Fees); nur 1 Round-Trips (< 30); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 33% der Wochen profitabel (< 60%); Swing-Trader: mediane Haltedauer 89.2h (> 12h) - passt nicht zum Day-Trading-Profil",
-    "2026-07-17 17:49:17,269 INFO Analyse-Trichter: 41 Kandidaten (CMM 0 + HL 40) \u2192 0 Haupt(\u226535) / 7 Sprint-tauglich (Gate-K.O. 9, Richtung unter 10: 0, Schl\u00e4fer: 23) | Aussortiert: 2 zu aktiv, 39 LARP (netto unprofitabel\u00d725, \u00fcberhebelt\u00d72), 0 Fehler | Top-Scores: -",
-    "2026-07-17 17:49:17,269 WARNING Analyse fand keine geeigneten Leader - behalte bisherige",
-    "2026-07-17 17:50:07,797 INFO Sprint: frisches Signal LIT von 0x8d7d49eb VERWORFEN (unbestaetigt_negativ)",
-    "2026-07-17 18:03:24,359 INFO Sprint: frisches Signal MET von 0x8d7d49eb VERWORFEN (unbestaetigt_negativ)",
-    "2026-07-17 18:07:04,488 INFO Sprint: frisches Signal ARB von 0x8d7d49eb VERWORFEN (unbestaetigt_negativ)",
-    "2026-07-17 18:23:09,472 INFO Sprint: frisches Signal GALA von 0xc9c78160 VERWORFEN (unbestaetigt_negativ)"
+    "2026-07-25 19:14:08,191 INFO   LARP-Filter K.O. f\u00fcr 0x8607a7d1: nur 1 Round-Trips (< 30); nur 6 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 50% der Wochen profitabel (< 60%)",
+    "2026-07-25 19:14:09,669 INFO Analysiert 0x5ad79acb: score=0.0 sprint=77.5 wr=0% roi=-23.3% pf=0.00 trips=0 dd=23.3% hold=0min",
+    "2026-07-25 19:14:09,669 INFO   LARP-Filter K.O. f\u00fcr 0x5ad79acb: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 3 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
+    "2026-07-25 19:14:12,530 INFO Analysiert 0xa6181aac: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
+    "2026-07-25 19:14:12,530 INFO   LARP-Filter K.O. f\u00fcr 0xa6181aac: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
+    "2026-07-25 19:14:14,769 INFO Analysiert 0xb228e0b0: score=68.3 sprint=77.5 wr=100% roi=2438.7% pf=2.15 trips=1 dd=2119.2% hold=328min",
+    "2026-07-25 19:14:14,769 INFO   LARP-Filter K.O. f\u00fcr 0xb228e0b0: nur 1 Round-Trips (< 30); nur 3 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); \u00fcberhebelt: 2119% Drawdown (> 25%)",
+    "2026-07-25 19:14:26,431 WARNING HL Rate-Limit (429) - warte 2s und versuche erneut",
+    "2026-07-25 19:14:28,667 WARNING HL Rate-Limit (429) - warte 4s und versuche erneut",
+    "2026-07-25 19:14:34,275 WARNING HL Rate-Limit (429) - warte 2s und versuche erneut",
+    "2026-07-25 19:14:36,509 WARNING HL Rate-Limit (429) - warte 4s und versuche erneut",
+    "2026-07-25 19:14:40,742 WARNING HL Rate-Limit (429) - warte 8s und versuche erneut",
+    "2026-07-25 19:14:48,987 WARNING HL Rate-Limit (429) - warte 16s und versuche erneut",
+    "2026-07-25 19:14:49,408 WARNING Snapshot 0xdd796428 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:49,693 WARNING Snapshot 0x56eba194 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:49,976 WARNING Snapshot 0xb4476ce7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:50,274 WARNING Snapshot 0x72774e2f fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:50,559 WARNING Snapshot 0xdf83170d fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:50,851 WARNING Snapshot 0x874226b2 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:51,133 WARNING Snapshot 0xcaaacd1e fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:51,517 WARNING Snapshot 0x45855f71 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:51,802 WARNING Snapshot 0x7f20c6ea fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:52,086 WARNING Snapshot 0x39d60548 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:52,385 WARNING Snapshot 0x4f7634c0 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:52,683 WARNING Snapshot 0xbe195419 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:52,966 WARNING Snapshot 0xda744273 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:53,255 WARNING Snapshot 0x5559da6e fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:53,540 WARNING Snapshot 0x6bb97143 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:54,009 WARNING Snapshot 0x42b6d907 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:14:54,518 WARNING Snapshot 0x28473085 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:15:06,703 INFO Analysiert 0xdf83170d: score=93.4 sprint=82.9 wr=91% roi=7.8% pf=123.25 trips=0 dd=0.0% hold=0min",
+    "2026-07-25 19:15:06,703 INFO   LARP-Filter K.O. f\u00fcr 0xdf83170d: nur 0 Round-Trips (< 30); nur 3 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%)",
+    "2026-07-25 19:15:08,218 INFO Analysiert 0x90404eb5: score=0.0 sprint=0.0 wr=0% roi=0.0% pf=0.00 trips=0 dd=0.0% hold=0min",
+    "2026-07-25 19:15:08,218 INFO   LARP-Filter K.O. f\u00fcr 0x90404eb5: netto unprofitabel (nach Fees); nur 0 Round-Trips (< 30); nur 0 aktive Tage (< 10); Lucky Punch: gr\u00f6\u00dfter Trade = 100% des Gewinns (> 40%); inkonsistent: nur 0% der Wochen profitabel (< 60%)",
+    "2026-07-25 19:15:08,220 INFO Analyse-Trichter: 110 Kandidaten (CMM 227 + HL 56) \u2192 2 Haupt(\u226535) / 16 Sprint-tauglich (Gate-K.O. 23, Richtung unter 10: 0, Schl\u00e4fer: 44, Sitzer-Deckel: 15) | Aussortiert: 4 zu aktiv, 96 LARP (netto unprofitabel\u00d773, nur 0 Round-Trips\u00d78), 8 Fehler | Top-Scores: 98/96",
+    "2026-07-25 19:15:08,220 INFO Echtzeit-Feed: 2 Leader abonniert",
+    "2026-07-25 19:17:46,524 WARNING Snapshot 0x0daf132c teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:17:46,823 WARNING Snapshot 0xb981a0c7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:17:47,104 WARNING Snapshot 0xe6c7b3e0 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:17:47,428 WARNING Snapshot 0x1bbfb3a3 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:17:47,726 WARNING Snapshot 0xcaaacd1e fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:17:48,007 WARNING Snapshot 0x45855f71 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:17:48,299 WARNING Snapshot 0x7f20c6ea fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:17:48,581 WARNING Snapshot 0x39d60548 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:17:51,015 WARNING Snapshot 0x4f7634c0 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:17:51,296 WARNING Snapshot 0xbe195419 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:17:51,825 WARNING Snapshot 0x0c4a3a7a teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:17:52,107 WARNING Snapshot 0x874226b2 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:17:52,391 WARNING Snapshot 0x28473085 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:17:53,209 WARNING Snapshot 0xdf83170d fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:18:52,176 WARNING Snapshot 0xb981a0c7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:18:52,719 WARNING Snapshot 0xe6c7b3e0 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:18:53,925 WARNING Snapshot 0x7f20c6ea fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:18:54,777 WARNING Snapshot 0x4f7634c0 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:18:55,059 WARNING Snapshot 0xbe195419 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:18:55,812 WARNING Snapshot 0x0c4a3a7a teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:18:56,648 WARNING Snapshot 0x28473085 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:18:56,940 WARNING Snapshot 0x72774e2f fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:18:57,222 WARNING Snapshot 0xdf83170d fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:49,439 WARNING Snapshot 0xdd796428 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:49,721 WARNING Snapshot 0x56eba194 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:50,004 WARNING Snapshot 0xb4476ce7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:50,315 WARNING Snapshot 0x0daf132c fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:50,610 WARNING Snapshot 0xb981a0c7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:50,893 WARNING Snapshot 0xe6c7b3e0 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:51,178 WARNING Snapshot 0x1bbfb3a3 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:51,460 WARNING Snapshot 0xcaaacd1e fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:51,966 WARNING Snapshot 0x45855f71 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:52,333 WARNING Snapshot 0x7f20c6ea fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:52,615 WARNING Snapshot 0x39d60548 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:52,906 WARNING Snapshot 0x4f7634c0 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:53,192 WARNING Snapshot 0xbe195419 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:53,524 WARNING Snapshot 0x0c4a3a7a fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:53,808 WARNING Snapshot 0x874226b2 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:54,093 WARNING Snapshot 0x28473085 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:54,376 WARNING Snapshot 0x72774e2f fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:20:54,661 WARNING Snapshot 0xdf83170d fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:23:50,305 WARNING Snapshot 0x39d60548 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:23:50,908 WARNING Snapshot 0xbe195419 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:23:51,212 WARNING Snapshot 0x0c4a3a7a fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:23:51,495 WARNING Snapshot 0x874226b2 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:23:51,776 WARNING Snapshot 0x28473085 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:23:52,302 WARNING Snapshot 0x72774e2f teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:23:52,584 WARNING Snapshot 0xdf83170d fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:24:50,471 WARNING Snapshot 0x874226b2 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:24:50,800 WARNING Snapshot 0x28473085 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:24:51,655 WARNING Snapshot 0xdf83170d fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:25:53,259 WARNING Snapshot 0xe6c7b3e0 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:25:55,809 WARNING Snapshot 0x1bbfb3a3 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:25:56,093 WARNING Snapshot 0xcaaacd1e fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:25:56,681 WARNING Snapshot 0x7f20c6ea fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:25:59,368 WARNING Snapshot 0x39d60548 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:25:59,662 WARNING Snapshot 0x4f7634c0 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:25:59,944 WARNING Snapshot 0xbe195419 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:26:36,950 INFO Sprint: COUNTER SHORT HYPE $10000 (frisches Signal von lighter:28, Zyklus 31)",
+    "2026-07-25 19:27:00,043 WARNING Snapshot 0xdd796428 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:29:59,774 WARNING Snapshot 0xdd796428 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:30:00,056 WARNING Snapshot 0x56eba194 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:32:02,135 INFO Sprint: COUNTER SHORT AVAX $10000 (frisches Signal von lighter:28, Zyklus 31)",
+    "2026-07-25 19:32:02,223 INFO Sprint: frisches Signal HYPE von lighter:28 VERWORFEN (korb_begrenzt)",
+    "2026-07-25 19:32:32,290 INFO Sprint: COUNTER LONG SUI $10000 (frisches Signal von 0xdf83170d, Zyklus 31)",
+    "2026-07-25 19:38:45,468 WARNING Snapshot 0x56eba194 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:38:46,041 WARNING Snapshot 0xb4476ce7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:38:46,585 WARNING Snapshot 0x0daf132c teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:38:47,730 WARNING Snapshot 0x1bbfb3a3 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:38:48,326 WARNING Snapshot 0x45855f71 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:38:48,626 WARNING Snapshot 0x7f20c6ea fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:38:49,478 WARNING Snapshot 0x4f7634c0 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:38:49,771 WARNING Snapshot 0xbe195419 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:38:50,315 WARNING Snapshot 0x0c4a3a7a teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:38:53,311 WARNING Snapshot 0x28473085 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:38:53,593 WARNING Snapshot 0x72774e2f fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:51,837 WARNING Snapshot 0xb4476ce7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:52,133 WARNING Snapshot 0x0daf132c fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:52,426 WARNING Snapshot 0xb981a0c7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:53,271 WARNING Snapshot 0x1bbfb3a3 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:53,565 WARNING Snapshot 0xcaaacd1e fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:53,864 WARNING Snapshot 0x45855f71 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:54,467 WARNING Snapshot 0x39d60548 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:54,783 WARNING Snapshot 0x4f7634c0 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:55,358 WARNING Snapshot 0x0c4a3a7a fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:55,652 WARNING Snapshot 0x874226b2 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:55,953 WARNING Snapshot 0x28473085 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:56,249 WARNING Snapshot 0x72774e2f fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:40:56,544 WARNING Snapshot 0xdf83170d fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:42:21,525 INFO Sprint: frisches Signal HYPE von lighter:28 VERWORFEN (leader_belegt)",
+    "2026-07-25 19:43:45,644 WARNING Snapshot 0xdd796428 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:46,233 WARNING Snapshot 0xb4476ce7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:46,544 WARNING Snapshot 0x0daf132c fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:46,838 WARNING Snapshot 0xb981a0c7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:47,695 WARNING Snapshot 0x1bbfb3a3 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:48,284 WARNING Snapshot 0x45855f71 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:49,191 WARNING Snapshot 0x39d60548 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:49,473 WARNING Snapshot 0x4f7634c0 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:49,765 WARNING Snapshot 0xbe195419 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:50,047 WARNING Snapshot 0x0c4a3a7a fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:50,341 WARNING Snapshot 0x874226b2 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:50,633 WARNING Snapshot 0x28473085 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:43:51,190 WARNING Snapshot 0x72774e2f teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:45:49,825 WARNING Snapshot 0xdf83170d fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:48:38,963 WARNING Snapshot 0xdd796428 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:48:39,258 WARNING Snapshot 0x56eba194 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:48:39,541 WARNING Snapshot 0xb4476ce7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:48:39,824 WARNING Snapshot 0x0daf132c fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:48:40,107 WARNING Snapshot 0xb981a0c7 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:48:40,650 WARNING Snapshot 0xe6c7b3e0 teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:48:42,856 WARNING Snapshot 0x4f7634c0 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:48:43,140 WARNING Snapshot 0xbe195419 fehlgeschlagen - nutze letzten guten Stand",
+    "2026-07-25 19:48:43,682 WARNING Snapshot 0x0c4a3a7a teilweise fehlgeschlagen (Builder-DEX) - nutze letzten VOLLST\u00c4NDIGEN Stand statt l\u00fcckenhafter Daten",
+    "2026-07-25 19:48:44,819 WARNING Snapshot 0x72774e2f fehlgeschlagen - nutze letzten guten Stand"
   ]
 }
