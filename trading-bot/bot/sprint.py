@@ -217,6 +217,16 @@ class SprintBook:
         # (risk_off/markt_zu = erzwungene Schließungen) zählen nicht gegen ihn,
         # konsistent zur Strike-Philosophie. Persistiert wie strikes/confidence.
         self.leader_record: dict[str, dict] = {}
+        # Monoton steigende Gesamtzahl abgeschlossener Mess-Zyklen (Nutzer-Fund
+        # 25.07.): won/busted sind die Bilanz der AKTUELLEN Ära und werden von
+        # `/quest reset` bewusst genullt - das Elite-Gate rechnete seine
+        # Zyklen-Schwelle aber genau daraus und fiel dadurch von 149 auf 11
+        # zurück, obwohl die komplette Beweislage (leader_record/leader_pnl,
+        # beide reset- UND amnestie-fest) intakt war. Ein Bilanz-Reset ist eine
+        # Aussage über die BILANZ, nicht über die Messhistorie. Dieser Zähler
+        # steigt deshalb nur, nie zurück - genau wie die übrigen "positive
+        # Beweise verfallen nicht"-Felder.
+        self.cycles_total = 0
         # Netto-PnL JE LEADER über alle seine abgeschlossenen Zyklen (Nutzer
         # 24.07., Elite-Audit): die Winrate allein reicht als Elite-Kriterium
         # NICHT - im Live-Tail erfüllte 0xc30c7ea9 mit 2W/1L (66.7%) die
@@ -943,7 +953,12 @@ class SprintBook:
         sind synthetische Gegenwetten, keine folgbaren Wallets - im
         Einzel-Ritt-Modus (der EINEN Leader reitet) kann man ihnen nicht
         folgen, sie zählen also nicht gegen die Leader-Mindestzahl."""
-        cycles = self.won + self.busted
+        # cycles_total, NICHT won+busted (Nutzer-Fund 25.07.): letztere sind die
+        # Bilanz der aktuellen Ära und werden von `/quest reset` genullt - das
+        # Gate fiel dadurch von 149 auf 11 Zyklen zurück, obwohl die gesamte
+        # Beweislage intakt war. Ein Bilanz-Reset sagt nichts über die
+        # Messhistorie.
+        cycles = self.cycles_total
         cands = []
         for addr, rec in self.leader_record.items():
             n = rec.get("won", 0) + rec.get("lost", 0)
@@ -1536,6 +1551,7 @@ class SprintBook:
         Strike/Heilung für den Ritt-Leader, Journal + Telegram."""
         cycle = self.won + self.busted + 1
         self.banked += pnl
+        self.cycles_total += 1   # nie zurückgesetzt, siehe Feld-Kommentar
         won = pnl > 0
         if won:
             self.won += 1
@@ -1695,6 +1711,10 @@ class SprintBook:
         return {
             "equity": round(eq, 2),
             "cycle": cycles_done + 1,
+            # Gesamt-Messhistorie, reset- und amnestie-fest (Nutzer-Fund
+            # 25.07.): 'cycle' zählt nur die aktuelle Bilanz-Ära, das
+            # Elite-Gate braucht die volle Historie.
+            "cycles_total": self.cycles_total,
             "cycle_pnl": round(eq - self.cfg.equity, 2),
             "positions": positions,
             "target": round(self.cfg.equity + self.cfg.target_profit, 2),
@@ -1825,6 +1845,17 @@ class SprintBook:
             # ab jetzt mit; leader_record (Winrate) bleibt derweil vollständig.
             self.leader_pnl = {str(a): float(v)
                                for a, v in (raw.get("leader_pnl") or {}).items()}
+            # Alt-States kennen cycles_total noch nicht. Statt bei 0 zu starten
+            # (was die gesamte Messhistorie für das Elite-Gate verschenken
+            # würde) aus leader_record hochrechnen: dessen Summe won+lost ist
+            # eine UNTERGRENZE der je gelaufenen Zyklen - strike-exempte
+            # Verluste (plus_lock/risk_off/markt_zu/kein_preis) stehen dort
+            # bewusst nicht drin, echte Zyklen waren es aber trotzdem. Lieber
+            # ehrlich zu niedrig als bei null.
+            self.cycles_total = int(raw.get("cycles_total") or 0)
+            if not self.cycles_total:
+                self.cycles_total = sum(r.get("won", 0) + r.get("lost", 0)
+                                        for r in self.leader_record.values())
             # Ausstehender Bilanz-Reset über Neustarts halten (Deep-Dive-Fund):
             # ohne das geht der Reset verloren, wenn ein Neustart mitten in den
             # Mode-Switch-Drain fällt (der Drain hat parallel_rides=false schon
@@ -1916,6 +1947,7 @@ class SprintBook:
                 "ride_peak": self._ride_peak,
                 "leader_record": self.leader_record,
                 "leader_pnl": self.leader_pnl,
+                "cycles_total": self.cycles_total,
                 "bilanz_reset_pending": self._bilanz_reset_pending,
                 "strikes": self.strikes, "banned": sorted(self.banned),
                 "confidence": self.confidence,

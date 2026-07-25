@@ -450,6 +450,53 @@ def test_elite_audit_separates_unknown_pnl_from_losses():
         assert c["passt"] is False, "ohne Beweis keine Elite-Zulassung"
 
 
+def test_cycles_total_survives_bilanz_reset():
+    """Nutzer-Fund 25.07. ('Ich hab nur die Bilanz resetet'): `/quest reset`
+    nullt won/busted bewusst - das Elite-Gate rechnete seine Zyklen-Schwelle
+    aber genau daraus und fiel von 149 auf 11 zurück, obwohl leader_record
+    und leader_pnl (beide reset-fest) intakt blieben. Ein Bilanz-Reset ist
+    eine Aussage über die BILANZ, nicht über die Messhistorie."""
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        for _ in range(5):
+            b._book_cycle("0xa", 10.0, "tp")
+        assert b.cycles_total == 5 and b.won == 5
+        b.reset_bilanz()
+        assert b.won == 0 and b.banked == 0.0, "Bilanz genullt (gewollt)"
+        assert b.cycles_total == 5, "Messhistorie bleibt"
+        assert b.elite_audit()["cycles"] == 5, "Elite-Gate nutzt die Historie"
+        b2 = book(tmp)   # Neustart
+        assert b2.cycles_total == 5, "über Neustart persistiert"
+
+
+def test_cycles_total_seeded_from_leader_record_for_old_state():
+    """Alt-States (vor 25.07.) kennen cycles_total nicht. Statt bei 0 zu
+    starten und die gesamte Messhistorie fürs Elite-Gate zu verschenken,
+    wird aus leader_record hochgerechnet - eine ehrliche Untergrenze
+    (strike-exempte Verluste stehen dort bewusst nicht drin)."""
+    import json as _json
+
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b.leader_record = {"0xa": {"won": 4, "lost": 1}, "0xb": {"won": 2, "lost": 3}}
+        b._save_state()
+        raw = _json.loads(b.state_path.read_text())
+        del raw["cycles_total"]                  # Alt-Format nachbauen
+        b.state_path.write_text(_json.dumps(raw))
+        b2 = book(tmp)
+        assert b2.cycles_total == 10, "4+1+2+3 aus der Historie hochgerechnet"
+
+
+def test_amnesty_keeps_cycles_total():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = book(tmp)
+        b._book_cycle("0xa", -10.0, "leader_exit")
+        b._book_cycle("0xa", -10.0, "leader_exit")
+        assert b.cycles_total == 2
+        b.amnesty()
+        assert b.cycles_total == 2, "Amnestie löscht Urteile, nicht die Messhistorie"
+
+
 def test_elite_audit_counter_identities_do_not_count_as_leaders():
     """counter:-Identitäten sind synthetische Gegenwetten, keine folgbaren
     Wallets - im Einzel-Ritt-Modus (der EINEN Leader reitet) kann man ihnen
@@ -458,7 +505,7 @@ def test_elite_audit_counter_identities_do_not_count_as_leaders():
         b = book(tmp)
         b.leader_record = {f"counter:0x{i}": {"won": 3, "lost": 0} for i in range(6)}
         b.leader_pnl = {f"counter:0x{i}": 50.0 for i in range(6)}
-        b.won, b.busted = 120, 30    # Zyklus-Kriterium klar erfüllt
+        b.cycles_total = 150         # Zyklus-Kriterium klar erfüllt
         a = b.elite_audit()
         assert len(a["qualifiziert"]) == 6, "als Kandidaten sichtbar"
         assert a["qualifiziert_echt"] == [], "aber keine echten Wallets"

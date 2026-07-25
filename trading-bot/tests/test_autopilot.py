@@ -1095,7 +1095,7 @@ def test_cmd_quest_elite_reports_readiness_and_blind_spot():
 
     with tempfile.TemporaryDirectory() as tmp:
         ap = _autopilot_with_sprint(tmp)
-        ap.sprint.won, ap.sprint.busted = 120, 30
+        ap.sprint.cycles_total = 150
         ap.sprint.leader_record = {
             "0xverdiener": {"won": 3, "lost": 1},
             "0xschoenwetter": {"won": 2, "lost": 1},
@@ -1120,7 +1120,7 @@ def test_cmd_quest_elite_signals_ready_when_all_criteria_met():
 
     with tempfile.TemporaryDirectory() as tmp:
         ap = _autopilot_with_sprint(tmp)
-        ap.sprint.won, ap.sprint.busted = 120, 30
+        ap.sprint.cycles_total = 150
         ap.sprint.leader_record = {f"0x{i}": {"won": 3, "lost": 1} for i in range(5)}
         ap.sprint.leader_pnl = {f"0x{i}": 80.0 for i in range(5)}
         out = ap._cmd_quest_elite()

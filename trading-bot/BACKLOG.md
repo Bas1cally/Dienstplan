@@ -344,6 +344,27 @@ Neuer Reason `falschrichtung`. 4 neue Tests (kappt Falschrichtung, verschont
 gelaufene Ritte, aus per Default, greift im Fast-Path). `wrong_way_stop: 0`
 = altes Verhalten.
 
+**NACHTRAG 14 (25.07., Nutzer: "Ich hab nur die Bilanz resetet") —
+Elite-Gate hing am zurücksetzbaren Bilanz-Zähler.** Der Zyklus-Sprung
+150 → 12 war KEIN Bug, sondern ein gewolltes `/quest reset`. Dabei fiel
+aber eine echte Inkonsistenz auf: `elite_audit()` rechnete seine
+Zyklen-Schwelle aus `won + busted` — und die nullt `reset_bilanz()`
+bewusst. Das Elite-Gate fiel dadurch von 149 auf 11 Zyklen zurück,
+obwohl die komplette Beweislage intakt war (`leader_record` mit 57
+Identitäten = 197 gemessene Zyklen, `leader_pnl` ebenso — beide sind
+bewusst reset- UND amnestie-fest). Das widerspricht dem tragenden
+Prinzip des Projekts: „positive Beweise verfallen nicht durch einen
+Regelwechsel". Ein Bilanz-Reset ist eine Aussage über die BILANZ, nicht
+über die Messhistorie.
+Fix: neues `SprintBook.cycles_total` — monoton steigend, persistiert,
+von `reset_bilanz()` und `amnesty()` unberührt; `elite_audit()` nutzt es
+statt `won + busted`. Alt-States ohne das Feld werden beim Laden aus
+`leader_record` hochgerechnet (Summe won+lost = ehrliche UNTERGRENZE,
+weil strike-exempte Verluste dort bewusst nicht mitzählen) — so gehen
+die 197 bereits gemessenen Zyklen nicht verloren. Auch im Spiegel
+sichtbar (`cycles_total` neben `cycle`). 3 neue Tests (übersteht
+Bilanz-Reset + Neustart, Seed aus Alt-State, Amnestie-fest).
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien sind seit 24.07. CODIFIZIERT und jederzeit per `/quest elite`
 abrufbar (`SprintBook.elite_audit()`, Schwellen als `ELITE_*`-Konstanten
