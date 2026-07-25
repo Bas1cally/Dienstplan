@@ -54,6 +54,7 @@ _REASON_TXT = {
     "markt_zu": "Börsen-Schluss (Gewinn gesichert)",
     "plus_lock": "Plus gesichert (war im Plus - kein Minus-Exit)",
     "kein_preis": "kein Preis verfügbar (zum Einstand abgerechnet)",
+    "falschrichtung": "Falschrichtung gekappt (war nie im Plus)",
 }
 # Nutzer-Fund 22.07.: die Meldung oben behauptete "kein Minus-Exit", obwohl
 # der gemeldete PnL negativ war (-7.24$, HYPE) - Plus-Lock kann trotz
@@ -344,6 +345,13 @@ class SprintBook:
             for coin in list(self.paper.sizes()):
                 self._close_coin(coin, prices, "plus_lock")
             self._settle_ride(prices, "plus_lock")
+            return
+        if self.paper.sizes() and self._wrong_way_due("__single__", eq - self.cfg.equity):
+            log.warning("Sprint: Ritt war nie im Plus und steht bei %.2f - "
+                        "Falschrichtung gekappt", eq - self.cfg.equity)
+            for coin in list(self.paper.sizes()):
+                self._close_coin(coin, prices, "falschrichtung")
+            self._settle_ride(prices, "falschrichtung")
             return
         if eq <= self.cfg.equity * self.cfg.bust_frac:
             self._settle_ride(prices, "bust")
@@ -652,6 +660,10 @@ class SprintBook:
                 self._settle_one(coin, prices, "tp")
             elif self._plus_lock_due(coin, pnl):
                 self._settle_one(coin, prices, "plus_lock")
+            elif self._wrong_way_due(coin, pnl):
+                log.warning("Sprint: Mess-Ritt %s war nie im Plus und steht bei "
+                            "%.2f - Falschrichtung gekappt, Slot frei", coin, pnl)
+                self._settle_one(coin, prices, "falschrichtung")
             elif self.cfg.equity + pnl <= self.cfg.equity * self.cfg.bust_frac:
                 self._settle_one(coin, prices, "bust")
             # Zeit+negativ-Cut JE RITT (Live-Fund 18.07.: lief bisher nur im
@@ -1036,6 +1048,32 @@ class SprintBook:
             return False
         peak = self._ride_peak.get(key, 0.0)
         return peak >= c.plus_lock_arm and pnl <= c.plus_lock_floor
+
+    def _wrong_way_due(self, key: str, pnl: float) -> bool:
+        """Falschrichtungs-Stop (Nutzer-Entscheidung 25.07., Tages-Check: EIN
+        Ritt auf STX machte -270.78$ = 97% der Tagesbilanz; der Zeit-Cut
+        feuerte korrekt nach genau 2h, da war der Schaden aber längst da.
+        Nach oben war alles austariert - Trail lässt laufen, Plus-Lock sichert
+        ab -, nach unten klaffte zwischen 2h und bust bei -95% ein Loch).
+
+        BEWUSST NUR für Ritte, die nie meaningful im Plus waren: der Peak hat
+        die Plus-Lock-Schwelle nie erreicht, die Sicherung wurde also nie
+        scharf. Wer schon lief, behält volle Freiheit - dort übernimmt
+        Plus-Lock (dessen Bedingung `peak >= arm` genau das Gegenstück ist,
+        beide können sich also nie in die Quere kommen). Gekappt werden nur
+        Einstiege, die von Anfang an in die falsche Richtung liefen - das ist
+        keine Edge-Dämpfung, sondern das Schließen einer Schieflage.
+
+        Referenz ist plus_lock_arm; ist die Plus-Sicherung aus, dient
+        target_profit als Ersatz-Maßstab für 'war mal ernsthaft im Plus'.
+        Anders als plus_lock/kein_preis NICHT strike-exempt: hier lag der
+        Leader wirklich falsch, das ist seine Schuld."""
+        c = self.cfg
+        if c.wrong_way_stop <= 0:
+            return False
+        arm = c.plus_lock_arm if c.plus_lock_arm > 0 else c.target_profit
+        peak = self._ride_peak.get(key, pnl)
+        return peak < arm and pnl <= -abs(c.wrong_way_stop)
 
     def _ride_pnl(self, coin: str, prices: dict[str, float]) -> float | None:
         """PnL eines Mess-Ritts auf seiner eigenen 1000$-Basis, konservativ

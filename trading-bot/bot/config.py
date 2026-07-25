@@ -479,6 +479,19 @@ class SprintConfig:
     # schaltet scharf).
     plus_lock_arm: float = 0.0
     plus_lock_floor: float = 0.0
+    # Falschrichtungs-Stop (Nutzer-Entscheidung 25.07. nach dem Tages-Check:
+    # EIN Ritt - 0xf224d1b2 auf STX - machte -270.78$ und damit 97% der
+    # gesamten Tagesbilanz; der Zeit-Cut feuerte korrekt nach genau 2h, da war
+    # der Schaden aber längst angerichtet. Zwischen "2 Stunden" und "bust bei
+    # -95%" gab es KEINE Verlustgrenze, während nach oben alles fein austariert
+    # ist - größter Gewinn +69.80$ gegen größten Verlust -270.78$, Faktor 3.9).
+    # BEWUSST schmal geschnitten, damit die Edge nicht gedämpft wird: der Stop
+    # greift NUR für Ritte, die nie meaningful im Plus waren (Peak <
+    # plus_lock_arm, die Plus-Sicherung wurde also nie scharf). Wer schon lief,
+    # behält volle Freiheit - dort übernimmt Plus-Lock/Trail. Gekappt werden
+    # also nur Einstiege, die von Anfang an in die falsche Richtung liefen.
+    # 0 = aus (Default; config.yaml schaltet scharf).
+    wrong_way_stop: float = 0.0
     # Fast-Path zwischen den vollen Autopilot-Ticks (Spiegel-Fund 22.07.:
     # Plus-Lock schoss trotz Floor bis zu -33.57$ durch - ein 10x-Ritt kann
     # sich in den poll_seconds (typ. 20s) zwischen zwei vollen Ticks weiter

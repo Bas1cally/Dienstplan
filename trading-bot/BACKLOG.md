@@ -305,6 +305,45 @@ ausgefallener DEX bleibt im Gedächtnis (wird nicht als "verlassen"
 missverstanden). `feed.dex_calls` im Spiegel macht die Wirkung messbar.
 5 neue Tests. `dex_reprobe_s: 0` = altes Verhalten.
 
+**NACHTRAG 13 (25.07., Tages-Check nach 13h Post-Fix-Laufzeit) — beide
+Fixes bestätigt, neuer Haupt-Verlusttreiber gefunden + Falschrichtungs-Stop.**
+
+*Snapshot-Storm-Fix (NACHTRAG 12) wirkt voll:* stale 7/15 → **0/16**,
+`dex_calls` ~300 → **21**, Tick-Dauer 86s → **29s**, Signalrate 2,2/h →
+**4,3/h**. *Plus-Lock-Fix (NACHTRAG 10) bestätigt:* vorher 10 von 14
+plus_lock-Exits negativ (7x exakt -9,00$), jetzt **3 von 3 positiv**
+(+40,23$). Der neue `kein_preis`-Drain hat 1x gefeuert, bei 0,00$ - genau
+wie designt.
+
+*Neuer Haupt-Verlusttreiber:* `zeit_negativ` (8 von 16 Zyklen, -406,38$,
+avg -50,80$). Darin steckte ein einzelner Ausreißer, der ALLES dominierte:
+`0xf224d1b2` auf **STX** LONG (5x, 5000$ Notional), Entry 23:49:01 → Exit
+01:49:15 = **genau 2h**, der Zeit-Cut feuerte also korrekt - aber bei
+**-270,78$**, das sind **97% der gesamten Tagesbilanz**. Ohne diesen einen
+Ritt: -8,00$ statt -278,78$, praktisch flat.
+*Strukturelle Lücke:* nach oben war alles austariert (Trail lässt laufen,
+Plus-Lock sichert ab +30$ bei +15$), nach unten klaffte zwischen
+`max_ride_hours` (2h) und `bust_frac` (-95%) **keine Verlustgrenze**.
+Größter Gewinn +69,80$ gegen größten Verlust -270,78$ = Faktor 3,9 - diese
+Asymmetrie verhindert Profitabilität mathematisch, unabhängig von der
+Trefferquote.
+
+*Gebaut (Nutzer-Entscheidung per AskUserQuestion: "Nur Falschrichtung
+kappen"):* neuer `sprint.wrong_way_stop` (config.yaml: 50$) +
+`SprintBook._wrong_way_due()`, verdrahtet in `_check_ride_targets` (greift
+damit auch im 1s-Fast-Path) UND im Einzel-Ritt-Zweig (für den späteren
+Elite-Modus). **Bewusst schmal geschnitten, um die Edge nicht zu dämpfen**
+(Nutzer 19.07.: "ich brauch die Edge und nicht diesen lieber dämpfen
+bullshit"): der Stop greift NUR für Ritte, deren Peak nie `plus_lock_arm`
+erreicht hat - die also von Anfang an in die falsche Richtung liefen. Wer
+schon meaningful im Plus war, behält volle Freiheit; dort übernimmt
+Plus-Lock, dessen Bedingung (`peak >= arm`) das exakte Gegenstück ist -
+beide können sich nie in die Quere kommen. Anders als `plus_lock`/
+`kein_preis` NICHT strike-exempt: hier lag der Leader wirklich falsch.
+Neuer Reason `falschrichtung`. 4 neue Tests (kappt Falschrichtung, verschont
+gelaufene Ritte, aus per Default, greift im Fast-Path). `wrong_way_stop: 0`
+= altes Verhalten.
+
 ### 2. Elite-Umschaltung (Masterplan Phase D — das dokumentierte ENDZIEL)
 Kriterien sind seit 24.07. CODIFIZIERT und jederzeit per `/quest elite`
 abrufbar (`SprintBook.elite_audit()`, Schwellen als `ELITE_*`-Konstanten

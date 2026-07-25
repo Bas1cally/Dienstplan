@@ -1964,6 +1964,73 @@ def test_plus_lock_positive_message_still_says_no_minus_exit():
         assert "kein Minus-Exit" in msg
 
 
+def test_wrong_way_stop_caps_ride_that_was_never_in_plus():
+    """Nutzer-Entscheidung 25.07. (Tages-Check): EIN Ritt (0xf224d1b2 auf STX)
+    machte -270.78$ = 97% der Tagesbilanz. Der Zeit-Cut feuerte korrekt nach
+    2h, da war der Schaden aber längst da - zwischen 2h und bust bei -95%
+    klaffte keine Verlustgrenze. Ein Ritt, der nie im Plus war, wird jetzt
+    bei -wrong_way_stop gekappt."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, plus_lock_arm=30.0, plus_lock_floor=15.0,
+                       wrong_way_stop=50.0)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)          # LONG Entry 100
+        # Kurs fällt ~0.3% -> ~-40$: noch über dem Stop, Ritt lebt
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.7, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), "-40$ noch über dem -50$-Stop"
+        # weiter runter -> Stop greift
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.3, "ETH": 100.0})
+        assert b.paper.sizes() == {}, "Falschrichtung gekappt"
+        assert b.busted == 1 and -110 < b.banked < -50, \
+            f"Verlust gedeckelt statt bis zum Zeit-Cut laufen zu lassen: {b.banked:.2f}"
+        assert b.strikes.get("0xbest") == 1, \
+            "NICHT strike-exempt - hier lag der Leader wirklich falsch"
+
+
+def test_wrong_way_stop_spares_ride_that_already_ran():
+    """Kern der Nutzer-Entscheidung ('nur Falschrichtung kappen'): ein Ritt,
+    der schon meaningful im Plus war (Peak >= plus_lock_arm), behält VOLLE
+    Freiheit - dort übernimmt Plus-Lock. Der Stop darf die Edge nicht dämpfen."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, plus_lock_arm=30.0, plus_lock_floor=-999.0,
+                       wrong_way_stop=50.0)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 100.5, "ETH": 100.0})
+        assert b._ride_peak["BTC"] >= 30.0, "Vorbedingung: war ernsthaft im Plus"
+        # jetzt tief ins Minus - der Falschrichtungs-Stop darf NICHT greifen
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 99.0, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), \
+            "gelaufener Ritt wird nicht gekappt (Plus-Lock ist hier zuständig)"
+
+
+def test_wrong_way_stop_off_by_default():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, plus_lock_arm=30.0, plus_lock_floor=15.0)
+        assert b.cfg.wrong_way_stop == 0
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], {"BTC": 98.0, "ETH": 100.0})
+        assert "BTC" in b.paper.sizes(), "aus = altes Verhalten (Zeit-Cut/bust regeln)"
+
+
+def test_wrong_way_stop_also_fires_on_fast_path():
+    """Der Stop muss auch über fast_exit_check greifen - sonst hängt die
+    Kappung wieder am langsamen Voll-Tick (genau der Gap, der Plus-Lock
+    durchschießen ließ)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = {"now": 1_000_000.0}
+        b = _edge_book(tmp, t, plus_lock_arm=30.0, plus_lock_floor=15.0,
+                       wrong_way_stop=50.0)
+        b.tick(LED, [snap("0xbest", 50_000)], P)
+        b.tick(LED, [snap("0xbest", 50_000, BTC=500)], P)
+        b.fast_exit_check({"BTC": 99.3, "ETH": 100.0})
+        assert b.paper.sizes() == {}, "Falschrichtung auch im 1s-Fast-Path gekappt"
+
+
 def test_fast_exit_check_catches_plus_lock_between_full_ticks():
     """Spiegel-Fund 22.07.: Plus-Lock (Floor 15$) schoss trotzdem bis zu
     -33.57$ ins Minus durch - der volle Tick lief nur alle poll_seconds

@@ -290,6 +290,24 @@ sprint:
                             # slippen Stops). Reason "plus_lock" bleibt
                             # strike-exempt: unsere Sicherungs-Regel, nicht die
                             # Entscheidung des Leaders.
+  wrong_way_stop: 50        # FALSCHRICHTUNGS-STOP (Nutzer-Entscheidung 25.07.
+                            # nach dem Tages-Check): EIN Ritt (0xf224d1b2 auf
+                            # STX) machte -270.78$ = 97% der Tagesbilanz. Der
+                            # Zeit-Cut feuerte korrekt nach genau 2h - da war
+                            # der Schaden aber längst da. Nach oben ist alles
+                            # austariert (Trail lässt laufen, Plus-Lock sichert
+                            # ab +30$ bei +15$), nach unten klaffte zwischen 2h
+                            # und bust bei -95% ein Loch: größter Gewinn
+                            # +69.80$ gegen größten Verlust -270.78$ = Faktor
+                            # 3.9, das verhindert Profitabilität mathematisch.
+                            # BEWUSST schmal: greift NUR bei Ritten, deren Peak
+                            # nie plus_lock_arm (30$) erreicht hat - die also
+                            # von Anfang an falsch lagen. Wer schon im Plus
+                            # war, behält volle Freiheit (dort übernimmt
+                            # Plus-Lock/Trail). Keine Edge-Dämpfung, sondern
+                            # das Schließen einer Schieflage. NICHT
+                            # strike-exempt: hier lag der Leader wirklich
+                            # falsch. 0 = aus.
   fast_check_seconds: 1     # FAST-PATH (Spiegel-Fund 22.07.): trotz 15$-Floor
                             # schoss Plus-Lock live bis zu -33.57$ ins Minus
                             # durch - der volle Tick lief nur alle poll_seconds
