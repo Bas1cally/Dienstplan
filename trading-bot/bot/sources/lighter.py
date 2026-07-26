@@ -20,6 +20,12 @@ from ..journal import RUNTIME
 
 log = logging.getLogger(__name__)
 
+# Obergrenze für den _known-Cache (Speicher-Leck-Fix 25.07., siehe
+# LighterShadow._prune_known): Lighter-Discovery liefert laufend neue Konto-IDs,
+# ohne Deckel wuchs der Cache in RAM UND Datei unbegrenzt. 500 deckt jede
+# realistische Top-Liste samt gerittener Nachzügler ab.
+_KNOWN_MAX = 500
+
 DEFAULT_BASE = "https://mainnet.zklighter.elliot.ai"
 
 
@@ -300,14 +306,44 @@ class LighterShadow:
         # geladen (nur Einträge <= 3x scan_seconds alt, dieselbe Staleness-
         # Grenze wie beim Top-Listen-Schutz oben).
         self._known: dict[str, "LeaderSnapshot"] = {}
+        # addr -> wann zuletzt in einem Scan GESEHEN (fürs Kappen, s. _prune_known)
+        self._known_t: dict[str, float] = {}
         self._known_path = runtime / "lighter_known.json"
         self._load_known()
 
+    def _prune_known(self) -> None:
+        """Speicher-Leck-Fix (25.07., Nutzer meldete OOM auf dem Server): der
+        _known-Cache wuchs UNBEGRENZT. Lighter-Discovery liefert laufend neue
+        Konto-IDs (siehe BACKLOG: "ENDLOS neue IDs"), jede blieb für immer im
+        Dict UND in lighter_known.json. Schlimmer: _save_known stempelte beim
+        Schreiben ALLE Einträge mit der aktuellen Zeit, wodurch der
+        Alters-Filter in _load_known nie etwas aussortierte - der Cache konnte
+        also nur wachsen, nie schrumpfen.
+
+        Jetzt: echter Zeitstempel je Eintrag (wann zuletzt GESEHEN) und harte
+        Obergrenze. Bewusst nach Zuletzt-gesehen sortiert statt nach Alter
+        allein: ein gerade GERITTENER Leader fällt aus der Top-Liste (genau
+        wofür dieser Cache existiert) und altert dann - er darf nicht
+        wegfliegen. Bei _KNOWN_MAX ist er praktisch immer noch dabei."""
+        if len(self._known) <= _KNOWN_MAX:
+            return
+        neueste = sorted(self._known, key=lambda a: self._known_t.get(a, 0.0),
+                         reverse=True)[:_KNOWN_MAX]
+        behalten = set(neueste)
+        entfernt = len(self._known) - len(behalten)
+        self._known = {a: s for a, s in self._known.items() if a in behalten}
+        self._known_t = {a: t for a, t in self._known_t.items() if a in behalten}
+        log.info("Lighter: _known-Cache auf %d Einträge gekappt (%d alte entfernt)",
+                 _KNOWN_MAX, entfernt)
+
     def _save_known(self) -> None:
+        self._prune_known()
         try:
             data = {
                 addr: {
-                    "t": self.clock(),
+                    # ECHTER Zeitstempel (wann zuletzt gesehen), nicht "jetzt" -
+                    # sonst ist der Alters-Filter beim Laden wirkungslos.
+                    "t": self._known_t.get(addr, self.clock()),
                     "equity": snap.equity,
                     "positions": {
                         c: {"size": p.size, "entry": p.entry,
@@ -337,6 +373,7 @@ class LighterShadow:
                 for c, p in entry.get("positions", {}).items()
             }
             self._known[addr] = LeaderSnapshot(addr, entry.get("equity", 0.0), positions)
+            self._known_t[addr] = float(entry.get("t", 0))
 
     def tick(self, hl_prices: dict[str, float]) -> None:
         if not hl_prices:
@@ -349,6 +386,7 @@ class LighterShadow:
                 self._last_scan_ok = self.clock()
                 for s in self._leaders:
                     self._known[str(s.address)] = s
+                    self._known_t[str(s.address)] = self.clock()
                 self._save_known()
             except Exception as e:
                 log.warning("Lighter-Ranking fehlgeschlagen: %s", str(e)[:80])
